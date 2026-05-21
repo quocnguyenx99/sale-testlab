@@ -1,0 +1,41 @@
+{
+  "name": "sale-testlab-data-pipeline",
+  "version": "1.0.0",
+  "description": "Local-first sales testlab data pipeline",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "phase1": "tsx src/run-phase1.ts",
+    "phase2b": "tsx src/run-phase2b.ts",
+    "phase3": "tsx src/run-phase3.ts",
+    "phase4": "tsx src/run-phase4.ts",
+    "phase5": "tsx src/run-phase5.ts",
+    "phase5b": "tsx src/run-phase5b.ts",
+    "phase5c": "tsx src/run-phase5c.ts",
+    "phase6": "tsx src/run-phase6.ts",
+    "phase6c": "tsx src/run-phase6c.ts",
+    "phase7": "tsx src/run-phase7.ts",
+    "phase7b": "tsx src/run-phase7b.ts",
+    "phase10": "tsx src/run-phase10.ts",
+    "phase10c": "tsx src/run-phase10c.ts",
+    "phase10d": "tsx src/run-phase10d.ts",
+    "phase11b": "tsx src/run-phase11b.ts",
+    "phase8": "tsx src/run-phase8.ts",
+    "phase8c": "tsx src/run-phase8c.ts",
+    "playground": "tsx src/playground/server.ts",
+    "test:phase12cd": "tsx src/runtime/phase12cd.regression.test.ts",
+    "test:phase12e": "tsx src/runtime/phase12e.regression.test.ts",
+    "test:phase12f": "tsx src/runtime/phase12f.regression.test.ts",
+    "test:phase12f2": "tsx src/runtime/phase12f2.regression.test.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@types/node": "^25.7.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3",
+    "zod": "^4.4.3"
+  }
+}
