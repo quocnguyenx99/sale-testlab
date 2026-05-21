@@ -169,7 +169,8 @@ function hasQuestionIntent(text: string): boolean {
   const t = normalize(text);
   return (
     text.includes("?") ||
-    /\b(khong|sao|the nao|bao nhieu|khi nao|duoc khong|chua|gi)\b/.test(t)
+    /\b(khong|sao|the nao|bao nhieu|khi nao|duoc khong|chua|gi)\b/.test(t) ||
+    /\b(gui lai|bao gia lai|cho xin lai|gui giup|cho minh xin|cho em xin|gui cho)\b/.test(t)
   );
 }
 
@@ -249,6 +250,7 @@ export function shouldForceCompletionReply(input: {
   nextUnresolvedTopic: ConversationTopic | null;
 }): boolean {
   if (input.completion.completion_ready) return true;
+  if (input.nextUnresolvedTopic === "next_step") return true;
 
   const reopenedTopics = detectReopenedAnsweredTopics(input.candidateReply, input.progress);
   if (reopenedTopics.length > 0) return true;

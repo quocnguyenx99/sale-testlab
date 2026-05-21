@@ -1,4 +1,4 @@
-﻿import * as fs from "fs";
+import * as fs from "fs";
 import * as path from "path";
 import * as http from "http";
 import { randomUUID } from "crypto";
@@ -727,11 +727,15 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
   let conversationProgress = snapshotProgress(existing?.conversationProgress || createEmptyConversationProgress());
   conversationProgress = updateProgressFromSaleMessage(conversationProgress, message);
   const progressBeforeReply = snapshotProgress(conversationProgress);
+  
+  const isSaleOpening = !existing && turns.length === 0;
+  const openingText = isSaleOpening ? message : (normalizeSalutationStyle(ep.salutation_style).length > 0 ? undefined : (existing?.turns?.[0]?.text || ep.role_prompt || ""));
   const identityProfile =
     existing?.identityProfile ||
     buildIdentityProfileFromPersona(
       ep,
-      normalizeSalutationStyle(ep.salutation_style).length > 0 ? undefined : (existing?.turns?.[0]?.text || ep.role_prompt || "")
+      openingText,
+      isSaleOpening
     );
   const identitySource = deriveIdentitySource(ep, Boolean(existing?.identityProfile));
   const personaSalutationStyle = ep.salutation_style || "";
@@ -871,6 +875,21 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
   })) {
     guardTriggered = true;
     guardTriggerReasons.push("final_guard");
+    
+    const closing = buildCompletionReply({
+      completion,
+      identity: identityProfile,
+      recentReplies,
+      nextUnresolvedTopic
+    });
+    reply = closing.reply;
+    finalReplySource = "deterministic_fallback";
+    completionForcedReply = true;
+    completionVariantId = closing.variant_id;
+    completionTopicUsed = closing.topic_used;
+    completionOverrideReason = "final_guard_forced";
+    fallbackVariantId = null;
+    fallbackTopicUsed = null;
   }
 
   const progressAfter = updateProgressFromCustomerMessage(snapshotProgress(progressBeforeReply), reply);

@@ -1,4 +1,4 @@
-﻿export interface ConversationIdentityProfile {
+export interface ConversationIdentityProfile {
   customer_self_pronoun: "anh" | "chị" | "em" | "mình" | "tôi";
   customer_target_pronoun: "em" | "anh" | "chị" | "bạn";
   sale_expected_self_pronoun: "em" | "anh" | "chị" | "bạn";
@@ -109,9 +109,42 @@ function inferFromDisplayName(name?: string): {
   return {};
 }
 
+export function buildIdentityProfileFromSaleOpening(saleMessage: string): ConversationIdentityProfile {
+  const t = normalize(saleMessage);
+  let customerSelf: ConversationIdentityProfile["customer_self_pronoun"] = "mình";
+  let customerTarget: ConversationIdentityProfile["customer_target_pronoun"] = "em";
+
+  if (/\b(anh|anh\s+oi|chao\s+anh|gui\s+anh)\b/.test(t)) {
+    customerSelf = "anh";
+    customerTarget = "em";
+  } else if (/\b(chi|chi\s+oi|chao\s+chi|gui\s+chi)\b/.test(t)) {
+    customerSelf = "chị";
+    customerTarget = "em";
+  } else if (/\b(em|em\s+oi|chao\s+em|gui\s+em)\b/.test(t)) {
+    customerSelf = "em";
+    if (/\b(anh|anh\s+chao|anh\s+gui)\b/.test(t)) {
+      customerTarget = "anh";
+    } else if (/\b(chi|chi\s+chao|chi\s+gui)\b/.test(t)) {
+      customerTarget = "chị";
+    } else {
+      customerTarget = "bạn";
+    }
+  }
+
+  return {
+    customer_self_pronoun: customerSelf,
+    customer_target_pronoun: customerTarget,
+    sale_expected_self_pronoun: expectedSaleSelf(customerTarget),
+    sale_expected_target_pronoun: expectedSaleTarget(customerSelf),
+    tone_style: "business_casual",
+    conversation_role: "customer_to_sales"
+  };
+}
+
 export function buildIdentityProfileFromPersona(
   persona: IdentitySourcePersona,
-  openingText?: string
+  openingText?: string,
+  isSaleOpening = false
 ): ConversationIdentityProfile {
   const fromStyle = parseSalutationStyle(persona.salutation_style);
 
@@ -132,7 +165,9 @@ export function buildIdentityProfileFromPersona(
   let customerTarget = fromName.customer_target_pronoun;
 
   if (!customerSelf || !customerTarget) {
-    const fallback = buildIdentityProfileFromOpening(openingText || persona.display_name || persona.name || "");
+    const fallback = isSaleOpening && openingText
+      ? buildIdentityProfileFromSaleOpening(openingText)
+      : buildIdentityProfileFromOpening(openingText || persona.display_name || persona.name || "");
     customerSelf = customerSelf || fallback.customer_self_pronoun;
     customerTarget = customerTarget || fallback.customer_target_pronoun;
   }
