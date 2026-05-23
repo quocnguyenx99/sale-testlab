@@ -1,9 +1,11 @@
-﻿import { ConversationIdentityProfile } from "./conversationIdentity";
+import { ConversationIdentityProfile } from "./conversationIdentity";
 import {
   ConversationProgress,
   ConversationTopic,
   TOPIC_ORDER,
-  getFirstUnresolvedTopic
+  getFirstUnresolvedTopic,
+  ensureConversationProgress,
+  getTopicProgress
 } from "./conversationProgressTracker";
 
 function normalize(input: string): string {
@@ -90,8 +92,9 @@ const TOPIC_ASK_PATTERNS: Record<ConversationTopic, RegExp> = {
 };
 
 export function getBlockedTopics(progress: ConversationProgress): ConversationTopic[] {
+  const safeProgress = ensureConversationProgress(progress);
   return TOPIC_ORDER.filter((topic) => {
-    const t = progress[topic];
+    const t = getTopicProgress(safeProgress, topic);
     return (t.requested && t.answered) || t.confirmed;
   });
 }
@@ -150,11 +153,11 @@ export function buildProgressionInstruction(progress: ConversationProgress): str
   const nextText = next ?? "none";
 
   return [
-    "Repetition guard:",
-    `- blocked_topics: ${blockedText}`,
-    `- next_unresolved_topic: ${nextText}`,
-    "- Nếu một topic đã requested+answered hoặc đã confirmed thì không hỏi lại.",
-    "- Nếu topic đã hoàn tất, chuyển tự nhiên sang topic chưa hoàn tất tiếp theo."
+    "Repetition & Flow guard:",
+    `- blocked_topics: ${blockedText} (KHÔNG ĐƯỢC hỏi lại những chủ đề này dưới mọi hình thức)`,
+    `- next_unresolved_topic: ${nextText} (Đây là chủ đề gợi ý tiếp theo để định hướng hội thoại)`,
+    "- TẬP TRUNG vào sự tự nhiên: Hãy lắng nghe và ghi nhận (acknowledge) ngắn gọn, tự nhiên câu trả lời trước đó của Sale trước khi chuyển ý.",
+    "- Bạn KHÔNG BẮT BUỘC phải hỏi dồn dập về chủ đề tiếp theo ở mọi lượt. Bạn có thể tỏ ra đắn đo, cân nhắc hoặc đề cập một cách mượt mà, tránh tạo cảm giác điền checklist máy móc."
   ].join("\n");
 }
 

@@ -1,4 +1,4 @@
-﻿import {
+import {
   RuntimeState,
   buildConstraintLines,
   defaultRuntimeConstraints,
@@ -9,6 +9,8 @@ import {
   ConversationProgress,
   ConversationTopic,
   getFirstUnresolvedTopic,
+  getTopicProgress,
+  TOPIC_ORDER,
 } from "./conversationProgressTracker";
 import {
   ConversationIdentityProfile,
@@ -86,9 +88,8 @@ function toMemoryLines(memory: ConversationMemorySlots): string[] {
 }
 
 function toProgressLines(progress: ConversationProgress): string[] {
-  const topics = Object.keys(progress) as ConversationTopic[];
-  return topics.map((topic) => {
-    const p = progress[topic];
+  return TOPIC_ORDER.map((topic) => {
+    const p = getTopicProgress(progress, topic);
     return `- ${topic}: requested=${p.requested}, answered=${p.answered}, confirmed=${p.confirmed}`;
   });
 }
@@ -149,8 +150,9 @@ export function buildEnrichedRuntimePrompt(input: EnrichedPromptInput): string {
     "",
     progressionBlock,
     "",
-    "Không hỏi lại thông tin đã được Sale xác nhận trong memory_slots.",
-    "Nếu giá/cấu hình đã được trả lời, hãy chuyển sang thông tin còn thiếu như tồn kho, giao hàng, bảo hành hoặc bước tiếp theo.",
+    "Ghi nhớ quy tắc hội thoại tự nhiên:",
+    "- KHÔNG ĐƯỢC hỏi lại những thông tin đã được Sale cung cấp và ghi trong memory_slots (ví dụ: nếu giá hoặc cấu hình đã có, cấm hỏi lại giá/cấu hình).",
+    "- Lắng nghe, ghi nhận và phản hồi tự nhiên trước. Tránh tạo cảm giác bạn đang phỏng vấn hay điền checklist. Hãy chuyển ý mượt mà bằng cách liên kết câu trả lời của Sale với câu hỏi tiếp theo của bạn.",
     "",
     `Runtime state: ${input.runtimeState}`,
     "",

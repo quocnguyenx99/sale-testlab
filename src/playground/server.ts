@@ -17,6 +17,7 @@ import { ConversationMemorySlots, createEmptyMemory, updateMemorySlots } from ".
 import {
   ConversationProgress,
   createEmptyConversationProgress,
+  ensureConversationProgress,
   getFirstUnresolvedTopic,
   ConversationTopic,
   updateProgressFromCustomerMessage,
@@ -31,7 +32,9 @@ import {
 import {
   ConversationIdentityProfile,
   buildIdentityProfileFromPersona,
-  detectIdentityDrift
+  detectIdentityDrift,
+  runCustomerVoiceGuard,
+  rewriteVoiceDrift
 } from "../runtime/conversationIdentity";
 import {
   buildResponseBankReply
@@ -183,13 +186,20 @@ function chooseResponseBankReply(input: {
   identity: ConversationIdentityProfile;
   recentFallbackVariantIds: string[];
   recentReplies: string[];
+  persona?: {
+    buyer_role?: string;
+    purchase_context?: string;
+    behavior_rules?: string[];
+    difficulty?: string;
+  };
 }): { reply: string; variant_id: string; topic_used: string | null } {
   const bank = buildResponseBankReply({
     topic: input.topic,
     nextTopic: input.nextTopic,
     identity: input.identity,
     recentFallbackVariantIds: input.recentFallbackVariantIds,
-    recentReplies: input.recentReplies
+    recentReplies: input.recentReplies,
+    persona: input.persona
   });
   return bank;
 }
@@ -216,7 +226,7 @@ function deriveIdentitySource(persona: { salutation_style?: string; display_name
 }
 
 function snapshotProgress(progress: ConversationProgress): ConversationProgress {
-  return structuredClone(progress) as ConversationProgress;
+  return ensureConversationProgress(structuredClone(progress) as ConversationProgress);
 }
 
 function buildCustomerOpening(persona: RuntimePersonaRecord): {
@@ -303,11 +313,11 @@ function buildPage(): string {
   <title>Runtime Chat Playground</title>
   <style>
     * { box-sizing: border-box; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; background: #f0f2f5; color: #111; }
-    .wrap { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; grid-template-columns: 320px 1fr; gap: 12px; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; background: #eef2f7; color: #111; }
+    .wrap { max-width: 1280px; margin: 0 auto; padding: 16px; display: grid; grid-template-columns: minmax(360px, 420px) 1fr; gap: 14px; }
     .sidebar { display: flex; flex-direction: column; gap: 10px; }
     .main { display: flex; flex-direction: column; gap: 10px; }
-    .panel { background: #fff; border: 1px solid #d9dde3; border-radius: 10px; padding: 14px; }
+    .panel { background: #fff; border: 1px solid #d9dde3; border-radius: 12px; padding: 14px; box-shadow: 0 2px 8px rgba(32, 50, 78, 0.06); }
     h3 { margin: 0 0 8px; font-size: 15px; }
     select, input, button { padding: 8px 10px; font-size: 14px; border-radius: 6px; border: 1px solid #ccc; }
     select { width: 100%; }
@@ -326,12 +336,23 @@ function buildPage(): string {
     .medium { background:#fef3cd; color:#8a6b00; }
     .easy { background:#d9f2d9; color:#1d6b1d; }
     .recommended-badge { background:#d0e8ff; color:#1a5fa8; margin-left:4px; }
-    .detail-row { display:flex; justify-content:space-between; margin-bottom:4px; font-size:13px; }
-    .detail-label { color:#555; font-weight:bold; min-width:120px; }
-    .tag { display:inline-block; background:#eef; border-radius:4px; padding:1px 6px; margin:2px; font-size:12px; }
+    .detail-grid { display:grid; grid-template-columns: 120px 1fr; gap: 8px 10px; margin-bottom: 8px; }
+    .detail-label { color:#555; font-weight:bold; font-size:13px; }
+    .detail-value { min-width: 0; overflow-wrap: anywhere; line-height: 1.35; font-size: 13px; }
+    .detail-card { max-height: 58vh; overflow: auto; padding-right: 4px; }
+    .tag-wrap { display:flex; flex-wrap:wrap; gap:6px; }
+    .tag { display:inline-block; background:#eef; border-radius:6px; padding:4px 8px; font-size:12px; line-height:1.3; }
     .risk-tag { background:#fff0f0; color:#c00; }
-    details summary { cursor:pointer; color:#888; font-size:12px; margin-top:4px; }
+    details { margin-top: 6px; }
+    details summary { cursor:pointer; color:#666; font-size:12px; padding:4px 0; }
+    details ul { margin: 4px 0 8px; padding-left: 18px; line-height: 1.45; }
     .row { display:flex; gap:8px; }
+    #persona { height: 280px !important; }
+    @media (max-width: 960px) {
+      .wrap { grid-template-columns: 1fr; }
+      .detail-card { max-height: none; }
+      #chat { max-height: 360px; }
+    }
   </style>
 </head>
 <body>
@@ -339,11 +360,11 @@ function buildPage(): string {
     <div class="sidebar">
       <div class="panel">
         <h3>🎭 Chọn Persona</h3>
-        <select id="persona" size="8" style="height:200px"></select>
+        <select id="persona" size="10" style="height:280px"></select>
       </div>
       <div class="panel" id="personaDetail">
         <h3>📋 Thông tin Persona</h3>
-        <div id="detailContent"><em>Chọn persona để xem chi tiết</em></div>
+        <div id="detailContent" class="detail-card"><em>Chọn persona để xem chi tiết</em></div>
       </div>
     </div>
 
@@ -387,7 +408,7 @@ function esc(v) {
 }
 
 function tags(arr, cls) {
-  return (arr||[]).map(function(t) { return '<span class="tag ' + (cls||'') + '">' + esc(t) + '</span>'; }).join('');
+  return '<div class="tag-wrap">' + (arr||[]).map(function(t) { return '<span class="tag ' + (cls||'') + '">' + esc(t) + '</span>'; }).join('') + '</div>';
 }
 
 function addMessage(role, text, meta) {
@@ -408,21 +429,23 @@ function addMessage(role, text, meta) {
 function renderPersonaDetail(p) {
   if (!p) return;
   var diffCls = p.difficulty || 'medium';
-  var html = '<div class="detail-row"><span class="detail-label">T\u00ean hi\u1ec3n th\u1ecb</span><b>' + esc(p.display_name) + '</b></div>' +
-    '<div class="detail-row"><span class="detail-label">Vai tr\u00f2</span>' + esc(p.buyer_role) + '</div>' +
-    '<div class="detail-row"><span class="detail-label">T\u1ed5 ch\u1ee9c</span>' + esc(p.organization_type) + '</div>' +
-    '<div class="detail-row"><span class="detail-label">\u0110\u1ed9 kh\u00f3</span><span class="badge ' + diffCls + '">' + (p.difficulty||'').toUpperCase() + '</span></div>' +
-    '<div class="detail-row"><span class="detail-label">B\u1ed1i c\u1ea3nh mua</span><span style="font-size:12px">' + esc(p.purchase_context) + '</span></div>' +
-    '<div class="detail-row"><span class="detail-label">S\u1ea3n ph\u1ea9m</span>' + tags(p.product_interest_categories) + '</div>' +
-    '<details><summary>Quy t\u1eafc h\u00e0nh vi (' + (p.behavior_rules||[]).length + ')</summary><ul style="font-size:12px;margin:4px 0">' +
+  var html = '<div class="detail-grid">' +
+    '<div class="detail-label">T\u00ean hi\u1ec3n th\u1ecb</div><div class="detail-value"><b>' + esc(p.display_name) + '</b></div>' +
+    '<div class="detail-label">Vai tr\u00f2</div><div class="detail-value">' + esc(p.buyer_role) + '</div>' +
+    '<div class="detail-label">T\u1ed5 ch\u1ee9c</div><div class="detail-value">' + esc(p.organization_type) + '</div>' +
+    '<div class="detail-label">\u0110\u1ed9 kh\u00f3</div><div class="detail-value"><span class="badge ' + diffCls + '">' + (p.difficulty||'').toUpperCase() + '</span></div>' +
+    '<div class="detail-label">B\u1ed1i c\u1ea3nh mua</div><div class="detail-value">' + esc(p.purchase_context) + '</div>' +
+    '<div class="detail-label">S\u1ea3n ph\u1ea9m</div><div class="detail-value">' + tags(p.product_interest_categories) + '</div>' +
+    '</div>' +
+    '<details><summary>Quy t\u1eafc h\u00e0nh vi (' + (p.behavior_rules||[]).length + ')</summary><ul style="font-size:12px">' +
       (p.behavior_rules||[]).map(function(r){return '<li>' + esc(r) + '</li>';}).join('') + '</ul></details>' +
-    '<details><summary>C\u00e2u m\u1edf \u0111\u1ea7u (' + (p.opening_messages||[]).length + ')</summary><ul style="font-size:12px;margin:4px 0">' +
+    '<details><summary>C\u00e2u m\u1edf \u0111\u1ea7u (' + (p.opening_messages||[]).length + ')</summary><ul style="font-size:12px">' +
       (p.opening_messages||[]).map(function(r){return '<li>' + esc(r) + '</li>';}).join('') + '</ul></details>' +
-    '<details><summary>C\u00e2u h\u1ecfi hay g\u1eb7p</summary><ul style="font-size:12px;margin:4px 0">' +
+    '<details><summary>C\u00e2u h\u1ecfi hay g\u1eb7p</summary><ul style="font-size:12px">' +
       (p.likely_questions||[]).map(function(r){return '<li>' + esc(r) + '</li>';}).join('') + '</ul></details>' +
-    '<details><summary>Ph\u1ea3n \u0111\u1ed1i hay g\u1eb7p</summary><ul style="font-size:12px;margin:4px 0">' +
+    '<details><summary>Ph\u1ea3n \u0111\u1ed1i hay g\u1eb7p</summary><ul style="font-size:12px">' +
       (p.objection_patterns||[]).map(function(r){return '<li>' + esc(r) + '</li>';}).join('') + '</ul></details>' +
-    '<details><summary>\u0110i\u1ec1u ki\u1ec7n ch\u1ed1t</summary><ul style="font-size:12px;margin:4px 0">' +
+    '<details><summary>\u0110i\u1ec1u ki\u1ec7n ch\u1ed1t</summary><ul style="font-size:12px">' +
       (p.closing_conditions||[]).map(function(r){return '<li>' + esc(r) + '</li>';}).join('') + '</ul></details>' +
     '<details><summary>Training focus</summary>' + tags(p.sale_training_focus) + '</details>';
   if ((p.risk_flags||[]).length > 0) {
@@ -724,7 +747,7 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
 
   let memorySlots = existing?.memorySlots || createEmptyMemory();
   memorySlots = updateMemorySlots(memorySlots, message);
-  let conversationProgress = snapshotProgress(existing?.conversationProgress || createEmptyConversationProgress());
+  let conversationProgress = ensureConversationProgress(existing?.conversationProgress || createEmptyConversationProgress());
   conversationProgress = updateProgressFromSaleMessage(conversationProgress, message);
   const progressBeforeReply = snapshotProgress(conversationProgress);
   
@@ -781,6 +804,7 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
   const recentFallbackVariantIds = existing?.recentFallbackVariantIds ?? [];
   const recentReplies = turns.filter((t) => t.role === "customer_ai").map((t) => t.text);
   const nextUnresolvedTopic = getFirstUnresolvedTopic(conversationProgress);
+  const fallbackTopic = nextUnresolvedTopic ?? "next_step";
   const freeFormLoopDetected = detectRepeatedFreeFormLoop(reply, recentReplies);
   let fallbackVariantId: string | null = null;
   let fallbackTopicUsed: ConversationTopic | null = null;
@@ -792,10 +816,16 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
   const applyBankFallback = (reasonTopic: ConversationTopic | null): void => {
     const bank = chooseResponseBankReply({
       topic: reasonTopic,
-      nextTopic: nextUnresolvedTopic,
+      nextTopic: fallbackTopic,
       identity: identityProfile,
       recentFallbackVariantIds,
-      recentReplies
+      recentReplies,
+      persona: {
+        buyer_role: ep.buyer_role,
+        purchase_context: ep.purchase_context,
+        behavior_rules: ep.behavior_rules,
+        difficulty: ep.difficulty
+      }
     });
     reply = bank.reply;
     finalReplySource = "deterministic_fallback";
@@ -805,16 +835,51 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
   };
 
   if (assistantHits.length > 0) {
-    applyBankFallback(nextUnresolvedTopic);
+    applyBankFallback(fallbackTopic);
     guardTriggered = true;
     guardTriggerReasons.push("assistant_style");
   }
-  if (greetingOnly) reply = "Chào bạn, mình đang tham khảo. Bạn tư vấn ngắn gọn giúp mình nhé.";
+
+  const voiceGuardResult = runCustomerVoiceGuard(reply, identityProfile);
+  let customerVoiceDriftDetected = voiceGuardResult.customer_voice_drift_detected;
+  let customerVoiceGuardReason = voiceGuardResult.customer_voice_guard_reason;
+
+  if (customerVoiceDriftDetected) {
+    guardTriggered = true;
+    guardTriggerReasons.push(`voice_drift:${customerVoiceGuardReason}`);
+    const rewritten = rewriteVoiceDrift(reply, identityProfile);
+    if (rewritten !== reply) {
+      reply = rewritten;
+      const recheck = runCustomerVoiceGuard(reply, identityProfile);
+      customerVoiceDriftDetected = recheck.customer_voice_drift_detected;
+      customerVoiceGuardReason = recheck.customer_voice_guard_reason;
+      if (customerVoiceDriftDetected) {
+        applyBankFallback(fallbackTopic);
+      }
+    } else {
+      applyBankFallback(fallbackTopic);
+    }
+  }
+
+  if (greetingOnly) {
+    const self = identityProfile.customer_self_pronoun;
+    const target = identityProfile.customer_target_pronoun;
+    const selfCap = self.charAt(0).toUpperCase() + self.slice(1);
+    const targetCap = target.charAt(0).toUpperCase() + target.slice(1);
+    
+    if ((self === "anh" || self === "chị") && target === "em") {
+      reply = `${selfCap} chào ${target}, ${self} đang tham khảo sản phẩm bên ${target}. ${targetCap} tư vấn ngắn gọn giúp ${self} nhé.`;
+    } else if (self === "em" && (target === "anh" || target === "chị")) {
+      reply = `Em chào ${target}, em đang tham khảo sản phẩm bên mình. ${targetCap} tư vấn ngắn gọn giúp em nhé.`;
+    } else {
+      reply = `Chào bạn, mình đang tham khảo sản phẩm bên mình. Bạn tư vấn ngắn gọn giúp mình nhé.`;
+    }
+  }
   const repeatedTopics = detectRepeatedTopicAsking(reply, conversationProgress);
   const previousAiReplies = recentReplies;
   const genericLoopDetected = isRepeatedGenericFallback(reply, previousAiReplies);
   if (repeatedTopics.length > 0 || genericLoopDetected || freeFormLoopDetected || isGenericConfirmationIntent(reply)) {
-    applyBankFallback(nextUnresolvedTopic);
+    applyBankFallback(fallbackTopic);
     guardTriggered = true;
     if (repeatedTopics.length > 0) guardTriggerReasons.push(`repeated_topic:${repeatedTopics.join(",")}`);
     if (genericLoopDetected) guardTriggerReasons.push("generic_loop");
@@ -824,7 +889,7 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
 
   reopenedAnsweredTopics = detectReopenedAnsweredTopics(reply, conversationProgress);
   if (reopenedAnsweredTopics.length > 0) {
-    applyBankFallback(nextUnresolvedTopic);
+    applyBankFallback(fallbackTopic);
     guardTriggered = true;
     guardTriggerReasons.push(`reopened_topic:${reopenedAnsweredTopics.join(",")}`);
   }
@@ -835,6 +900,8 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
     next_unresolved_topic: nextUnresolvedTopic,
     recent_turns: turns
   });
+  const safeNextUnresolvedTopic =
+    nextUnresolvedTopic ?? (completion.completion_ready ? "next_step" : completion.missing_topics[0] ?? null);
   let completionForcedReply = false;
   let completionVariantId: string | null = null;
   let completionTopicUsed: ConversationTopic | null = null;
@@ -844,7 +911,7 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
       completion,
       identity: identityProfile,
       recentReplies,
-      nextUnresolvedTopic
+      nextUnresolvedTopic: safeNextUnresolvedTopic
     });
     reply = closing.reply;
     finalReplySource = "deterministic_fallback";
@@ -860,7 +927,7 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
 
   const identityDrift = detectIdentityDrift(reply, identityProfile);
   if (identityDrift.identity_drift_detected) {
-    applyBankFallback(nextUnresolvedTopic);
+    applyBankFallback(fallbackTopic);
     guardTriggered = true;
     guardTriggerReasons.push("identity_drift");
   }
@@ -871,7 +938,7 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
     progress: conversationProgress,
     identity: identityProfile,
     recentReplies,
-    nextUnresolvedTopic
+    nextUnresolvedTopic: safeNextUnresolvedTopic
   })) {
     guardTriggered = true;
     guardTriggerReasons.push("final_guard");
@@ -880,7 +947,7 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
       completion,
       identity: identityProfile,
       recentReplies,
-      nextUnresolvedTopic
+      nextUnresolvedTopic: safeNextUnresolvedTopic
     });
     reply = closing.reply;
     finalReplySource = "deterministic_fallback";
@@ -922,6 +989,9 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
     candidate_reply_before_guards: candidateReplyBeforeGuards,
     final_reply: reply,
     assistant_style_detected: assistantHits.length > 0,
+    customer_voice_drift_detected: customerVoiceDriftDetected,
+    customer_voice_guard_reason: customerVoiceGuardReason,
+    sale_opening_identity_detected: isSaleOpening,
     vietnamese_accent_warning: hasVietnameseAccentWarning(reply),
     latency_ms: latency, safety_flags: result.runtime_safety, constraint_triggers: usedConstraints,
     blocked_behaviors: result.reply_reasoning.blocked_behaviors,
@@ -932,7 +1002,7 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
     conversation_progress: progressAfter,
     last_requested_topic: progressAfter.last_requested_topic ?? null,
     last_answered_topic: progressAfter.last_answered_topic ?? null,
-    next_unresolved_topic: getFirstUnresolvedTopic(progressAfter),
+    next_unresolved_topic: getFirstUnresolvedTopic(progressAfter) ?? (completion.completion_ready ? "next_step" : completion.missing_topics[0] ?? null),
     identity_profile: identityProfile,
     identity_source: identitySource,
     persona_salutation_style: personaSalutationStyle,

@@ -48,6 +48,10 @@ function emptyTopic(): TopicProgress {
   return { requested: false, answered: false, confirmed: false };
 }
 
+export function getEmptyTopicProgress(): TopicProgress {
+  return emptyTopic();
+}
+
 export function createEmptyConversationProgress(): ConversationProgress {
   return {
     product_model: emptyTopic(),
@@ -66,15 +70,21 @@ export function createEmptyConversationProgress(): ConversationProgress {
 }
 
 function setRequested(progress: ConversationProgress, topic: ConversationTopic): void {
-  progress[topic].requested = true;
+  const state = progress[topic] ?? getEmptyTopicProgress();
+  state.requested = true;
+  progress[topic] = state;
 }
 
 function setAnswered(progress: ConversationProgress, topic: ConversationTopic): void {
-  progress[topic].answered = true;
+  const state = progress[topic] ?? getEmptyTopicProgress();
+  state.answered = true;
+  progress[topic] = state;
 }
 
 function setConfirmed(progress: ConversationProgress, topic: ConversationTopic): void {
-  progress[topic].confirmed = true;
+  const state = progress[topic] ?? getEmptyTopicProgress();
+  state.confirmed = true;
+  progress[topic] = state;
 }
 
 function hasConfirmation(text: string): boolean {
@@ -163,7 +173,7 @@ export function updateProgressFromCustomerMessage(
   customerMessage: string
 ): ConversationProgress {
   const text = normalize(customerMessage);
-  const next = structuredClone(current) as ConversationProgress;
+  const next = ensureConversationProgress(current);
   const requestedTopics = detectCustomerRequestedTopics(text);
 
   for (const topic of requestedTopics) {
@@ -175,8 +185,9 @@ export function updateProgressFromCustomerMessage(
   }
 
   if (hasConfirmation(text)) {
-    for (const topic of Object.keys(next) as ConversationTopic[]) {
-      if (next[topic].answered) setConfirmed(next, topic);
+    for (const topic of TOPIC_ORDER) {
+      const state = getTopicProgress(next, topic);
+      if (state.answered) setConfirmed(next, topic);
     }
   }
 
@@ -191,7 +202,7 @@ export function updateProgressFromSaleMessage(
   saleMessage: string
 ): ConversationProgress {
   const text = normalize(saleMessage);
-  const next = structuredClone(current) as ConversationProgress;
+  const next = ensureConversationProgress(current);
   const topicsInOrder: ConversationTopic[] = [
     "price",
     "stock",
@@ -218,9 +229,39 @@ export function topicCompleted(topic: TopicProgress): boolean {
   return topic.requested && topic.answered && topic.confirmed;
 }
 
-export function getFirstUnresolvedTopic(progress: ConversationProgress): ConversationTopic | null {
+export function getTopicProgress(
+  progress: ConversationProgress | null | undefined,
+  topic: ConversationTopic
+): TopicProgress {
+  if (!progress) return getEmptyTopicProgress();
+  const state = progress[topic];
+  if (!state || typeof state !== "object") return getEmptyTopicProgress();
+  return {
+    requested: Boolean(state.requested),
+    answered: Boolean(state.answered),
+    confirmed: Boolean(state.confirmed)
+  };
+}
+
+export function ensureConversationProgress(
+  progress?: ConversationProgress | null
+): ConversationProgress {
+  const base = createEmptyConversationProgress();
+  if (!progress) return base;
+
   for (const topic of TOPIC_ORDER) {
-    const t = progress[topic];
+    base[topic] = getTopicProgress(progress, topic);
+  }
+  base.last_requested_topic = progress.last_requested_topic ?? null;
+  base.last_answered_topic = progress.last_answered_topic ?? null;
+  base.last_customer_topic = progress.last_customer_topic ?? null;
+  return base;
+}
+
+export function getFirstUnresolvedTopic(progress: ConversationProgress): ConversationTopic | null {
+  const safeProgress = ensureConversationProgress(progress);
+  for (const topic of TOPIC_ORDER) {
+    const t = getTopicProgress(safeProgress, topic);
     const blocked = t.answered || t.confirmed;
     if (!blocked) return topic;
   }

@@ -1,6 +1,12 @@
 import { ConversationIdentityProfile, detectIdentityDrift } from "./conversationIdentity";
 import { detectRepeatedFreeFormLoop, detectRepeatedTopicAsking, isGenericConfirmationIntent, isRepeatedGenericFallback } from "./repetitionGuard";
-import { ConversationProgress, ConversationTopic, TOPIC_ORDER } from "./conversationProgressTracker";
+import {
+  ConversationProgress,
+  ConversationTopic,
+  TOPIC_ORDER,
+  ensureConversationProgress,
+  getTopicProgress
+} from "./conversationProgressTracker";
 
 export type CompletionRecommendedAction =
   | "ask_for_quote"
@@ -79,7 +85,8 @@ function render(text: string, identity: ConversationIdentityProfile): string {
 }
 
 function isResolved(progress: ConversationProgress, topic: ConversationTopic): boolean {
-  return progress[topic].answered || progress[topic].confirmed;
+  const state = getTopicProgress(progress, topic);
+  return state.answered || state.confirmed;
 }
 
 function getResolvedTopics(progress: ConversationProgress): ConversationTopic[] {
@@ -192,9 +199,10 @@ export function detectReopenedAnsweredTopics(
 ): ConversationTopic[] {
   if (!hasQuestionIntent(candidateReply)) return [];
   const t = normalize(candidateReply);
+  const safeProgress = ensureConversationProgress(progress);
   const reopened: ConversationTopic[] = [];
   for (const topic of TOPIC_ORDER) {
-    const state = progress[topic];
+    const state = getTopicProgress(safeProgress, topic);
     if (!(state.answered || state.confirmed)) continue;
     const patterns = REOPEN_PATTERNS[topic];
     if (patterns.some((pattern) => pattern.test(t))) {

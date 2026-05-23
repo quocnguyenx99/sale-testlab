@@ -1,87 +1,54 @@
-import { spawn, ChildProcessWithoutNullStreams } from "node:child_process";
-import * as fs from "node:fs";
+import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 
-type LiveResponse = {
+type ApiResp = {
   sessionId: string;
   persona_id: string;
   reply: string;
-  reply_source: string;
   final_reply?: string;
-  raw_model_reply?: string;
-  candidate_reply_before_guards?: string;
+  reply_source?: string;
   next_unresolved_topic?: string | null;
   completion_ready?: boolean;
-  completion_reason?: string;
-  missing_topics?: string[];
-  resolved_topics?: string[];
   completion_forced_reply?: boolean;
-  completion_override_reason?: string | null;
-  fallback_variant_id?: string | null;
-  fallback_topic_used?: string | null;
-  progress_before?: unknown;
-  progress_after?: unknown;
-  identity_profile?: {
-    customer_self_pronoun?: string;
-    customer_target_pronoun?: string;
-    sale_expected_self_pronoun?: string;
-    sale_expected_target_pronoun?: string;
-  };
-  identity_source?: string;
-  persona_salutation_style?: string;
-  identity_drift_detected?: boolean;
-  role_inversion_detected?: boolean;
-  repeated_freeform_loop?: boolean;
-  repeated_blocked_topics?: string[];
   reopened_topic_detected?: boolean;
   reopened_answered_topics?: string[];
-  final_reopen_guard_triggered?: boolean;
-  guard_triggered?: boolean;
-  guard_trigger_reasons?: string[];
+  identity_profile?: Record<string, string>;
+  missing_topics?: string[];
 };
 
-type ScenarioRow = {
-  scenario_name: string;
-  result: "PASS" | "FAIL" | "PARTIAL";
-  failure_reason: string;
-  final_reply: string;
-  reply_source: string;
-  next_unresolved_topic: string | null | undefined;
-  completion_ready: boolean | undefined;
-  completion_reason: string | undefined;
-  missing_topics: string;
-  resolved_topics: string;
-  identity_profile: string;
-  identity_drift_detected: boolean | undefined;
-  role_inversion_detected: boolean | undefined;
-  repeated_freeform_loop: boolean | undefined;
-  repeated_blocked_topics: string;
-  fallback_variant_id: string | null | undefined;
-  fallback_topic_used: string | null | undefined;
-  reopened_topic_detected?: boolean | undefined;
-  reopened_answered_topics?: string;
-  final_reopen_guard_triggered?: boolean | undefined;
-  guard_triggered?: boolean | undefined;
-  guard_trigger_reasons?: string;
-  identity_source?: string;
-  persona_salutation_style?: string;
-  completion_forced_reply?: boolean | undefined;
-  completion_override_reason?: string | null | undefined;
-};
+type CaseId = "L1" | "L2" | "L3" | "L4";
 
-type ScenarioDef = {
+type CaseResult = {
+  case_id: CaseId;
   name: string;
-  personaSelector: (personas: Array<{ persona_id: string; display_name: string }>) => string;
-  turns: string[];
-  pass: (finalResponse: LiveResponse, history: LiveResponse[]) => boolean;
-  failReason: (finalResponse: LiveResponse, history: LiveResponse[]) => string;
-  partial?: (finalResponse: LiveResponse, history: LiveResponse[]) => boolean;
+  result: "PASS" | "PARTIAL" | "FAIL" | "TIMEOUT";
+  duration_ms: number;
+  final_reply: string;
+  metadata: string;
+  notes: string;
 };
 
-const PORT = 3011;
-const MONTH = "2026-03";
+type RunnerOptions = {
+  caseId: CaseId | null;
+  attach: boolean;
+  port: number | null;
+  help: boolean;
+};
 
-function normalize(text: string): string {
-  return (text || "")
+type CaseSpec = {
+  name: string;
+  personaId: string;
+  turns: string[];
+  evaluator: (last: ApiResp) => { result: CaseResult["result"]; notes: string };
+};
+
+const MONTH = "2026-03";
+const REQ_TIMEOUT = 30_000;
+const CASE_TIMEOUT = 90_000;
+const GLOBAL_TIMEOUT = 6 * 60_000;
+const DEFAULT_PORTS = [3009, 3011, 3012];
+
+function normalizeText(input: string): string {
+  return (input || "")
     .normalize("NFD")
     .replace(/\p{M}/gu, "")
     .toLowerCase()
@@ -92,312 +59,398 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForServer(timeoutMs = 120_000): Promise<void> {
+function parseArgs(argv: string[]): RunnerOptions {
+  let caseId: CaseId | null = null;
+  let attach = false;
+  let port: number | null = null;
+  let help = false;
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--help" || arg === "-h") {
+      help = true;
+      continue;
+    }
+    if (arg.startsWith("--case=")) {
+      const v = arg.slice("--case=".length).trim();
+      if (v === "L1" || v === "L2" || v === "L3" || v === "L4") caseId = v;
+      continue;
+    }
+    if (arg === "--case" && argv[i + 1]) {
+      const v = argv[++i].trim();
+      if (v === "L1" || v === "L2" || v === "L3" || v === "L4") caseId = v;
+      continue;
+    }
+    if (arg.startsWith("--attach=")) {
+      attach = /^(true|1|yes)$/i.test(arg.slice("--attach=".length).trim());
+      continue;
+    }
+    if (arg === "--attach") {
+      attach = true;
+      continue;
+    }
+    if (arg.startsWith("--port=")) {
+      const v = Number(arg.slice("--port=".length).trim());
+      if (Number.isInteger(v) && v > 0) port = v;
+      continue;
+    }
+    if (arg === "--port" && argv[i + 1]) {
+      const v = Number(argv[++i].trim());
+      if (Number.isInteger(v) && v > 0) port = v;
+      continue;
+    }
+  }
+
+  return { caseId, attach, port, help };
+}
+
+function printUsage(): void {
+  console.log([
+    "Usage:",
+    "  npx tsx src/playground/run_qa_phase12f_live.ts --case=L1",
+    "  npx tsx src/playground/run_qa_phase12f_live.ts --case=L3 --attach=true --port=3009",
+    "",
+    "Cases:",
+    "  L1  normal buying flow",
+    "  L2  proactive sale info",
+    "  L3  female persona identity",
+    "  L4  missing price should not close",
+  ].join("\n"));
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`TIMEOUT:${label}:${ms}`)), ms);
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
+function maskHost(raw: string): string {
+  try {
+    const u = new URL(raw);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return "invalid_url";
+  }
+}
+
+async function fetchJson<T>(
+  baseUrl: string,
+  path: string,
+  init?: RequestInit
+): Promise<{ status: number; data: T; rawText: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQ_TIMEOUT);
+  try {
+    const resp = await fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+      signal: controller.signal
+    });
+    const rawText = await resp.text();
+    let data: T;
+    try {
+      data = rawText ? (JSON.parse(rawText) as T) : ({} as T);
+    } catch {
+      data = rawText as T;
+    }
+    return { status: resp.status, data, rawText };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function killStalePlaygroundOnPort(port: number): Promise<void> {
+  if (process.platform !== "win32") return;
+  const script = `
+    $lines = netstat -ano | findstr :${port}
+    if ($lines) {
+      $ids = @($lines | ForEach-Object { ($_ -split '\\s+')[-1] } | Sort-Object -Unique)
+      foreach ($id in $ids) {
+        try {
+          $p = Get-CimInstance Win32_Process -Filter "ProcessId=$id"
+          if ($p.Name -eq 'node.exe' -and ($p.CommandLine -match 'playground|server.ts|tsx')) {
+            Stop-Process -Id $id -Force
+            Write-Output "Killed PID $id on ${port}"
+          }
+        } catch {}
+      }
+    }
+  `;
+  await new Promise<void>((resolve) => {
+    const p = spawn("powershell.exe", ["-NoProfile", "-Command", script], {
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    p.on("close", () => resolve());
+  });
+}
+
+function startServer(port: number): ChildProcessWithoutNullStreams {
+  const envCmd = `set PLAYGROUND_PORT=${port}&& set npm_config_month=${MONTH}&& npm run playground`;
+  return spawn("cmd.exe", ["/c", envCmd], {
+    cwd: process.cwd(),
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+}
+
+async function waitServer(baseUrl: string, child: ChildProcessWithoutNullStreams, timeoutMs = 60_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    try {
-      const resp = await fetch(`http://127.0.0.1:${PORT}/api/version`);
-      if (resp.ok) return;
-    } catch {}
-    await sleep(2000);
-  }
-  throw new Error("Playground live server not ready");
-}
-
-async function startServer(): Promise<ChildProcessWithoutNullStreams> {
-  const child =
-    process.platform === "win32"
-      ? spawn("cmd.exe", ["/c", `set PLAYGROUND_PORT=${PORT}&& set npm_config_month=${MONTH}&& npm run playground -- --month=${MONTH}`], {
-          cwd: process.cwd(),
-          stdio: ["ignore", "pipe", "pipe"]
-        })
-      : spawn("npm", ["run", "playground", "--", `--month=${MONTH}`], {
-          cwd: process.cwd(),
-          env: {
-            ...process.env,
-            PLAYGROUND_PORT: String(PORT),
-            npm_config_month: MONTH
-          },
-          stdio: ["ignore", "pipe", "pipe"]
-        });
-
-  child.stdout.on("data", (chunk) => process.stdout.write(chunk.toString()));
-  child.stderr.on("data", (chunk) => process.stderr.write(chunk.toString()));
-  return child;
-}
-
-async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const resp = await fetch(`http://127.0.0.1:${PORT}${path}`, {
-    headers: {
-      "Content-Type": "application/json"
-    },
-    ...init
-  });
-  if (!resp.ok) {
-    throw new Error(`HTTP ${resp.status} for ${path}`);
-  }
-  return (await resp.json()) as T;
-}
-
-async function customerStart(personaId: string): Promise<LiveResponse> {
-  return apiJson<LiveResponse>("/api/customer-start", {
-    method: "POST",
-    body: JSON.stringify({ personaId })
-  });
-}
-
-async function chat(sessionId: string, personaId: string, message: string): Promise<LiveResponse> {
-  return apiJson<LiveResponse>("/api/chat", {
-    method: "POST",
-    body: JSON.stringify({ sessionId, personaId, message })
-  });
-}
-
-function row(
-  scenario_name: string,
-  response: LiveResponse,
-  result: "PASS" | "FAIL" | "PARTIAL",
-  failure_reason: string,
-  partial = false
-): ScenarioRow {
-  return {
-    scenario_name,
-    result: partial ? "PARTIAL" : result,
-    failure_reason,
-    final_reply: response.final_reply || response.reply || "",
-    reply_source: response.reply_source || "",
-    next_unresolved_topic: response.next_unresolved_topic,
-    completion_ready: response.completion_ready,
-    completion_reason: response.completion_reason,
-    missing_topics: (response.missing_topics || []).join(", "),
-    resolved_topics: (response.resolved_topics || []).join(", "),
-    identity_profile: JSON.stringify(response.identity_profile || {}),
-    identity_drift_detected: response.identity_drift_detected,
-    role_inversion_detected: response.role_inversion_detected,
-    repeated_freeform_loop: response.repeated_freeform_loop,
-    repeated_blocked_topics: (response.repeated_blocked_topics || []).join(", "),
-    fallback_variant_id: response.fallback_variant_id,
-    fallback_topic_used: response.fallback_topic_used,
-    reopened_topic_detected: response.reopened_topic_detected,
-    reopened_answered_topics: (response.reopened_answered_topics || []).join(", "),
-    final_reopen_guard_triggered: response.final_reopen_guard_triggered,
-    guard_triggered: response.guard_triggered,
-    guard_trigger_reasons: (response.guard_trigger_reasons || []).join(", "),
-    identity_source: response.identity_source,
-    persona_salutation_style: response.persona_salutation_style,
-    completion_forced_reply: response.completion_forced_reply,
-    completion_override_reason: response.completion_override_reason
-  };
-}
-
-function hasReopen(text: string): boolean {
-  const t = normalize(text);
-  return /\b(gia sao|còn hàng|con hang|giao khi nao|giao duoc|thanh toan|hóa đơn|bao hanh|bao nhieu|stk|so tai khoan)\b/.test(t);
-}
-
-function makeScenarios(personas: Array<{ persona_id: string; display_name: string }>): ScenarioDef[] {
-  const male = personas.find((p) => /^anh\b/i.test(p.display_name))?.persona_id || personas[0]?.persona_id || "";
-  const female = personas.find((p) => /^chị\b/i.test(p.display_name))?.persona_id || personas[personas.length - 1]?.persona_id || male;
-
-  return [
-    {
-      name: "F1 - Long normal buying flow",
-      personaSelector: () => male,
-      turns: [
-        "Hiện còn mẫu này anh.",
-        "25 triệu anh.",
-        "Mai giao trong ngày được anh.",
-        "Chuyển khoản hoặc tiền mặt đều được anh.",
-        "Xuất hóa đơn đầy đủ anh nhé."
-      ],
-      pass: (finalResponse) =>
-        !hasReopen(finalResponse.final_reply || finalResponse.reply) &&
-        Boolean(finalResponse.completion_ready) &&
-        Boolean(finalResponse.completion_forced_reply),
-      failReason: () => "did_not_close_or_reopened"
-    },
-    {
-      name: "F2 - Proactive sale info",
-      personaSelector: () => male,
-      turns: [
-        "Mẫu này i5 RAM 16GB, giá 25 triệu, còn 12 máy, giao hôm nay được, bảo hành 12 tháng, có xuất hóa đơn công ty và thanh toán chuyển khoản được anh."
-      ],
-      pass: (finalResponse) =>
-        Boolean(finalResponse.completion_ready) &&
-        Boolean(finalResponse.completion_forced_reply) &&
-        !hasReopen(finalResponse.final_reply || finalResponse.reply),
-      failReason: () => "proactive_sale_info_not_respected"
-    },
-    {
-      name: "F3 - Short answer stress",
-      personaSelector: () => male,
-      turns: [
-        "còn anh",
-        "30 anh",
-        "mai giao được",
-        "12 tháng",
-        "có hóa đơn",
-        "chuyển khoản được"
-      ],
-      pass: (finalResponse) =>
-        Boolean(finalResponse.completion_ready) &&
-        !hasReopen(finalResponse.final_reply || finalResponse.reply),
-      failReason: () => "short_answers_not_closed"
-    },
-    {
-      name: "F4 - Female persona identity stress",
-      personaSelector: () => female,
-      turns: [
-        "Mình đang tìm laptop cho văn phòng.",
-        "Dòng i5 còn hàng chị.",
-        "Giá sao em?",
-        "24 triệu chị.",
-        "Giao được khi nào em?",
-        "Mai giao được chị.",
-        "Thanh toán sao em?",
-        "Chuyển khoản hoặc tiền mặt đều được chị.",
-        "Xuất hóa đơn công ty được không em?",
-        "Xuất đầy đủ chị."
-      ],
-      pass: (finalResponse) =>
-        finalResponse.identity_profile?.customer_self_pronoun === "chị" &&
-        finalResponse.identity_profile?.customer_target_pronoun === "em" &&
-        !Boolean(finalResponse.identity_drift_detected) &&
-        !Boolean(finalResponse.role_inversion_detected) &&
-        !/anh cần|anh muốn|anh sẽ/i.test(finalResponse.final_reply || finalResponse.reply),
-      failReason: () => "identity_drift_or_role_inversion"
-    },
-    {
-      name: "F5 - Reopen / loop attack",
-      personaSelector: () => male,
-      turns: [
-        "Còn hàng, giá 26 triệu, mai giao, chuyển khoản được, có hóa đơn anh.",
-        "Giá sao em?",
-        "Giao khi nào em?",
-        "Còn hàng không em?"
-      ],
-      pass: (finalResponse) =>
-        !Boolean(finalResponse.reopened_topic_detected) ||
-        Boolean(finalResponse.final_reopen_guard_triggered) ||
-        Boolean(finalResponse.completion_forced_reply),
-      failReason: () => "reopen_guard_not_triggered"
-    },
-    {
-      name: "F6 - Not enough info should NOT close",
-      personaSelector: () => male,
-      turns: [
-        "Mẫu này còn hàng, cấu hình i5 RAM 16GB SSD 512GB anh."
-      ],
-      pass: (finalResponse) =>
-        !Boolean(finalResponse.completion_ready) &&
-        !Boolean(finalResponse.completion_forced_reply),
-      failReason: () => "closed_too_early",
-      partial: undefined
-    },
-    {
-      name: "F7 - Long messy real-world flow",
-      personaSelector: () => male,
-      turns: [
-        "Mẫu A còn hàng anh.",
-        "Giá 29 triệu anh.",
-        "Xuất VAT đầy đủ.",
-        "Công nợ chưa hỗ trợ, chuyển khoản hoặc tiền mặt.",
-        "Nếu đổi mẫu B thì giá 31 triệu.",
-        "Mẫu B còn 2 máy.",
-        "Mẫu B giao hai địa điểm được, phát sinh phí nhẹ.",
-        "Mẫu A vẫn còn 5 máy.",
-        "Mẫu A giao mai được.",
-        "Bảo hành 12 tháng.",
-        "Có thể giữ hàng 24h."
-      ],
-      pass: (finalResponse, history) =>
-        !Boolean(finalResponse.identity_drift_detected) &&
-        !Boolean(finalResponse.role_inversion_detected) &&
-        !Boolean(finalResponse.repeated_freeform_loop) &&
-        history.length > 0,
-      failReason: () => "critical_drift_or_loop",
-      partial: undefined
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error("playground_exited_before_ready");
     }
-  ];
-}
-
-function printTable(rows: ScenarioRow[]): void {
-  console.log("+----+-------------------------------+---------+");
-  console.log("| ID | Scenario                      | Result  |");
-  console.log("+----+-------------------------------+---------+");
-  rows.forEach((row, idx) => {
-    console.log(
-      `| ${String(idx + 1).padEnd(2)} | ${row.scenario_name.slice(0, 29).padEnd(29)} | ${row.result.padEnd(7)} |`
-    );
-  });
-  console.log("+----+-------------------------------+---------+");
-}
-
-async function runScenario(def: ScenarioDef, personas: Array<{ persona_id: string; display_name: string }>): Promise<ScenarioRow> {
-  const personaId = def.personaSelector(personas);
-  const start = await customerStart(personaId);
-  let sessionId = start.sessionId;
-  const history: LiveResponse[] = [start];
-  let last = start;
-
-  for (const turn of def.turns) {
-    last = await chat(sessionId, personaId, turn);
-    sessionId = last.sessionId;
-    history.push(last);
+    try {
+      const r = await fetchJson<{ ok?: boolean }>(baseUrl, "/api/version");
+      if (r.status < 400) return;
+    } catch {}
+    await sleep(1000);
   }
+  throw new Error("server_not_ready");
+}
 
-  const ok = def.pass(last, history);
-  const result = ok ? "PASS" : (def.partial ? "PARTIAL" : "FAIL");
-  const partial = def.partial ? def.partial(last, history) : false;
-  return row(def.name, last, result, ok ? "" : def.failReason(last, history), partial && !ok);
+function pickPersona(
+  personas: Array<{ persona_id: string; display_name: string }>,
+  mode: "male" | "female"
+): { persona_id: string; display_name: string } {
+  if (mode === "female") {
+    return (
+      personas.find((p) => /chi lan/.test(normalizeText(p.display_name))) ||
+      personas.find((p) => /^chi\b/.test(normalizeText(p.display_name))) ||
+      personas[0]
+    );
+  }
+  return personas.find((p) => /^anh\b/.test(normalizeText(p.display_name))) || personas[0];
+}
+
+async function startManagedServer(preferredPort: number | null): Promise<{ port: number; child: ChildProcessWithoutNullStreams }> {
+  const ports = preferredPort ? [preferredPort] : DEFAULT_PORTS;
+  for (const port of ports) {
+    await killStalePlaygroundOnPort(port);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const child = startServer(port);
+    child.stdout.on("data", (chunk) => process.stdout.write(`[playground:${port}] ${chunk.toString()}`));
+    child.stderr.on("data", (chunk) => process.stderr.write(`[playground:${port}] ${chunk.toString()}`));
+    try {
+      await waitServer(baseUrl, child);
+      return { port, child };
+    } catch (error) {
+      if (!child.killed) child.kill("SIGTERM");
+      if (preferredPort) throw error;
+      console.log(`Port ${port} not ready, trying next port`);
+    }
+  }
+  throw new Error("no_available_playground_port");
+}
+
+async function runCase(
+  baseUrl: string,
+  caseId: CaseId,
+  name: string,
+  personaId: string,
+  turns: string[],
+  evaluator: (last: ApiResp) => { result: CaseResult["result"]; notes: string }
+): Promise<CaseResult> {
+  const t0 = Date.now();
+  console.log(`[CASE_START] ${caseId} ${name}`);
+
+  const run = async (): Promise<CaseResult> => {
+    const statusTrail: string[] = [];
+    const start = await fetchJson<ApiResp>(baseUrl, "/api/customer-start", {
+      method: "POST",
+      body: JSON.stringify({ personaId })
+    });
+    statusTrail.push(`start=${start.status}`);
+    console.log(`[HTTP] ${caseId} /api/customer-start ${start.status}`);
+    if (start.status >= 400) {
+      throw new Error(`HTTP ${start.status} /api/customer-start ${start.rawText.slice(0, 220)}`);
+    }
+
+    let sid = start.data.sessionId;
+    let last = start.data;
+    for (const message of turns) {
+      const r = await fetchJson<ApiResp>(baseUrl, "/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ sessionId: sid, personaId, message })
+      });
+      statusTrail.push(`chat=${r.status}`);
+      console.log(`[HTTP] ${caseId} /api/chat ${r.status}`);
+      if (r.status >= 400) {
+        throw new Error(`HTTP ${r.status} /api/chat ${r.rawText.slice(0, 220)}`);
+      }
+      sid = r.data.sessionId;
+      last = r.data;
+    }
+
+    const evaled = evaluator(last);
+    return {
+      case_id: caseId,
+      name,
+      result: evaled.result,
+      duration_ms: Date.now() - t0,
+      final_reply: (last.final_reply || last.reply || "").slice(0, 220),
+      metadata: `http=${statusTrail.join(",")}|src=${last.reply_source || "-"}|next=${last.next_unresolved_topic || "-"}|ready=${String(last.completion_ready)}|forced=${String(last.completion_forced_reply)}|reopen=${String(last.reopened_topic_detected)}`,
+      notes: `${evaled.notes}; reopened=${(last.reopened_answered_topics || []).join(",") || "-"}; id=${JSON.stringify(last.identity_profile || {})}`
+    };
+  };
+
+  try {
+    const out = await withTimeout(run(), CASE_TIMEOUT, `case_${caseId}`);
+    console.log(`[CASE_END] ${caseId} ${out.result} ${out.duration_ms}ms`);
+    return out;
+  } catch (error) {
+    const note = error instanceof Error ? error.message : String(error);
+    console.log(`[CASE_END] ${caseId} TIMEOUT/ERROR ${Date.now() - t0}ms ${note}`);
+    return {
+      case_id: caseId,
+      name,
+      result: note.includes("TIMEOUT") ? "TIMEOUT" : "FAIL",
+      duration_ms: Date.now() - t0,
+      final_reply: "-",
+      metadata: "-",
+      notes: note
+    };
+  }
+}
+
+function buildCaseSpec(
+  caseId: CaseId,
+  personas: Array<{ persona_id: string; display_name: string }>
+): CaseSpec {
+  const male = pickPersona(personas, "male");
+  const female = pickPersona(personas, "female");
+
+  switch (caseId) {
+    case "L1":
+      return {
+        name: "normal buying flow",
+        personaId: male.persona_id,
+        turns: [
+          "Dạ bên em có mẫu laptop i5 RAM 16GB cho văn phòng anh.",
+          "Dạ giá 25 triệu anh.",
+          "Dạ còn sẵn 12 máy anh.",
+          "Dạ giao nội thành hôm nay được, bảo hành 12 tháng anh.",
+          "Dạ có xuất hóa đơn công ty và thanh toán chuyển khoản được anh."
+        ],
+        evaluator: (last) => {
+          const txt = (last.final_reply || last.reply || "").toLowerCase();
+          const bad = /(gia sao|con hang khong|giao khi nao|bao hanh sao|hoa don sao)/i.test(txt);
+          if (bad) return { result: "FAIL", notes: "reopen_obvious_topic" };
+          if (last.completion_ready || last.completion_forced_reply) return { result: "PASS", notes: "completion_or_forced_ok" };
+          return { result: "PARTIAL", notes: "not_closed_yet" };
+        }
+      };
+    case "L2":
+      return {
+        name: "proactive sale info",
+        personaId: male.persona_id,
+        turns: [
+          "Dạ mẫu này i5 RAM 16GB, giá 25 triệu, còn 12 máy, giao hôm nay được, bảo hành 12 tháng, có xuất hóa đơn công ty và thanh toán chuyển khoản được anh."
+        ],
+        evaluator: (last) => {
+          const txt = (last.final_reply || last.reply || "").toLowerCase();
+          if (/(gia sao em|con hang khong em|giao khi nao em)/i.test(txt)) return { result: "FAIL", notes: "reopen_not_blocked" };
+          if (last.reopened_topic_detected || last.completion_forced_reply || last.completion_ready) return { result: "PASS", notes: "guard_or_completion_active" };
+          return { result: "PARTIAL", notes: "no_reopen_but_no_clear_guard" };
+        }
+      };
+    case "L3":
+      return {
+        name: "female persona identity",
+        personaId: female.persona_id,
+        turns: ["Dạ bên em còn hàng chị.", "Dạ giá 25 triệu chị."],
+        evaluator: (last) => {
+          const txt = (last.final_reply || last.reply || "").toLowerCase();
+          const self = last.identity_profile?.customer_self_pronoun || "";
+          const target = last.identity_profile?.customer_target_pronoun || "";
+          if (self === "chị" && target === "em" && !/anh cần|anh muốn|anh sẽ/.test(txt)) {
+            return { result: "PASS", notes: "identity_lock_ok" };
+          }
+          return { result: "FAIL", notes: `identity_drift self=${self} target=${target}` };
+        }
+      };
+    case "L4":
+      return {
+        name: "missing price should not close",
+        personaId: male.persona_id,
+        turns: ["Dạ bên em có mẫu i5 RAM 16GB, còn hàng và giao hôm nay được anh."],
+        evaluator: (last) => {
+          const missing = last.missing_topics || [];
+          if (last.completion_ready) return { result: "FAIL", notes: "closed_too_early" };
+          if (missing.includes("price")) return { result: "PASS", notes: "missing_price_kept_open" };
+          return { result: "PARTIAL", notes: "not_closed_but_missing_not_reported" };
+        }
+      };
+  }
 }
 
 async function main(): Promise<void> {
-  const server = await startServer();
+  const options = parseArgs(process.argv.slice(2));
+  if (options.help || !options.caseId) {
+    printUsage();
+    process.exitCode = options.help ? 0 : 1;
+    return;
+  }
+
+  const baseRaw = process.env.OPENAI_BASE_URL || "";
+  const model = process.env.OPENAI_MODEL || "";
+  console.log(`OPENAI_BASE_URL detected: ${baseRaw ? "yes" : "no"}`);
+  if (baseRaw) console.log(`OPENAI_BASE_URL masked: ${maskHost(baseRaw)}`);
+  console.log(`OPENAI_MODEL detected: ${model ? "yes" : "no"}`);
+
+  let server: ChildProcessWithoutNullStreams | null = null;
+  let port = options.port;
+
   try {
-    await waitForServer();
-    const personaPayload = await apiJson<{ personas: Array<{ persona_id: string; display_name: string }> }>("/api/personas");
-    const scenarios = makeScenarios(personaPayload.personas);
-    const rows: ScenarioRow[] = [];
-    for (const scenario of scenarios) {
-      rows.push(await runScenario(scenario, personaPayload.personas));
+    if (options.attach) {
+      port = port ?? 3009;
+      console.log(`Attach mode enabled on port: ${port}`);
+    } else {
+      const managed = await startManagedServer(port);
+      port = managed.port;
+      server = managed.child;
+      console.log(`Using playground port: ${port}`);
     }
-    printTable(rows);
-    for (const rowData of rows) {
-      console.log(`\n[${rowData.result}] ${rowData.scenario_name}`);
-      console.log(`failure_reason: ${rowData.failure_reason || "-"}`);
-      console.log(`final_reply: ${rowData.final_reply}`);
-      console.log(`reply_source: ${rowData.reply_source}`);
-      console.log(`next_unresolved_topic: ${rowData.next_unresolved_topic ?? "-"}`);
-      console.log(`completion_ready: ${String(rowData.completion_ready)}`);
-      console.log(`completion_reason: ${rowData.completion_reason ?? "-"}`);
-      console.log(`missing_topics: ${rowData.missing_topics || "-"}`);
-      console.log(`resolved_topics: ${rowData.resolved_topics || "-"}`);
-      console.log(`identity_profile: ${rowData.identity_profile}`);
-      console.log(`identity_source: ${rowData.identity_source || "-"}`);
-      console.log(`persona_salutation_style: ${rowData.persona_salutation_style || "-"}`);
-      console.log(`identity_drift_detected: ${String(rowData.identity_drift_detected)}`);
-      console.log(`role_inversion_detected: ${String(rowData.role_inversion_detected)}`);
-      console.log(`repeated_freeform_loop: ${String(rowData.repeated_freeform_loop)}`);
-      console.log(`repeated_blocked_topics: ${rowData.repeated_blocked_topics || "-"}`);
-      console.log(`reopened_topic_detected: ${String(rowData.reopened_topic_detected)}`);
-      console.log(`reopened_answered_topics: ${rowData.reopened_answered_topics || "-"}`);
-      console.log(`final_reopen_guard_triggered: ${String(rowData.final_reopen_guard_triggered)}`);
-      console.log(`guard_triggered: ${String(rowData.guard_triggered)}`);
-      console.log(`guard_trigger_reasons: ${rowData.guard_trigger_reasons || "-"}`);
-      console.log(`fallback_variant_id: ${rowData.fallback_variant_id || "-"}`);
-      console.log(`fallback_topic_used: ${rowData.fallback_topic_used || "-"}`);
-      console.log(`completion_forced_reply: ${String(rowData.completion_forced_reply)}`);
-      console.log(`completion_override_reason: ${rowData.completion_override_reason || "-"}`);
+
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const personasResp = await fetchJson<{ personas: Array<{ persona_id: string; display_name: string }> }>(
+      baseUrl,
+      "/api/personas"
+    );
+    if (personasResp.status >= 400) {
+      throw new Error(`HTTP ${personasResp.status} /api/personas ${personasResp.rawText.slice(0, 220)}`);
     }
+
+    const personas = personasResp.data.personas || [];
+    if (personas.length === 0) throw new Error("no_persona_found");
+
+    const spec = buildCaseSpec(options.caseId, personas);
+    const result = await runCase(baseUrl, options.caseId, spec.name, spec.personaId, spec.turns, spec.evaluator);
+
+    console.log("");
+    console.log("+------+-----------------------------+---------+----------+");
+    console.log("| Case | Name                        | Result  | Duration |");
+    console.log("+------+-----------------------------+---------+----------+");
+    console.log(`| ${result.case_id.padEnd(4)} | ${result.name.slice(0, 27).padEnd(27)} | ${result.result.padEnd(7)} | ${String(result.duration_ms).padEnd(8)} |`);
+    console.log("+------+-----------------------------+---------+----------+");
+    console.log(`[${result.case_id}] final_reply=${result.final_reply}`);
+    console.log(`[${result.case_id}] metadata=${result.metadata}`);
+    console.log(`[${result.case_id}] notes=${result.notes}`);
+
+    process.exitCode = result.result === "PASS" ? 0 : 1;
   } finally {
-    if (!server.killed) {
-      server.kill("SIGTERM");
-    }
+    if (server && !server.killed) server.kill("SIGTERM");
   }
 }
 
-main().catch((error) => {
-  console.error(error);
+withTimeout(main(), GLOBAL_TIMEOUT, "global_live_runner").catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 });

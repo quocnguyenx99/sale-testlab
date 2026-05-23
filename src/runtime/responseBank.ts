@@ -7,6 +7,12 @@ export interface ResponseBankInput {
   identity: ConversationIdentityProfile;
   recentFallbackVariantIds: string[];
   recentReplies: string[];
+  persona?: {
+    buyer_role?: string;
+    purchase_context?: string;
+    behavior_rules?: string[];
+    difficulty?: string;
+  };
 }
 
 export interface ResponseBankResult {
@@ -144,9 +150,163 @@ function chooseBestVariant(
   return best;
 }
 
+export type VoiceGroup =
+  | "price_sensitive"
+  | "corporate_buyer"
+  | "reseller"
+  | "internal_it"
+  | "hesitant_buyer"
+  | "urgent_buyer"
+  | "standard";
+
+export function inferVoiceGroup(persona?: {
+  buyer_role?: string;
+  purchase_context?: string;
+  behavior_rules?: string[];
+  difficulty?: string;
+}): VoiceGroup {
+  if (!persona) return "standard";
+  const role = (persona.buyer_role || "").toLowerCase();
+  const context = (persona.purchase_context || "").toLowerCase();
+  const rules = (persona.behavior_rules || []).map((r) => r.toLowerCase()).join(" ");
+
+  if (
+    role.includes("thu mua") ||
+    role.includes("purchasing") ||
+    context.includes("cong ty") ||
+    context.includes("vat") ||
+    context.includes("hoa don") ||
+    rules.includes("trinh duyet") ||
+    rules.includes("hoa don")
+  ) {
+    return "corporate_buyer";
+  }
+  if (
+    role.includes("dai ly") ||
+    role.includes("reseller") ||
+    role.includes("si") ||
+    context.includes("ban lai") ||
+    context.includes("dai ly")
+  ) {
+    return "reseller";
+  }
+  if (
+    role.includes("it") ||
+    role.includes("ky thuat") ||
+    role.includes("admin") ||
+    role.includes("he thong")
+  ) {
+    return "internal_it";
+  }
+  if (
+    context.includes("gap") ||
+    context.includes("som") ||
+    context.includes("ngay trong ngay") ||
+    rules.includes("gap")
+  ) {
+    return "urgent_buyer";
+  }
+  if (
+    rules.includes("gia re") ||
+    rules.includes("mac ca") ||
+    rules.includes("chiet khau") ||
+    rules.includes("ngan sach han hep") ||
+    context.includes("tiet kiem")
+  ) {
+    return "price_sensitive";
+  }
+  if (
+    rules.includes("phan van") ||
+    rules.includes("tham khao") ||
+    rules.includes("can nhac") ||
+    rules.includes("luong lu")
+  ) {
+    return "hesitant_buyer";
+  }
+  return "standard";
+}
+
 export function buildResponseBankReply(input: ResponseBankInput): ResponseBankResult {
   const topic = input.nextTopic || input.topic;
   const fallbackTopic = topic ?? "next_step";
+  
+  const voiceGroup = inferVoiceGroup(input.persona);
+
+  // Apply voice group specific overrides
+  if (voiceGroup === "corporate_buyer") {
+    if (fallbackTopic === "payment" || fallbackTopic === "invoice_or_document" || fallbackTopic === "next_step") {
+      const s = input.identity.customer_self_pronoun;
+      const sCap = s.charAt(0).toUpperCase() + s.slice(1);
+      const t = input.identity.customer_target_pronoun;
+      return {
+        reply: `${sCap} cần ${t} gửi giúp ${s} báo giá công ty kèm thông tin tài khoản và thủ tục xuất hóa đơn VAT để trình duyệt nhé.`,
+        variant_id: `voice_corporate_fallback`,
+        topic_used: fallbackTopic,
+        exhausted_variants: false
+      };
+    }
+  } else if (voiceGroup === "price_sensitive") {
+    if (fallbackTopic === "price") {
+      const s = input.identity.customer_self_pronoun;
+      const sCap = s.charAt(0).toUpperCase() + s.slice(1);
+      const t = input.identity.customer_target_pronoun;
+      return {
+        reply: `Giá này bên ${t} còn mức chiết khấu nào tốt hơn nữa không? Nếu ổn thì gửi ${s} báo giá để xem chốt luôn nhé.`,
+        variant_id: `voice_price_sensitive_fallback`,
+        topic_used: fallbackTopic,
+        exhausted_variants: false
+      };
+    }
+  } else if (voiceGroup === "urgent_buyer") {
+    if (fallbackTopic === "payment" || fallbackTopic === "next_step" || fallbackTopic === "stock") {
+      const s = input.identity.customer_self_pronoun;
+      const sCap = s.charAt(0).toUpperCase() + s.slice(1);
+      const t = input.identity.customer_target_pronoun;
+      return {
+        reply: `Nếu mẫu này còn sẵn hàng thì ${t} giữ trước giúp ${s} nhé, gửi ${s} thông tin thanh toán để ${s} chuyển khoản xử lý sớm nha.`,
+        variant_id: `voice_urgent_fallback`,
+        topic_used: fallbackTopic,
+        exhausted_variants: false
+      };
+    }
+  } else if (voiceGroup === "reseller") {
+    if (fallbackTopic === "price" || fallbackTopic === "next_step") {
+      const s = input.identity.customer_self_pronoun;
+      const sCap = s.charAt(0).toUpperCase() + s.slice(1);
+      const t = input.identity.customer_target_pronoun;
+      return {
+        reply: `Bên đại lý của ${s} lấy số lượng thì có chính sách giá sỉ đặc biệt không ${t}? Gửi ${s} báo giá chi tiết nhé.`,
+        variant_id: `voice_reseller_fallback`,
+        topic_used: fallbackTopic,
+        exhausted_variants: false
+      };
+    }
+  } else if (voiceGroup === "internal_it") {
+    if (fallbackTopic === "configuration" || fallbackTopic === "product_model") {
+      const s = input.identity.customer_self_pronoun;
+      const sCap = s.charAt(0).toUpperCase() + s.slice(1);
+      const t = input.identity.customer_target_pronoun;
+      return {
+        reply: `${sCap} bên kỹ thuật nội bộ cần kiểm tra kỹ cấu hình chi tiết và tính tương thích, ${t} gửi thông số chuẩn giúp ${s} nhé.`,
+        variant_id: `voice_it_fallback`,
+        topic_used: fallbackTopic,
+        exhausted_variants: false
+      };
+    }
+  } else if (voiceGroup === "hesitant_buyer") {
+    if (fallbackTopic === "price" || fallbackTopic === "next_step") {
+      const s = input.identity.customer_self_pronoun;
+      const sCap = s.charAt(0).toUpperCase() + s.slice(1);
+      const t = input.identity.customer_target_pronoun;
+      return {
+        reply: `${sCap} đang cân nhắc và so sánh thêm giữa vài phương án, ${t} cứ gửi trước thông tin để ${s} xem kỹ nhé.`,
+        variant_id: `voice_hesitant_fallback`,
+        topic_used: fallbackTopic,
+        exhausted_variants: false
+      };
+    }
+  }
+
   const variants = BANK[fallbackTopic];
   const chosen = chooseBestVariant(variants, input.recentFallbackVariantIds, input.recentReplies);
   const reply = render(chosen.text, input.identity).replace(/^Dạ\s+/i, "");

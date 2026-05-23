@@ -8,4 +8,5 @@ coverage/
 *.log
 playground-live.log
 qa_output.txt
+sale-testlab-data/
 .DS_Store

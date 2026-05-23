@@ -114,20 +114,50 @@ export function buildIdentityProfileFromSaleOpening(saleMessage: string): Conver
   let customerSelf: ConversationIdentityProfile["customer_self_pronoun"] = "mình";
   let customerTarget: ConversationIdentityProfile["customer_target_pronoun"] = "em";
 
-  if (/\b(anh|anh\s+oi|chao\s+anh|gui\s+anh)\b/.test(t)) {
-    customerSelf = "anh";
-    customerTarget = "em";
-  } else if (/\b(chi|chi\s+oi|chao\s+chi|gui\s+chi)\b/.test(t)) {
+  // 1. Direct patterns for greeting and sending files
+  if (/\b(em\s+chao\s+chi|em\s+gui\s+chi|gui\s+chi|da\s+chi)\b/.test(t)) {
     customerSelf = "chị";
     customerTarget = "em";
-  } else if (/\b(em|em\s+oi|chao\s+em|gui\s+em)\b/.test(t)) {
+  } else if (/\b(em\s+chao\s+anh|em\s+gui\s+anh|gui\s+anh|da\s+anh)\b/.test(t)) {
+    customerSelf = "anh";
+    customerTarget = "em";
+  } else if (/\b(anh\s+chao\s+em|anh\s+gui\s+em|gui\s+em)\b/.test(t)) {
     customerSelf = "em";
-    if (/\b(anh|anh\s+chao|anh\s+gui)\b/.test(t)) {
-      customerTarget = "anh";
-    } else if (/\b(chi|chi\s+chao|chi\s+gui)\b/.test(t)) {
-      customerTarget = "chị";
-    } else {
-      customerTarget = "bạn";
+    customerTarget = "anh";
+  } else if (/\b(chi\s+chao\s+em|chi\s+gui\s+em|gui\s+em)\b/.test(t)) {
+    customerSelf = "em";
+    customerTarget = "chị";
+  } else {
+    // 2. General fallbacks
+    // Check if Sale addresses customer as "chị"
+    const hasChi = /\b(chi|chj|chi\s+oi|chao\s+chi|gui\s+chi|cho\s+chi|gui\s+cho\s+chi|da\s+chi)\b/.test(t);
+    // Check if Sale addresses customer as "anh"
+    const hasAnh = /\b(anh|anh\s+oi|chao\s+anh|gui\s+anh|cho\s+anh|gui\s+cho\s+anh|da\s+anh)\b/.test(t);
+    // Check if Sale addresses customer as "em"
+    const hasEm = /\b(em|em\s+oi|chao\s+em|gui\s+em|cho\s+em|da\s+em)\b/.test(t);
+
+    // Check if Sale refers to self as "em"
+    const saleSelfIsEm = /\b(em|ben\s+em|em\s+gui|em\s+chao)\b/.test(t);
+    // Check if Sale refers to self as "anh"
+    const saleSelfIsAnh = /\b(anh|ben\s+anh|anh\s+gui|anh\s+chao)\b/.test(t);
+    // Check if Sale refers to self as "chị"
+    const saleSelfIsChi = /\b(chi|ben\s+chi|chi\s+gui|chi\s+chao)\b/.test(t);
+
+    if (hasChi) {
+      customerSelf = "chị";
+      customerTarget = "em";
+    } else if (hasAnh) {
+      customerSelf = "anh";
+      customerTarget = "em";
+    } else if (hasEm) {
+      customerSelf = "em";
+      if (saleSelfIsAnh) {
+        customerTarget = "anh";
+      } else if (saleSelfIsChi) {
+        customerTarget = "chị";
+      } else {
+        customerTarget = "bạn";
+      }
     }
   }
 
@@ -146,6 +176,15 @@ export function buildIdentityProfileFromPersona(
   openingText?: string,
   isSaleOpening = false
 ): ConversationIdentityProfile {
+  // If in sale-start mode and there is clear pronoun evidence, it overrides display_name.
+  if (isSaleOpening && openingText) {
+    const saleProfile = buildIdentityProfileFromSaleOpening(openingText);
+    const self = saleProfile.customer_self_pronoun;
+    if (self === "anh" || self === "chị" || self === "em") {
+      return saleProfile;
+    }
+  }
+
   const fromStyle = parseSalutationStyle(persona.salutation_style);
 
   if (fromStyle.customer_self_pronoun && fromStyle.customer_target_pronoun) {
@@ -241,4 +280,83 @@ export function detectIdentityDrift(
     role_inversion_detected: roleInversion,
     forbidden_phrase_matches: Array.from(new Set([...forbidden, ...disallowedRolePronouns]))
   };
+}
+
+export interface CustomerVoiceGuardResult {
+  customer_voice_drift_detected: boolean;
+  customer_voice_guard_reason: string | null;
+}
+
+export function runCustomerVoiceGuard(
+  reply: string,
+  identity: ConversationIdentityProfile
+): CustomerVoiceGuardResult {
+  const t = reply.normalize("NFC").trim();
+  const tNorm = normalize(t);
+
+  // 1. Chặn các cụm từ đặc trưng của hỗ trợ/sale
+  const forbiddenPhrases = [
+    "toi co the ho tro",
+    "ben em ho tro",
+    "em tu van cho anh",
+    "em tu van cho chi",
+    "mình hỗ trợ",
+    "minh ho tro"
+  ];
+
+  for (const phrase of forbiddenPhrases) {
+    if (tNorm.includes(phrase)) {
+      return {
+        customer_voice_drift_detected: true,
+        customer_voice_guard_reason: `support_phrase:${phrase}`
+      };
+    }
+  }
+
+  // 2. Chặn từ "ạ" từ phía khách xưng anh/chị khi nghe không tự nhiên (role reversal)
+  const self = identity.customer_self_pronoun;
+  const target = identity.customer_target_pronoun;
+
+  if ((self === "anh" || self === "chị") && target === "em") {
+    // Chỉ chặn từ "ạ" hoặc "a" (có dấu hỏi hoặc chấm hoặc ở cuối câu) mang giọng điệu hỏi tư vấn bán hàng
+    // Ví dụ: "chị đang tìm máy tính xách tay ạ", "anh muốn xem mẫu này ạ"
+    const suffixRegex = /(?:anh|chị|chi)\s+[^]*?\s+ạ\s*[?.!]*$/i;
+    if (suffixRegex.test(t)) {
+      return {
+        customer_voice_drift_detected: true,
+        customer_voice_guard_reason: "awkward_ạ_ending"
+      };
+    }
+  }
+
+  return {
+    customer_voice_drift_detected: false,
+    customer_voice_guard_reason: null
+  };
+}
+
+export function rewriteVoiceDrift(reply: string, identity: ConversationIdentityProfile): string {
+  const self = identity.customer_self_pronoun;
+  const selfCap = self.charAt(0).toUpperCase() + self.slice(1);
+  const target = identity.customer_target_pronoun;
+
+  // Xử lý viết lại mẫu câu lỗi: "(chị/anh) đang tìm ... ạ" -> "(Chị/Anh) đang tìm ... cho công việc, em tư vấn giúp chị vài mẫu phù hợp nhé."
+  const match = reply.match(/^(chị|anh)\s+đang\s+tìm\s+([^]*?)\s+ạ\s*[?.!]*$/i);
+  if (match) {
+    const product = match[2].trim();
+    return `${selfCap} đang tìm ${product} cho công việc, ${target} tư vấn giúp ${self} vài mẫu phù hợp nhé.`;
+  }
+
+  // Viết lại mẫu câu lỗi: "(chị/anh) muốn xem mẫu này ạ" -> "(Chị/Anh) muốn xem mẫu này, em gửi giúp cấu hình chi tiết nhé."
+  const matchWant = reply.match(/^(chị|anh)\s+muốn\s+xem\s+([^]*?)\s+ạ\s*[?.!]*$/i);
+  if (matchWant) {
+    const model = matchWant[2].trim();
+    return `${selfCap} muốn xem mẫu ${model}, ${target} gửi giúp ${self} cấu hình chi tiết nhé.`;
+  }
+
+  // Loại bỏ từ "ạ" hoặc "ạ?" ở cuối một cách an toàn và thay bằng "nhé", "nha", hoặc câu tự nhiên của khách
+  let cleaned = reply.replace(/\s+ạ\s*([?.!]*)$/i, " nhé$1");
+  if (cleaned !== reply) return cleaned;
+
+  return reply;
 }
