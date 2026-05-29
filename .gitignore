@@ -10,3 +10,6 @@ playground-live.log
 qa_output.txt
 sale-testlab-data/
 .DS_Store
+logs/
+*.jsonl
+src/runtime/productKnowledge/product_knowledge.compact.json
