@@ -45,13 +45,13 @@ function run(): void {
 
   progress = createEmptyConversationProgress();
   progress = updateProgressFromCustomerMessage(progress, "Em ơi, bên mình còn laptop văn phòng i5 RAM 16GB không?");
-  progress = updateProgressFromSaleMessage(progress, "còn anh");
+  progress = updateProgressFromSaleMessage(progress, "còn hàng anh");
   assert.equal(progress.stock.answered, true);
 
   progress = createEmptyConversationProgress();
   progress = updateProgressFromSaleMessage(
     progress,
-    "Dạ mẫu này giá 25 triệu, còn 12 máy, giao hôm nay được, bảo hành 12 tháng anh."
+    "Dạ mẫu này giá 25 triệu, còn hàng, còn 12 máy, giao hôm nay được, bảo hành 12 tháng anh."
   );
   assert.equal(progress.price.answered, true);
   assert.equal(progress.stock.answered, true);

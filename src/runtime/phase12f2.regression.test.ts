@@ -41,7 +41,7 @@ function run(): void {
   progress = mkProgress();
   progress = updateProgressFromSaleMessage(
     progress,
-    "Da mau nay i5 RAM 16GB, gia 25 trieu, con 12 may, giao hom nay duoc, bao hanh 12 thang, co xuat hoa don cong ty va thanh toan chuyen khoan duoc anh."
+    "Da mau nay i5 RAM 16GB, gia 25 trieu, con hang, con 12 may, giao hom nay duoc, bao hanh 12 thang, co xuat hoa don cong ty va thanh toan chuyen khoan duoc anh."
   );
   assert.equal(progress.configuration.answered, true);
   assert.equal(progress.price.answered, true);

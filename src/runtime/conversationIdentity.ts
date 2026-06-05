@@ -37,8 +37,110 @@ function normalize(input: string): string {
     .trim();
 }
 
+function sanitizeVietnamesePronounText(t: string): string {
+  return t
+    // "chi" compound words / usages
+    .replace(/\bchi\s+tiet\b/g, "chi_tiet")
+    .replace(/\bchi\s+phi\b/g, "chi_phi")
+    .replace(/\bchi\s+nhanh\b/g, "chi_nhanh")
+    .replace(/\bchi\s+tieu\b/g, "chi_tieu")
+    .replace(/\bdia\s+chi\b/g, "dia_chi")
+    .replace(/\btham\s+chi\b/g, "tham_chi")
+    .replace(/\bdu\s+chi\b/g, "du_chi")
+    .replace(/\bthu\s+chi\b/g, "thu_chi")
+    .replace(/\bchi\s+co\b/g, "chi_co")
+    .replace(/\bchi\s+con\b/g, "chi_con")
+    .replace(/\bchi\s+can\b/g, "chi_can")
+    .replace(/\bchi\s+muon\b/g, "chi_muon")
+    .replace(/\bchi\s+lay\b/g, "chi_lay")
+    .replace(/\bchi\s+giao\b/g, "chi_giao")
+    .replace(/\bchi\s+duoc\b/g, "chi_duoc")
+    .replace(/\bchi\s+khoang\b/g, "chi_khoang")
+    .replace(/\bchi\s+tam\b/g, "chi_tam")
+    .replace(/\bchi\s+tu\b/g, "chi_tu")
+    .replace(/\bchi\s+dung\b/g, "chi_dung")
+    .replace(/\bchi\s+thoi\b/g, "chi_thoi")
+    .replace(/\bchi\s+de\b/g, "chi_de")
+    .replace(/\bchi\s+la\b/g, "chi_la")
+    .replace(/\bchi\s+thinh\b/g, "chi_thinh")
+    .replace(/\bchi\s+(ban|mua|gui|check|hoi|xem|nhan|tra|lam|biet|dung|gia|phai)\b/g, "chi_$1")
+    // "anh" compound words / names
+    .replace(/\btieng\s+anh\b/g, "tieng_anh")
+    .replace(/\bhinh\s+anh\b/g, "hinh_anh")
+    .replace(/\bphan\s+anh\b/g, "phan_anh")
+    .replace(/\bchup\s+anh\b/g, "chup_anh")
+    .replace(/\bbuc\s+anh\b/g, "buc_anh")
+    .replace(/\balbum\s+anh\b/g, "album_anh")
+    .replace(/\bfile\s+anh\b/g, "file_anh")
+    .replace(/\banh\s+sang\b/g, "anh_sang")
+    .replace(/\banh\s+duong\b/g, "anh_duong")
+    .replace(/\banh\s+kim\b/g, "anh_kim")
+    .replace(/\banh\s+sao\b/g, "anh_sao")
+    .replace(/\banh\s+hoa\b/g, "anh_hoa")
+    .replace(/\b(lan|quynh|tuan|viet|tram|duc|ngoc|duy|hoang|the|quoc|trung|minh|kieu|phuong|mai|ha|tu|van)\s+anh\b/g, "$1_anh")
+    // "em" compound words
+    .replace(/\btre\s+em\b/g, "tre_em")
+    // "minh" compound words / names
+    .replace(/\bthong\s+minh\b/g, "thong_minh")
+    .replace(/\bchung\s+minh\b/g, "chung_minh")
+    .replace(/\bbinh\s+minh\b/g, "binh_minh")
+    .replace(/\bcong\s+minh\b/g, "cong_minh")
+    .replace(/\bminh\s+chung\b/g, "minh_chung")
+    .replace(/\bminh\s+hoa\b/g, "minh_hoa")
+    .replace(/\bminh\s+bach\b/g, "minh_bach")
+    .replace(/\bthuyet\s+minh\b/g, "thuyet_minh")
+    .replace(/\b(hoang|duc|hai|quang|tuan|khanh|gia|nhat|binh|cong)\s+minh\b/g, "$1_minh")
+    // "ban" compound words
+    .replace(/\bban\s+bac\b/g, "ban_bac")
+    .replace(/\bban\s+luan\b/g, "ban_luan")
+    .replace(/\bban\s+ve\b/g, "ban_ve")
+    .replace(/\bvan\s+ban\b/g, "van_ban")
+    .replace(/\bban\s+giao\b/g, "ban_giao")
+    .replace(/\bban\s+ui\b/g, "ban_ui")
+    .replace(/\bban\s+phim\b/g, "ban_phim")
+    .replace(/\bban\s+ghe\b/g, "ban_ghe")
+    .replace(/\bphien\s+ban\b/g, "phien_ban")
+    .replace(/\bco\s+ban\b/g, "co_ban")
+    .replace(/\bban\s+tin\b/g, "ban_tin")
+    .replace(/\bban\s+do\b/g, "ban_do")
+    .replace(/\bban\s+nhap\b/g, "ban_nhap")
+    .replace(/\bban\s+quyen\b/g, "ban_quyen")
+    .replace(/\bban\s+phu\b/g, "ban_phu")
+    .replace(/\bban\s+goc\b/g, "ban_goc")
+    .replace(/\bchua\s+ban\b/g, "chua_ban")
+    .replace(/\bgia\s+ban\b/g, "gia_ban")
+    .replace(/\bnguoi\s+ban\b/g, "nguoi_ban")
+    .replace(/\bbuon\s+ban\b/g, "buon_ban")
+    .replace(/\brao\s+ban\b/g, "rao_ban")
+    .replace(/\bmua\s+ban\b/g, "mua_ban")
+    .replace(/\bban\s+le\b/g, "ban_le")
+    .replace(/\bban\s+si\b/g, "ban_si")
+    .replace(/\bban\s+hang\b/g, "ban_hang")
+    .replace(/\bban\s+chay\b/g, "ban_chay")
+    .replace(/\bban\s+duoc\b/g, "ban_duoc")
+    // "toi" compound words
+    .replace(/\bbong\s+toi\b/g, "bong_toi")
+    .replace(/\btam\s+toi\b/g, "tam_toi")
+    .replace(/\btoi\s+tam\b/g, "toi_tam")
+    .replace(/\btoi\s+gian\b/g, "toi_gian")
+    .replace(/\btoi\s+da\b/g, "toi_da")
+    .replace(/\btoi\s+thieu\b/g, "toi_thieu")
+    .replace(/\btoi\s+uu\b/g, "toi_uu")
+    .replace(/\btoi\s+nay\b/g, "toi_nay")
+    .replace(/\bbuoi\s+toi\b/g, "buoi_toi")
+    .replace(/\bden\s+toi\b/g, "den_toi")
+    .replace(/\btoi\s+mat\b/g, "toi_mat")
+    .replace(/\btoi\s+cao\b/g, "toi_cao")
+    .replace(/\btoi\s+mat\b/g, "toi_mat")
+    .replace(/\btoi\s+pham\b/g, "toi_pham")
+    .replace(/\btoi\s+loi\b/g, "toi_loi")
+    .replace(/\bpham\s+toi\b/g, "pham_toi")
+    .replace(/\bket\s+toi\b/g, "ket_toi")
+    .replace(/\btoi\s+tinh\b/g, "toi_tinh");
+}
+
 function detectSelfPronoun(text: string): ConversationIdentityProfile["customer_self_pronoun"] {
-  const t = normalize(text);
+  const t = sanitizeVietnamesePronounText(normalize(text));
   if (/\banh\s+(dang|can|muon|se|da)\b/.test(t)) return "anh";
   if (/\bchi\s+(dang|can|muon|se|da)\b/.test(t)) return "chị";
   if (/\bem\s+(dang|can|muon|se|da)\b/.test(t)) return "em";
@@ -51,7 +153,7 @@ function detectSelfPronoun(text: string): ConversationIdentityProfile["customer_
 }
 
 function detectTargetPronoun(text: string): ConversationIdentityProfile["customer_target_pronoun"] {
-  const t = normalize(text);
+  const t = sanitizeVietnamesePronounText(normalize(text));
   if (/\bem\b/.test(t)) return "em";
   if (/\banh\b/.test(t)) return "anh";
   if (/\bchi\b/.test(t)) return "chị";
@@ -110,7 +212,7 @@ function inferFromDisplayName(name?: string): {
 }
 
 export function buildIdentityProfileFromSaleOpening(saleMessage: string): ConversationIdentityProfile {
-  const t = normalize(saleMessage);
+  const t = sanitizeVietnamesePronounText(normalize(saleMessage));
   let customerSelf: ConversationIdentityProfile["customer_self_pronoun"] = "mình";
   let customerTarget: ConversationIdentityProfile["customer_target_pronoun"] = "em";
 
@@ -250,7 +352,7 @@ export function detectIdentityDrift(
   reply: string,
   identity: ConversationIdentityProfile
 ): IdentityDriftResult {
-  const t = normalize(reply);
+  const t = sanitizeVietnamesePronounText(normalize(reply));
   const forbidden: string[] = [];
 
   for (const phrase of SUPPORT_PHRASES) {

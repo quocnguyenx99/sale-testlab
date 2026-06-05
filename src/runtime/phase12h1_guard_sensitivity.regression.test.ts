@@ -6,6 +6,7 @@ import {
   getTopicProgress
 } from "./conversationProgressTracker";
 import { detectReopenedAnsweredTopics } from "./conversationCompletion";
+import { detectIdentityDrift } from "./conversationIdentity";
 
 // Mock helper matching the one in server.ts/live_qa_runner.ts
 function isActualStockLeak(reply: string, qtyStr: string): boolean {
@@ -105,7 +106,11 @@ function runTests() {
   let progress8 = createEmptyConversationProgress();
   // Simulate price answered
   progress8.price.answered = true;
-  const reopened8 = detectReopenedAnsweredTopics("vậy giá sỉ là 12 triệu đúng không em?", progress8);
+  const reopened8 = detectReopenedAnsweredTopics(
+    "vậy giá sỉ là 12 triệu đúng không em?",
+    progress8,
+    ["Dạ mẫu này giá sỉ là 12 triệu anh"]
+  );
   assert.equal(reopened8.length, 0, "Confirmation statement must not trigger reopen guard");
 
   // 9. Real reopen still detected
@@ -113,12 +118,39 @@ function runTests() {
   let progress9 = createEmptyConversationProgress();
   // Simulate price answered
   progress9.price.answered = true;
-  const reopened9 = detectReopenedAnsweredTopics("giá bao nhiêu vậy em?", progress9);
+  const reopened9 = detectReopenedAnsweredTopics(
+    "giá bao nhiêu vậy em?",
+    progress9,
+    ["Dạ mẫu này giá sỉ là 12 triệu anh"]
+  );
   assert.ok(reopened9.includes("price"), "Genuine question on resolved topic must trigger reopen guard");
 
   // 10. Existing safety unchanged (covered by other tests but quick check here)
   console.log("Running Test 10: Topic order structure unchanged...");
   assert.equal(getFirstUnresolvedTopic(createEmptyConversationProgress()), "product_model");
+
+  // 15. Vietnamese compound words do not trigger false positive identity drift
+  console.log("Running Test 15: Vietnamese compound words do not trigger false positive identity drift...");
+  const maleIdentity = {
+    customer_self_pronoun: "anh" as const,
+    customer_target_pronoun: "em" as const,
+    sale_expected_self_pronoun: "em" as const,
+    sale_expected_target_pronoun: "anh" as const,
+    tone_style: "business_casual" as const,
+    conversation_role: "customer_to_sales" as const
+  };
+  
+  const compResult1 = detectIdentityDrift("em gửi anh cấu hình chi tiết nhé", maleIdentity);
+  assert.equal(compResult1.identity_drift_detected, false, "'chi tiết' must not trigger identity drift");
+
+  const compResult2 = detectIdentityDrift("Bên em có bán lẻ hay chỉ bán sỉ?", maleIdentity);
+  assert.equal(compResult2.identity_drift_detected, false, "'chỉ bán sỉ' must not trigger identity drift");
+
+  const compResult3 = detectIdentityDrift("Anh đang cần check tiếng Anh của máy này", maleIdentity);
+  assert.equal(compResult3.identity_drift_detected, false, "'tiếng Anh' must not trigger identity drift");
+
+  const compResult4 = detectIdentityDrift("Hình ảnh của máy này có đẹp không em?", maleIdentity);
+  assert.equal(compResult4.identity_drift_detected, false, "'hình ảnh' must not trigger identity drift");
 
   console.log("=== ALL PHASE 12H.1-S GUARD SENSITIVITY SOFTENING REGRESSION TESTS: PASS ===");
 }

@@ -28,7 +28,9 @@ function run(): void {
       "Anh muốn kiểm tra lại mẫu này còn sẵn hàng không em?",
       "Mẫu này hiện còn hàng chứ em? Anh cần xác nhận trước khi đi tiếp.",
       "Anh đang ưu tiên mẫu còn sẵn hàng để khỏi mất thời gian."
-    ]
+    ],
+    product_context_status: "specific",
+    is_price_quoted: true
   });
   assert.ok(stockReply.reply.length > 0, "stock fallback must return text");
   assert.equal(normalize(stockReply.reply).startsWith("da"), false, "fallback must not start with Dạ");
@@ -44,13 +46,17 @@ function run(): void {
       "Anh muốn chốt mức giá rõ hơn cho mẫu này.",
       "Anh cần thêm mức giá cụ thể để so sánh.",
       "Giá này nếu còn linh hoạt thì anh sẽ dễ chốt hơn."
-    ]
+    ],
+    product_context_status: "specific",
+    is_price_quoted: true
   });
   assert.equal(priceReply.topic_used, "stock", "price fallback must transition to stock after price is handled");
   assert.ok(!normalize(priceReply.reply).includes("xac nhan ngan gon"), "price fallback must avoid generic confirmation");
   assert.ok(normalize(priceReply.reply).includes("anh"), "price fallback must keep customer pronoun");
 
   let progress = createEmptyConversationProgress();
+  progress.product_model.answered = true;
+  progress.configuration.answered = true;
   progress = updateProgressFromCustomerMessage(progress, "Em ơi, giá cho mẫu đó bao nhiêu vậy?");
   progress = updateProgressFromSaleMessage(progress, "25 triệu anh");
   const next = getFirstUnresolvedTopic(progress);
@@ -59,7 +65,9 @@ function run(): void {
     nextTopic: next,
     identity,
     recentFallbackVariantIds: [],
-    recentReplies: []
+    recentReplies: [],
+    product_context_status: "specific",
+    is_price_quoted: true
   });
   assert.equal(transitionReply.topic_used, "stock", "after price answered the fallback should transition to stock");
   assert.ok(

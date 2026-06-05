@@ -5,7 +5,8 @@ import {
   ConversationTopic,
   TOPIC_ORDER,
   ensureConversationProgress,
-  getTopicProgress
+  getTopicProgress,
+  isStrongSaleAnswerForTopic
 } from "./conversationProgressTracker";
 
 export type CompletionRecommendedAction =
@@ -216,26 +217,59 @@ function hasObjectionIntent(text: string): boolean {
 function hasConfirmationIntent(text: string): boolean {
   const t = normalize(text);
   const confirmationMarkers = [
-    "dung khong", "phai khong", "ha em", "a em", "vay la", "ok vay", "the la"
+    "dung khong", "phai khong", "ha em", "a em", "vay la", "ok vay", "the la",
+    "dung chua", "dung ko", "phai ko", "co phai", "nghia la", "tuc la", "xac nhan"
   ];
-  return confirmationMarkers.some(marker => t.includes(marker));
+  if (confirmationMarkers.some(marker => t.includes(marker))) {
+    return true;
+  }
+  if (/\b(a|ha|nhe|nha)\b\s*[?.!]*$/.test(t)) {
+    return true;
+  }
+  return false;
 }
 
 export function detectReopenedAnsweredTopics(
   candidateReply: string,
-  progress: ConversationProgress
+  progress: ConversationProgress,
+  recentSaleMessages?: string[]
 ): ConversationTopic[] {
   if (!hasQuestionIntent(candidateReply)) return [];
   if (hasObjectionIntent(candidateReply)) return [];
-  if (hasConfirmationIntent(candidateReply)) return [];
   const t = normalize(candidateReply);
   const safeProgress = ensureConversationProgress(progress);
+
+  const mentionedUnresolved: ConversationTopic[] = [];
+  for (const topic of TOPIC_ORDER) {
+    const state = getTopicProgress(safeProgress, topic);
+    if (state.answered || state.confirmed) continue;
+    const patterns = REOPEN_PATTERNS[topic];
+    if (patterns.some((pattern) => pattern.test(t))) {
+      mentionedUnresolved.push(topic);
+    }
+  }
+
   const reopened: ConversationTopic[] = [];
   for (const topic of TOPIC_ORDER) {
     const state = getTopicProgress(safeProgress, topic);
     if (!(state.answered || state.confirmed)) continue;
     const patterns = REOPEN_PATTERNS[topic];
     if (patterns.some((pattern) => pattern.test(t))) {
+      let bypass = false;
+      if (hasConfirmationIntent(candidateReply)) {
+        const saleMentionedRecent = recentSaleMessages && recentSaleMessages.some(msg =>
+          isStrongSaleAnswerForTopic(normalize(msg), topic)
+        );
+        if (saleMentionedRecent) {
+          bypass = true;
+        }
+      }
+      if (!bypass && mentionedUnresolved.length > 0) {
+        bypass = true;
+      }
+      if (bypass) {
+        continue;
+      }
       reopened.push(topic);
     }
   }
@@ -330,6 +364,7 @@ export function shouldForceCompletionReply(input: {
   identity: ConversationIdentityProfile;
   recentReplies: string[];
   nextUnresolvedTopic: ConversationTopic | null;
+  recentSaleMessages?: string[];
 }): boolean {
   if (hasObjectionIntent(input.candidateReply)) {
     return false;
@@ -338,7 +373,7 @@ export function shouldForceCompletionReply(input: {
   if (input.completion.completion_ready) return true;
   if (input.nextUnresolvedTopic === "next_step") return true;
 
-  const reopenedTopics = detectReopenedAnsweredTopics(input.candidateReply, input.progress);
+  const reopenedTopics = detectReopenedAnsweredTopics(input.candidateReply, input.progress, input.recentSaleMessages);
   if (reopenedTopics.length > 0) return true;
 
   const repeatedTopics = detectRepeatedTopicAsking(input.candidateReply, input.progress);

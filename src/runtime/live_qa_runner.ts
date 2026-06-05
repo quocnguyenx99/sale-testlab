@@ -271,9 +271,10 @@ async function executeLiveTurn(input: {
   }
 
   // Guard D: Reopened Topics
+  const recentSaleMessages = [message, ...turns.filter(t => t.role === "sale").slice(-1).map(t => t.text)];
   let reopenedAnsweredTopics: ConversationTopic[] = [];
   if (!directQuestion) {
-    reopenedAnsweredTopics = detectReopenedAnsweredTopics(reply, conversationProgress);
+    reopenedAnsweredTopics = detectReopenedAnsweredTopics(reply, conversationProgress, recentSaleMessages);
   }
   if (reopenedAnsweredTopics.length > 0) {
     applyBankFallback(fallbackTopic);
@@ -342,7 +343,8 @@ async function executeLiveTurn(input: {
     progress: conversationProgress,
     identity: identityProfile,
     recentReplies,
-    nextUnresolvedTopic: safeNextUnresolvedTopic
+    nextUnresolvedTopic: safeNextUnresolvedTopic,
+    recentSaleMessages
   })) {
     guardTriggered = true;
     guardTriggerReasons.push("final_guard");

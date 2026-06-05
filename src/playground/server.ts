@@ -1008,8 +1008,10 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
     if (isGenericConfirmationIntent(reply)) guardTriggerReasons.push("generic_confirmation");
   }
 
+  const recentSaleMessages = [message, ...turns.filter(t => t.role === "sale").slice(-1).map(t => t.text)];
+
   if (!directQuestion) {
-    reopenedAnsweredTopics = detectReopenedAnsweredTopics(reply, conversationProgress);
+    reopenedAnsweredTopics = detectReopenedAnsweredTopics(reply, conversationProgress, recentSaleMessages);
   }
   if (reopenedAnsweredTopics.length > 0) {
     applyBankFallback(fallbackTopic);
@@ -1076,7 +1078,8 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
     progress: conversationProgress,
     identity: identityProfile,
     recentReplies,
-    nextUnresolvedTopic: safeNextUnresolvedTopic
+    nextUnresolvedTopic: safeNextUnresolvedTopic,
+    recentSaleMessages
   })) {
     guardTriggered = true;
     guardTriggerReasons.push("final_guard");

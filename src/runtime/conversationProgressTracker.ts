@@ -109,7 +109,7 @@ function hasTopicContext(progress: ConversationProgress, topic: ConversationTopi
   return progress.last_requested_topic === topic || getFirstUnresolvedTopic(progress) === topic;
 }
 
-function isStrongSaleAnswerForTopic(text: string, topic: ConversationTopic): boolean {
+export function isStrongSaleAnswerForTopic(text: string, topic: ConversationTopic): boolean {
   switch (topic) {
     case "price":
       return /\b\d+(?:\.\d{3})*(?:\s*(?:tr|trieu|vnd|vnđ|trđ|k|m))\b/.test(text) ||

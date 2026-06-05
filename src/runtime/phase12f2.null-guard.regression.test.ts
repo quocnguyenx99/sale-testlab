@@ -77,7 +77,7 @@ function run(): void {
   // 4) short proactive sale answer still works on safe progress object.
   const proactive = updateProgressFromSaleMessage(
     ensureConversationProgress(undefined),
-    "gia 25 trieu, con 12 may, giao hom nay duoc",
+    "gia 25 trieu, con hang, con 12 may, giao hom nay duoc",
   );
   assert.equal(proactive.price.answered, true);
   assert.equal(proactive.stock.answered, true);

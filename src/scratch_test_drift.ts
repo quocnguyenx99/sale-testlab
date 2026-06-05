@@ -9,25 +9,21 @@ const identityProfile = {
   conversation_role: "customer_to_sales" as const
 };
 
-const reply = "Vậy em gửi giúp anh báo giá và cấu hình chi tiết nhé.";
-let t = reply.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[đĐ]/g, "d").replace(/\s+/g, " ").trim();
-t = t.replace(/\bchi\s+tiet\b/g, "chi_tiet")
-     .replace(/\bchi\s+phi\b/g, "chi_phi")
-     .replace(/\bchi\s+nhanh\b/g, "chi_nhanh")
-     .replace(/\btieng\s+anh\b/g, "tieng_anh")
-     .replace(/\bhinh\s+anh\b/g, "hinh_anh")
-     .replace(/\bphan\s+anh\b/g, "phan_anh")
-     .replace(/\btre\s+em\b/g, "tre_em")
-     .replace(/\bthong\s+minh\b/g, "thong_minh")
-     .replace(/\bchung\s+minh\b/g, "chung_minh")
-     .replace(/\bbinh\s+minh\b/g, "binh_minh")
-     .replace(/\bcong\s+minh\b/g, "cong_minh");
+const testCases = [
+  "Vậy em gửi giúp anh báo giá và cấu hình chi tiết nhé.",
+  "Anh đang cần check tiếng Anh của máy này.",
+  "Hình ảnh của máy này có đẹp không em?",
+  "Bên em có bán lẻ hay chỉ bán sỉ?",
+  "Em hỗ trợ anh buổi tối nhé.",
+  "Bàn phím này gõ êm không em?",
+  "Chứng minh giúp anh.",
+  "Gửi em thông tin cơ bản nhé."
+];
 
-const pronouns = ["anh", "chi", "em", "toi", "minh", "ban"].filter((p) => new RegExp(`\\b${p}\\b`).test(t));
-const expectedSelf = "anh";
-const expectedTarget = "em";
-const disallowedRolePronouns = pronouns.filter((p) => p !== expectedSelf && p !== expectedTarget && p !== "minh");
-
-console.log("Pronouns found:", pronouns);
-console.log("Disallowed pronouns found:", disallowedRolePronouns);
-
+for (const reply of testCases) {
+  const result = detectIdentityDrift(reply, identityProfile);
+  console.log(`Reply: "${reply}"`);
+  console.log(`  drift_detected: ${result.identity_drift_detected}`);
+  console.log(`  forbidden_matches:`, result.forbidden_phrase_matches);
+  console.log("-----------------------------------------");
+}
