@@ -116,7 +116,7 @@ function isStrongSaleAnswerForTopic(text: string, topic: ConversationTopic): boo
              /\b\d+(?:\.\d{3}){2,}\b/.test(text) ||
              /\b\d+tr\d*\b/.test(text);
     case "stock":
-      return /\b(con hang|san hang|co san|kho|con|co)\b/.test(text) || /^(con|co)(\s+\w+)?$/.test(text);
+      return /\b(con hang|co hang|san hang|co san|con san|hang san|con kho|ton kho|hien con|ben em con|het hang|khong con hang|chua co hang|tam het|dang het)\b/.test(text);
     case "delivery":
       return /\b(giao hom nay|giao thu|giao chieu nay|mai giao|van chuyen|giao duoc|ship)\b/.test(text);
     case "warranty":
@@ -152,7 +152,7 @@ function shouldMarkSaleAnswered(
              /\b\d+(?:\.\d{3})*(?:\s*(?:tr|trieu|vnd|vnđ|trđ|k|m))\b/.test(text) ||
              /\b\d+tr\d*\b/.test(text);
     case "stock":
-      return /^(con|co|con hang|co hang)(\s+\w+)?$/.test(text) || /\b(con|co)\b/.test(text);
+      return /\b(con hang|co hang|san hang|co san|con san|hang san|con kho|ton kho|hien con|ben em con|het hang|khong con hang|chua co hang|tam het|dang het)\b/.test(text);
     case "delivery":
       return /\b(duoc|giao duoc|hom nay|mai|thu \w+)\b/.test(text);
     case "warranty":

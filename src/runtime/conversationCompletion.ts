@@ -213,12 +213,21 @@ function hasObjectionIntent(text: string): boolean {
   return objectionKeywords.some(kw => t.includes(normalize(kw)));
 }
 
+function hasConfirmationIntent(text: string): boolean {
+  const t = normalize(text);
+  const confirmationMarkers = [
+    "dung khong", "phai khong", "ha em", "a em", "vay la", "ok vay", "the la"
+  ];
+  return confirmationMarkers.some(marker => t.includes(marker));
+}
+
 export function detectReopenedAnsweredTopics(
   candidateReply: string,
   progress: ConversationProgress
 ): ConversationTopic[] {
   if (!hasQuestionIntent(candidateReply)) return [];
   if (hasObjectionIntent(candidateReply)) return [];
+  if (hasConfirmationIntent(candidateReply)) return [];
   const t = normalize(candidateReply);
   const safeProgress = ensureConversationProgress(progress);
   const reopened: ConversationTopic[] = [];

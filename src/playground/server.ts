@@ -157,6 +157,37 @@ function isPriceActuallyQuoted(recentTurns: Array<{ role: "sale" | "customer_ai"
   return PRICE_QUOTE_PATTERN.test(joined);
 }
 
+function isActualStockLeak(reply: string, qtyStr: string): boolean {
+  const t = reply.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[đĐ]/g, "d").replace(/\s+/g, " ");
+  const regex = new RegExp(`\\b${qtyStr}\\b`, 'g');
+  let match;
+  
+  const stockKeywords = ["con", "ton", "kho", "san", "hang"];
+  const unitKeywords = ["cai", "chiec", "may", "bo", "con"];
+
+  while ((match = regex.exec(t)) !== null) {
+    const idx = match.index;
+    const start = Math.max(0, idx - 30);
+    const end = Math.min(t.length, idx + qtyStr.length + 30);
+    const windowText = t.substring(start, end);
+    
+    const hasKeyword = stockKeywords.some(kw => {
+      const kwRegex = new RegExp(`\\b${kw}\\b`);
+      return kwRegex.test(windowText);
+    });
+    
+    const hasUnit = unitKeywords.some(unit => {
+      const unitRegex = new RegExp(`\\b${unit}\\b`);
+      return unitRegex.test(windowText);
+    });
+    
+    if (hasKeyword && hasUnit) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function hasGatedTerms(text: string): boolean {
   const t = normalizeForMatch(text);
   const gatedPatterns = [
@@ -1127,7 +1158,7 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
       const isMentionedByAI = new RegExp(`\\b${qtyStr}\\b`).test(reply);
       const wasMentionedBySale = new RegExp(`\\b${qtyStr}\\b`).test(saleTextHistory) || new RegExp(`\\b${qtyStr}\\b`).test(message);
       
-      if (isMentionedByAI && !wasMentionedBySale) {
+      if (isMentionedByAI && !wasMentionedBySale && isActualStockLeak(reply, qtyStr)) {
         stock_quantity_hidden_from_customer = true;
         const self = identityProfile.customer_self_pronoun;
         const target = identityProfile.customer_target_pronoun;
