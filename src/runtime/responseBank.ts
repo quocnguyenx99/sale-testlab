@@ -13,6 +13,8 @@ export interface ResponseBankInput {
     behavior_rules?: string[];
     difficulty?: string;
   };
+  product_context_status?: string; // Phase 12H.1-C
+  is_price_quoted?: boolean; // Nhánh C
 }
 
 export interface ResponseBankResult {
@@ -41,11 +43,16 @@ function normalize(input: string): string {
 }
 
 function render(text: string, identity: ConversationIdentityProfile): string {
+  const self = identity.customer_self_pronoun;
+  const selfCap = self.charAt(0).toUpperCase() + self.slice(1);
+  const sale = identity.customer_target_pronoun;
+  const saleCap = sale.charAt(0).toUpperCase() + sale.slice(1);
+
   return text
-    .replaceAll("{self}", identity.customer_self_pronoun)
-    .replaceAll("{sale}", identity.customer_target_pronoun)
-    .replaceAll("{self_cap}", identity.customer_self_pronoun)
-    .replaceAll("{sale_cap}", identity.customer_target_pronoun);
+    .replaceAll("{self}", self)
+    .replaceAll("{self_cap}", selfCap)
+    .replaceAll("{sale}", sale)
+    .replaceAll("{sale_cap}", saleCap);
 }
 
 const BANK: TopicVariants = {
@@ -226,7 +233,78 @@ export function inferVoiceGroup(persona?: {
   return "standard";
 }
 
+function hasGatedTerms(text: string): boolean {
+  const t = normalize(text);
+  const gatedPatterns = [
+    "mau nay",
+    "model nay",
+    "giu mau nay",
+    "chot mau nay",
+    "stk",
+    "so tai khoan",
+    "thanh toan",
+    "chuyen khoan",
+    "chot luon"
+  ];
+  return gatedPatterns.some(pat => t.includes(pat));
+}
+
+function hasSupportPhrases(text: string): boolean {
+  const t = normalize(text);
+  const supportPhrases = [
+    "em ho tro giu mau nay",
+    "minh ho tro",
+    "ben minh ho tro",
+    "ben em dang san hang"
+  ];
+  return supportPhrases.some(pat => t.includes(pat));
+}
+
+function gateResponseBankResult(result: ResponseBankResult, input: ResponseBankInput): ResponseBankResult {
+  const isSpecific = input.product_context_status === "specific";
+  const hasGated = hasGatedTerms(result.reply);
+  const hasSupport = hasSupportPhrases(result.reply);
+  
+  // Nhánh C: Gating price negotiation variants if no price has been quoted
+  const isPriceTopic = input.nextTopic === "price" || input.topic === "price" || result.topic_used === "price" || result.variant_id.includes("price") || result.variant_id.includes("price_sensitive");
+  const hasPriceObjectionTerms = /gia nay|gia do|gia vay|linh hoat|giam them|bot them|de chot hon/.test(normalize(result.reply));
+  
+  if (isPriceTopic && hasPriceObjectionTerms && input.is_price_quoted === false) {
+    const self = input.identity.customer_self_pronoun;
+    const selfCap = self.charAt(0).toUpperCase() + self.slice(1);
+    const sale = input.identity.customer_target_pronoun;
+    const saleCap = sale.charAt(0).toUpperCase() + sale.slice(1);
+    
+    return {
+      reply: `${selfCap} chưa thấy ${sale} báo giá cụ thể nên chưa so sánh được. ${saleCap} gửi ${self} vài mẫu phù hợp kèm giá sỉ để ${self} xem trước nhé.`,
+      variant_id: "product_context_gating_price_request",
+      topic_used: result.topic_used,
+      exhausted_variants: result.exhausted_variants
+    };
+  }
+  
+  if (hasSupport || (!isSpecific && hasGated)) {
+    const self = input.identity.customer_self_pronoun;
+    const selfCap = self.charAt(0).toUpperCase() + self.slice(1);
+    const sale = input.identity.customer_target_pronoun;
+    const saleCap = sale.charAt(0).toUpperCase() + sale.slice(1);
+    const safeClarificationFallback = `${selfCap} chưa chốt model cụ thể đâu ${sale}. ${saleCap} gửi ${self} vài mẫu phù hợp để ${self} so sánh giá sỉ với cấu hình trước nhé.`;
+    
+    return {
+      reply: safeClarificationFallback,
+      variant_id: "product_context_gating_clarify",
+      topic_used: result.topic_used,
+      exhausted_variants: result.exhausted_variants
+    };
+  }
+  return result;
+}
+
 export function buildResponseBankReply(input: ResponseBankInput): ResponseBankResult {
+  return gateResponseBankResult(buildResponseBankReplyInternal(input), input);
+}
+
+function buildResponseBankReplyInternal(input: ResponseBankInput): ResponseBankResult {
   const topic = input.nextTopic || input.topic;
   const fallbackTopic = topic ?? "next_step";
   

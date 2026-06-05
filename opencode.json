@@ -1,0 +1,42 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "local-qwen/qwen3-8b",
+  "small_model": "local-qwen/qwen3-8b",
+  "provider": {
+    "local-qwen": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Local Qwen 3 8B",
+      "options": {
+        "apiKey": "sk-ai-atom-qwen3-8b-9001",
+        "baseURL": "http://192.168.117.73:9001/v1",
+        "timeout": 600000
+      },
+      "models": {
+        "qwen3-8b": {
+          "name": "Qwen 3 8B Local",
+          "options": {
+            "maxTokens": 4096,
+            "maxOutputTokens": 4096,
+            "maxCompletionTokens": 4096
+          },
+          "limit": {
+            "context": 32768,
+            "output": 4096
+          }
+        }
+      }
+    }
+  },
+  "watcher": {
+    "ignore": [
+      "node_modules/**",
+      "sale-testlab-data/00_raw/**",
+      "sale-testlab-data/01_normalized/**",
+      "sale-testlab-data/02_filtered/**",
+      "sale-testlab-data/03_sessions/**",
+      "sale-testlab-data/04_ai_classified/**",
+      "sale-testlab-data/05_ai_extractions/**",
+      "sale-testlab-data/logs/**"
+    ]
+  }
+}

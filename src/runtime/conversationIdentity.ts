@@ -260,17 +260,18 @@ export function detectIdentityDrift(
   const pronouns = ["anh", "chi", "em", "toi", "minh", "ban"].filter((p) => new RegExp(`\\b${p}\\b`).test(t));
   const expectedSelf = normalize(identity.customer_self_pronoun);
   const expectedTarget = normalize(identity.customer_target_pronoun);
-  const disallowedRolePronouns = pronouns.filter((p) => p !== expectedSelf && p !== expectedTarget);
+  // Allow 'mình' as a natural alternative self-pronoun
+  const disallowedRolePronouns = pronouns.filter((p) => p !== expectedSelf && p !== expectedTarget && p !== "minh");
 
   const roleInversion = /\b(em can|em gui bao gia|em ho tro|de em tu van)\b/.test(t);
   if (roleInversion) forbidden.push("role_inversion");
-  if (expectedSelf === "em" && /\b(anh|chi|toi|minh)\s+(dang|can|muon)\b/.test(t)) {
+  if (expectedSelf === "em" && /\b(anh|chi|toi)\s+(dang|can|muon)\b/.test(t)) {
     forbidden.push("self_pronoun_drift");
   }
-  if (expectedSelf === "anh" && /\b(em|chi|toi|minh)\s+(dang|can|muon)\b/.test(t)) {
+  if (expectedSelf === "anh" && /\b(em|chi|toi)\s+(dang|can|muon)\b/.test(t)) {
     forbidden.push("self_pronoun_drift");
   }
-  if (expectedSelf === "chị" && /\b(anh|em|toi|minh)\s+(dang|can|muon)\b/.test(t)) {
+  if (expectedSelf === "chị" && /\b(anh|em|toi)\s+(dang|can|muon)\b/.test(t)) {
     forbidden.push("self_pronoun_drift");
   }
 
@@ -301,7 +302,15 @@ export function runCustomerVoiceGuard(
     "em tu van cho anh",
     "em tu van cho chi",
     "mình hỗ trợ",
-    "minh ho tro"
+    "minh ho tro",
+    "mình sẽ hỗ trợ",
+    "minh se ho tro",
+    "mình tư vấn",
+    "minh tu van",
+    "mình kiểm tra cho bạn",
+    "minh kiem tra cho ban",
+    "bên mình hỗ trợ",
+    "ben minh ho tro"
   ];
 
   for (const phrase of forbiddenPhrases) {
@@ -318,10 +327,11 @@ export function runCustomerVoiceGuard(
   const target = identity.customer_target_pronoun;
 
   if ((self === "anh" || self === "chị") && target === "em") {
-    // Chỉ chặn từ "ạ" hoặc "a" (có dấu hỏi hoặc chấm hoặc ở cuối câu) mang giọng điệu hỏi tư vấn bán hàng
-    // Ví dụ: "chị đang tìm máy tính xách tay ạ", "anh muốn xem mẫu này ạ"
-    const suffixRegex = /(?:anh|chị|chi)\s+[^]*?\s+ạ\s*[?.!]*$/i;
-    if (suffixRegex.test(t)) {
+    // Chỉ chặn từ "ạ" hoặc "a" ở cuối câu khi đi kèm giọng điệu hỗ trợ/bán hàng
+    const hasAwkwardEnding = /\s+ạ\s*[?.!]*$/i.test(t);
+    const hasSupportTone = /(ho\s*tro|tu\s*van|bao\s*gia|stk|check|kiem\s*tra|xac\s*nhan|gui\s+stk|gui\s+bill|don\s*hang)/i.test(tNorm);
+    
+    if (hasAwkwardEnding && hasSupportTone) {
       return {
         customer_voice_drift_detected: true,
         customer_voice_guard_reason: "awkward_ạ_ending"

@@ -1,4 +1,4 @@
-﻿import { detectBlockedBehaviors, sanitizeText } from "./runtimeConstraints";
+import { detectBlockedBehaviors, sanitizeText } from "./runtimeConstraints";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -54,7 +54,7 @@ function fromEnv(): LocalAIAdapterConfig {
     envMap.LOCAL_AI_URL ||
     envMap.OPENAI_BASE_URL ||
     envMap.LOCAL_QWEN_URL ||
-    "";
+    "http://192.168.117.73:9001/v1";
   const model =
     process.env.LOCAL_AI_MODEL ||
     process.env.OPENAI_MODEL ||
@@ -62,7 +62,7 @@ function fromEnv(): LocalAIAdapterConfig {
     envMap.LOCAL_AI_MODEL ||
     envMap.OPENAI_MODEL ||
     envMap.LOCAL_QWEN_MODEL ||
-    "";
+    "qwen3-8b";
   const apiKey =
     process.env.OPENAI_API_KEY ||
     process.env.LOCAL_QWEN_API_KEY ||
@@ -209,20 +209,101 @@ function buildFallbackResult(
   };
 }
 
+function writeInstrumentationLog(logEntry: {
+  model_name: string;
+  max_tokens_used: number;
+  finish_reason: string;
+  usage: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+  has_reasoning_field: "yes" | "no";
+  content_null: "yes" | "no";
+  raw_content_length_chars: number;
+  final_reply_length_chars: number;
+  reply_source: "local_ai_generated" | "deterministic_fallback";
+  latency_ms?: number;
+  error_type?: string | null;
+}) {
+  const envMap = loadDotEnv();
+  const enable =
+    process.env.ENABLE_MODEL_INSTRUMENTATION === "true" ||
+    envMap.ENABLE_MODEL_INSTRUMENTATION === "true";
+
+  if (!enable) return;
+
+  // 1. Console log
+  console.log("[QWEN3_INSTRUMENTATION]", JSON.stringify(logEntry));
+
+  // 2. File log
+  try {
+    const logPath =
+      process.env.MODEL_INSTRUMENTATION_LOG_PATH ||
+      envMap.MODEL_INSTRUMENTATION_LOG_PATH ||
+      "logs/qwen3_instrumentation_log.jsonl";
+
+    const absoluteLogPath = path.isAbsolute(logPath)
+      ? logPath
+      : path.join(process.cwd(), logPath);
+
+    const dir = path.dirname(absoluteLogPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    fs.appendFileSync(absoluteLogPath, JSON.stringify(logEntry) + "\n", "utf8");
+  } catch (err) {
+    // Fail silently to avoid breaking the runtime in case of file write issues
+  }
+}
+
 export async function generateLocalAIReply(
   prompt: string,
   usedPatterns: string[],
   usedConstraints: string[]
 ): Promise<LocalAIReplyResult> {
   const cfg = fromEnv();
+  const envMap = loadDotEnv();
+  
+  const maxTokensEnv = process.env.OPENAI_MAX_TOKENS || envMap.OPENAI_MAX_TOKENS;
+  const maxTokens = maxTokensEnv ? parseInt(maxTokensEnv, 10) : 512;
+
+  const disableThinking =
+    process.env.OPENAI_DISABLE_THINKING === "true" ||
+    envMap.OPENAI_DISABLE_THINKING === "true";
+
+  let systemPrompt =
+    "You are always the CUSTOMER/BUYER. Reply in concise natural Vietnamese with accents. Avoid assistant/support tone. Keep operational realism. Do not invent emotion, history, demographics, or motives.";
+
+  if (disableThinking) {
+    systemPrompt = `/no_think\nRespond only as the customer.\nDo not output reasoning, analysis, or thinking blocks.\n${systemPrompt}`;
+  }
+
   const hasLocalEndpoint = cfg.baseUrl.length > 0 && cfg.model.length > 0;
 
   if (!hasLocalEndpoint) {
+    writeInstrumentationLog({
+      model_name: cfg.model,
+      max_tokens_used: maxTokens,
+      finish_reason: "error",
+      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      has_reasoning_field: "no",
+      content_null: "yes",
+      raw_content_length_chars: 0,
+      final_reply_length_chars: 0,
+      reply_source: "deterministic_fallback",
+      latency_ms: 0,
+      error_type: "missing_local_endpoint"
+    });
     return buildFallbackResult(prompt, usedPatterns, usedConstraints, "missing_local_endpoint");
   }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), cfg.timeoutMs ?? 30000);
+
+  const t0 = Date.now();
+  let latencyMs = 0;
 
   try {
     const resp = await fetch(`${cfg.baseUrl.replace(/\/$/, "")}/chat/completions`, {
@@ -235,12 +316,11 @@ export async function generateLocalAIReply(
         model: cfg.model,
         temperature: 0.35,
         top_p: 0.9,
-        max_tokens: 140,
+        max_tokens: maxTokens,
         messages: [
           {
             role: "system",
-            content:
-              "You are always the CUSTOMER/BUYER. Reply in concise natural Vietnamese with accents. Avoid assistant/support tone. Keep operational realism. Do not invent emotion, history, demographics, or motives."
+            content: systemPrompt
           },
           { role: "user", content: prompt }
         ]
@@ -248,20 +328,102 @@ export async function generateLocalAIReply(
       signal: controller.signal
     });
 
+    latencyMs = Date.now() - t0;
+
     if (!resp.ok) {
+      writeInstrumentationLog({
+        model_name: cfg.model,
+        max_tokens_used: maxTokens,
+        finish_reason: "error",
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        has_reasoning_field: "no",
+        content_null: "yes",
+        raw_content_length_chars: 0,
+        final_reply_length_chars: 0,
+        reply_source: "deterministic_fallback",
+        latency_ms: latencyMs,
+        error_type: `api_status_${resp.status}`
+      });
       return buildFallbackResult(prompt, usedPatterns, usedConstraints, "generation_failure");
     }
 
     const data = await resp.json();
+    const choice = data?.choices?.[0];
+    const messageObj = choice?.message;
+    const content = messageObj?.content || null;
+    const finishReason = choice?.finish_reason || "unknown";
+    const usage = data?.usage || {};
+
+    const hasReasoning = (
+      messageObj?.reasoning ||
+      messageObj?.reasoning_content ||
+      (typeof content === "string" && (content.includes("<think>") || content.includes("</think>")))
+    ) ? "yes" : "no";
+
+    const contentNull = (content === null || content === undefined || String(content).trim().length === 0) ? "yes" : "no";
+    const rawContentLength = content ? String(content).length : 0;
+
     const extracted = extractContent(data);
     if (!extracted) {
+      writeInstrumentationLog({
+        model_name: cfg.model,
+        max_tokens_used: maxTokens,
+        finish_reason: finishReason,
+        usage: {
+          prompt_tokens: usage.prompt_tokens || 0,
+          completion_tokens: usage.completion_tokens || 0,
+          total_tokens: usage.total_tokens || 0
+        },
+        has_reasoning_field: hasReasoning,
+        content_null: contentNull,
+        raw_content_length_chars: rawContentLength,
+        final_reply_length_chars: 0,
+        reply_source: "deterministic_fallback",
+        latency_ms: latencyMs,
+        error_type: "invalid_response_format"
+      });
       return buildFallbackResult(prompt, usedPatterns, usedConstraints, "invalid_response_format");
     }
 
     const safety = enforceSafety(extracted);
     if (safety.fullyBlocked) {
+      writeInstrumentationLog({
+        model_name: cfg.model,
+        max_tokens_used: maxTokens,
+        finish_reason: finishReason,
+        usage: {
+          prompt_tokens: usage.prompt_tokens || 0,
+          completion_tokens: usage.completion_tokens || 0,
+          total_tokens: usage.total_tokens || 0
+        },
+        has_reasoning_field: hasReasoning,
+        content_null: contentNull,
+        raw_content_length_chars: rawContentLength,
+        final_reply_length_chars: safety.safeReply.length,
+        reply_source: "deterministic_fallback",
+        latency_ms: latencyMs,
+        error_type: "safety_block"
+      });
       return buildFallbackResult(prompt, usedPatterns, usedConstraints, "safety_block");
     }
+
+    writeInstrumentationLog({
+      model_name: cfg.model,
+      max_tokens_used: maxTokens,
+      finish_reason: finishReason,
+      usage: {
+        prompt_tokens: usage.prompt_tokens || 0,
+        completion_tokens: usage.completion_tokens || 0,
+        total_tokens: usage.total_tokens || 0
+      },
+      has_reasoning_field: hasReasoning,
+      content_null: contentNull,
+      raw_content_length_chars: rawContentLength,
+      final_reply_length_chars: safety.safeReply.length,
+      reply_source: "local_ai_generated",
+      latency_ms: latencyMs,
+      error_type: null
+    });
 
     return {
       generated_reply: safety.safeReply,
@@ -278,11 +440,25 @@ export async function generateLocalAIReply(
       }
     };
   } catch (error) {
-    const reason =
-      error instanceof Error && /abort/i.test(error.name)
-        ? "timeout"
-        : "generation_failure";
-    return buildFallbackResult(prompt, usedPatterns, usedConstraints, reason);
+    const elapsed = Date.now() - t0;
+    const isTimeout = error instanceof Error && /abort/i.test(error.name);
+    const errorType = isTimeout ? "timeout" : "generation_failure";
+
+    writeInstrumentationLog({
+      model_name: cfg.model,
+      max_tokens_used: maxTokens,
+      finish_reason: "error",
+      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      has_reasoning_field: "no",
+      content_null: "yes",
+      raw_content_length_chars: 0,
+      final_reply_length_chars: 0,
+      reply_source: "deterministic_fallback",
+      latency_ms: elapsed,
+      error_type: errorType
+    });
+
+    return buildFallbackResult(prompt, usedPatterns, usedConstraints, isTimeout ? "timeout" : "generation_failure");
   } finally {
     clearTimeout(timeout);
   }

@@ -84,6 +84,9 @@ function toMemoryLines(memory: ConversationMemorySlots): string[] {
     `- payment_discussed: ${memory.payment_discussed}`,
     `- invoice_or_document_discussed: ${memory.invoice_or_document_discussed}`,
     `- next_step_discussed: ${memory.next_step_discussed}`,
+    `- selected_product_model: ${memory.selected_product_model || "none"}`,
+    `- selected_product_model_code: ${memory.selected_product_model_code || "none"}`,
+    `- product_context_status: ${memory.product_context_status || "unknown"}`,
   ];
 }
 
@@ -92,6 +95,32 @@ function toProgressLines(progress: ConversationProgress): string[] {
     const p = getTopicProgress(progress, topic);
     return `- ${topic}: requested=${p.requested}, answered=${p.answered}, confirmed=${p.confirmed}`;
   });
+}
+
+function formatProductCandidatesBlock(memory: ConversationMemorySlots): string {
+  if (!memory.product_candidates_summary || memory.product_candidates_summary.length === 0) {
+    return "";
+  }
+
+  let block = "=== THÔNG TIN SẢN PHẨM KHẢ DỤNG ===\n";
+  memory.product_candidates_summary.slice(0, 5).forEach((p, idx) => {
+    const priceSiFormatted = p.price_si !== null ? `${p.price_si.toLocaleString("vi-VN")} VNĐ` : "Liên hệ";
+    const priceLeFormatted = p.price_le !== null ? `${p.price_le.toLocaleString("vi-VN")} VNĐ` : "Liên hệ";
+    const stockText = p.stock_status === "in_stock"
+      ? `Còn hàng [INTERNAL_STOCK_REFERENCE_DO_NOT_MENTION: ${p.stock_qty}]`
+      : `Hết hàng [INTERNAL_STOCK_REFERENCE_DO_NOT_MENTION: ${p.stock_qty}]`;
+
+    block += `${idx + 1}. [Sản phẩm] ${p.display_name}\n`;
+    block += `   - Mã sản phẩm: ${p.model_code}\n`;
+    if (p.brand) {
+      block += `   - Thương hiệu: ${p.brand}\n`;
+    }
+    block += `   - Giá sỉ/đại lý: ${priceSiFormatted}\n`;
+    block += `   - Giá thị trường: ${priceLeFormatted}\n`;
+    block += `   - Trạng thái kho: ${stockText}\n`;
+  });
+  block += "====================================";
+  return block;
 }
 
 export function buildEnrichedRuntimePrompt(input: EnrichedPromptInput): string {
@@ -126,7 +155,9 @@ export function buildEnrichedRuntimePrompt(input: EnrichedPromptInput): string {
   const nextTopic = getFirstUnresolvedTopic(input.progress);
   const history = input.recentMessages.slice(-10).map(sanitizeText).join("\n");
 
-  return [
+  const productContextBlock = formatProductCandidatesBlock(input.memorySlots);
+
+  const lines = [
     input.persona.role_prompt,
     "",
     "Quy tắc hành vi:",
@@ -141,6 +172,59 @@ export function buildEnrichedRuntimePrompt(input: EnrichedPromptInput): string {
     "",
     ...scenarioLines,
     "",
+  ];
+
+  if (productContextBlock) {
+    lines.push(productContextBlock, "");
+  }
+
+  const status = input.memorySlots.product_context_status || "unknown";
+  const gatingInstructions = [
+    "QUY TẮC BỐI CẢNH SẢN PHẨM (CRITICAL):",
+    `1. Trạng thái bối cảnh sản phẩm hiện tại: "${status}".`,
+  ];
+
+  if (status === "unknown") {
+    gatingInstructions.push(
+      "   - Bạn CHƯA chọn được sản phẩm hay model cụ thể nào.",
+      "   - TUYỆT ĐỐI KHÔNG sử dụng cụm từ 'mẫu này', 'model này', 'mã này'.",
+      "   - TUYỆT ĐỐI KHÔNG hỏi thanh toán, giữ hàng, chuyển khoản, STK hay chốt đơn.",
+      "   - Hãy trao đổi tự nhiên về nhu cầu, ngân sách, mục đích sử dụng để Sale tư vấn/gợi ý mẫu phù hợp."
+    );
+  } else if (status === "vague") {
+    gatingInstructions.push(
+      "   - Bạn mới có cấu hình hoặc nhu cầu chung chung, chưa chọn model cụ thể.",
+      "   - Có thể hỏi giá sỉ (price_si), hỏi cấu hình, hỏi bảo hành, hoặc yêu cầu so sánh 2-3 mẫu máy.",
+      "   - TUYỆT ĐỐI KHÔNG hỏi thanh toán, chốt đơn, giữ hàng, gửi STK trừ khi Sale đã đề xuất một mẫu cụ thể rõ ràng và bạn đã chốt model đó."
+    );
+  } else if (status === "specific") {
+    gatingInstructions.push(
+      "   - Bạn ĐÃ XÁC ĐỊNH được model cụ thể.",
+      "   - Có thể sử dụng cụm từ 'mẫu này', 'model này' để chỉ sản phẩm đang nói.",
+      "   - Có thể chốt đơn, hỏi giữ hàng, hỏi thanh toán nếu các điều kiện deal khác đã đủ."
+    );
+  }
+
+  gatingInstructions.push(
+    "2. QUY TẮC SỐ LƯỢNG TỒN KHO:",
+    "   - TUYỆT ĐỐI KHÔNG được tự ý nhắc đến con số tồn cụ thể (như '650 cái', '2 cái') trong câu trả lời trừ khi Sale đã chủ động nói ra con số đó trước.",
+    "   - Thông tin số lượng trong tag INTERNAL_STOCK_REFERENCE_DO_NOT_MENTION chỉ dùng để bạn biết trong nội bộ.",
+    "   - Chỉ được hỏi thăm tình trạng kho một cách tự nhiên (ví dụ: 'Mẫu này bên em còn sẵn hàng không?', 'Anh lấy vài cái bên em có đủ giao không?')."
+  );
+
+  gatingInstructions.push(
+    "3. QUY TẮC LIỆT KÊ SẢN PHẨM KHẢ DỤNG (PRODUCT CANDIDATES):",
+    "   - Các sản phẩm trong mục 'THÔNG TIN SẢN PHẨM KHẢ DỤNG' chỉ dùng để tham khảo bối cảnh.",
+    "   - TUYỆT ĐỐI KHÔNG sao chép nguyên văn hoặc liệt kê một danh sách dài các mã sản phẩm/part number/cấu hình kỹ thuật từ danh sách khả dụng này vào câu trả lời.",
+    "   - Chỉ nhắc tối đa 1-2 tên sản phẩm/dòng máy một cách cực kỳ tự nhiên khi cần thiết.",
+    "   - Ưu tiên yêu cầu Sale tự chọn và gửi 2-3 phương án phù hợp kèm giá sỉ.",
+    "   - TUYỆT ĐỐI KHÔNG tự liệt kê nhiều mã máy hay các biến thể CPU/RAM khác nhau trừ khi Sale đã chủ động giới thiệu hoặc hỏi so sánh chúng.",
+    status === "vague"
+      ? "   - Ví dụ hỏi tự nhiên khi chưa rõ model cụ thể: 'Em gửi anh 2-3 mẫu HP workstation phù hợp render 3D kèm giá sỉ để anh so sánh nhé.', KHÔNG ĐƯỢC viết: 'Anh đang xem model HP Z2 Tower G9 (4N3U8AV - I5) và HP Z2...'"
+      : ""
+  );
+
+  lines.push(
     "memory_slots:",
     ...memoryLines,
     "",
@@ -149,6 +233,8 @@ export function buildEnrichedRuntimePrompt(input: EnrichedPromptInput): string {
     `- next_unresolved_topic: ${nextTopic ?? "none"}`,
     "",
     progressionBlock,
+    "",
+    gatingInstructions.join("\n"),
     "",
     "Ghi nhớ quy tắc hội thoại tự nhiên:",
     "- KHÔNG ĐƯỢC hỏi lại những thông tin đã được Sale cung cấp và ghi trong memory_slots (ví dụ: nếu giá hoặc cấu hình đã có, cấm hỏi lại giá/cấu hình).",
@@ -160,7 +246,9 @@ export function buildEnrichedRuntimePrompt(input: EnrichedPromptInput): string {
     history || "- none",
     "",
     "Khach AI:",
-  ].join("\n");
+  );
+
+  return lines.join("\n");
 }
 
 export function buildRuntimePrompt(

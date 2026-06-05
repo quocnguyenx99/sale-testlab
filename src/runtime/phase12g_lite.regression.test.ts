@@ -3,7 +3,8 @@ import {
   buildIdentityProfileFromSaleOpening,
   buildIdentityProfileFromPersona,
   runCustomerVoiceGuard,
-  rewriteVoiceDrift
+  rewriteVoiceDrift,
+  detectIdentityDrift
 } from "./conversationIdentity";
 import {
   buildCustomerOpeningEnriched
@@ -80,8 +81,8 @@ function run(): void {
   assert.equal(supportGuard.customer_voice_drift_detected, true);
   assert.equal(supportGuard.customer_voice_guard_reason?.startsWith("support_phrase"), true);
 
-  // Awkward "ạ" ending check
-  const awkwardGuard = runCustomerVoiceGuard("chị đang tìm máy tính xách tay ạ", targetIdentity);
+  // Awkward "ạ" ending check (with support tone)
+  const awkwardGuard = runCustomerVoiceGuard("chị đang tìm máy tính xách tay tư vấn ạ", targetIdentity);
   assert.equal(awkwardGuard.customer_voice_drift_detected, true);
   assert.equal(awkwardGuard.customer_voice_guard_reason, "awkward_ạ_ending");
 
@@ -89,6 +90,28 @@ function run(): void {
   const rewritten = rewriteVoiceDrift("chị đang tìm máy tính xách tay ạ", targetIdentity);
   assert.ok(rewritten.includes("Chị đang tìm máy tính xách tay cho công việc"));
   assert.ok(rewritten.includes("em tư vấn giúp chị"));
+
+  // Softened "mình" and "ạ" checks
+  const maleIdentity = {
+    customer_self_pronoun: "anh" as const,
+    customer_target_pronoun: "em" as const,
+    sale_expected_self_pronoun: "em" as const,
+    sale_expected_target_pronoun: "anh" as const,
+    tone_style: "business_casual" as const,
+    conversation_role: "customer_to_sales" as const
+  };
+
+  // Qwen-like reply "Mình đang so sánh vài model..." should not trigger self_pronoun_drift
+  const driftResult = detectIdentityDrift("Mình đang so sánh vài model...", maleIdentity);
+  assert.equal(driftResult.identity_drift_detected, false, "'mình đang' should not trigger identity drift");
+
+  // Qwen-like reply "Cho anh hỏi giá bao nhiêu ạ?" should not trigger awkward_ạ_ending
+  const awkwardQuestionGuard = runCustomerVoiceGuard("Cho anh hỏi giá bao nhiêu ạ?", maleIdentity);
+  assert.equal(awkwardQuestionGuard.customer_voice_drift_detected, false, "Natural question ending in ạ should be allowed");
+
+  // Support reply "Mình sẽ hỗ trợ kiểm tra cấu hình cho bạn" must still be blocked
+  const supportTextGuard = runCustomerVoiceGuard("Mình sẽ hỗ trợ kiểm tra cấu hình cho bạn", maleIdentity);
+  assert.equal(supportTextGuard.customer_voice_drift_detected, true, "Support-tone with mình must still be blocked");
 
   console.log("3. Voice Guard & Rewrite: PASS");
 

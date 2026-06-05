@@ -22,15 +22,15 @@ export type ConversationProgress = Record<ConversationTopic, TopicProgress> & {
 };
 
 export const TOPIC_ORDER: ConversationTopic[] = [
+  "product_model",
+  "configuration",
   "price",
   "stock",
   "delivery",
+  "warranty",
   "payment",
   "invoice_or_document",
-  "next_step",
-  "configuration",
-  "warranty",
-  "product_model"
+  "next_step"
 ];
 
 function normalize(input: string): string {
@@ -112,7 +112,9 @@ function hasTopicContext(progress: ConversationProgress, topic: ConversationTopi
 function isStrongSaleAnswerForTopic(text: string, topic: ConversationTopic): boolean {
   switch (topic) {
     case "price":
-      return /\b(gia|bao gia|trieu|vnd|vnđ)\b/.test(text) || /^\d+(\s*(tr|trieu|vnđ|vnd|k|000))?(\s+\w+)?$/.test(text);
+      return /\b\d+(?:\.\d{3})*(?:\s*(?:tr|trieu|vnd|vnđ|trđ|k|m))\b/.test(text) ||
+             /\b\d+(?:\.\d{3}){2,}\b/.test(text) ||
+             /\b\d+tr\d*\b/.test(text);
     case "stock":
       return /\b(con hang|san hang|co san|kho|con|co)\b/.test(text) || /^(con|co)(\s+\w+)?$/.test(text);
     case "delivery":
@@ -146,7 +148,9 @@ function shouldMarkSaleAnswered(
 
   switch (topic) {
     case "price":
-      return /^\d+(\s*(tr|trieu|vnđ|vnd|k|000))?(\s+\w+)?$/.test(text) || /\b\d+\b/.test(text);
+      return /^\d+(\s*(tr|trieu|vnđ|vnd|k|000))?(\s+\w+)?$/.test(text) ||
+             /\b\d+(?:\.\d{3})*(?:\s*(?:tr|trieu|vnd|vnđ|trđ|k|m))\b/.test(text) ||
+             /\b\d+tr\d*\b/.test(text);
     case "stock":
       return /^(con|co|con hang|co hang)(\s+\w+)?$/.test(text) || /\b(con|co)\b/.test(text);
     case "delivery":

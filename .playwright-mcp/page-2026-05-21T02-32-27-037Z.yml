@@ -1,0 +1,81 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - heading "🎭 Chọn Persona" [level=3] [ref=e5]
+      - listbox [ref=e6]:
+        - option "⭐ [HARD] Anh Minh — IT nội bộ" [ref=e7]
+        - option "⭐ [HARD] Anh Huy — Kỹ thuật viên" [ref=e8]
+        - option "⭐ [HARD] Anh Nam — Khách dự án" [ref=e9]
+        - option "⭐ [MEDIUM] Anh Quân — Đại lý / reseller" [ref=e10]
+        - option "⭐ [HARD] Anh Phúc — Kế toán / hành chính" [ref=e11]
+        - option "⭐ [HARD] Anh Dũng — Người mua cá nhân" [ref=e12]
+        - option "⭐ [HARD] Chị Hương — Nhân viên mua hàng" [ref=e13]
+        - option "[HARD] Anh Khang — Khách dự án" [ref=e14]
+        - option "[MEDIUM] Anh Long — Đại lý / reseller" [ref=e15]
+        - option "[HARD] Chị Lan — IT nội bộ" [selected] [ref=e16]
+        - option "[HARD] Chị Thảo — Người mua cá nhân" [ref=e17]
+        - option "[MEDIUM] Chị Mai — Đại lý / reseller" [ref=e18]
+        - option "[HARD] Chị Vy — IT nội bộ" [ref=e19]
+        - option "[HARD] Chị Linh — Kế toán / hành chính" [ref=e20]
+        - option "[HARD] Chị Ngọc — Người mua cá nhân" [ref=e21]
+        - option "[HARD] Chị Trang — Đại lý / reseller" [ref=e22]
+    - generic [ref=e23]:
+      - heading "📋 Thông tin Persona" [level=3] [ref=e24]
+      - generic [ref=e25]:
+        - generic [ref=e145]:
+          - generic [ref=e146]: Tên hiển thị
+          - generic [ref=e147]: Chị Lan
+        - generic [ref=e148]:
+          - generic [ref=e149]: Vai trò
+          - text: IT nội bộ
+        - generic [ref=e150]:
+          - generic [ref=e151]: Tổ chức
+          - text: Bộ phận IT nội bộ
+        - generic [ref=e152]:
+          - generic [ref=e153]: Độ khó
+          - generic [ref=e154]: HARD
+        - generic [ref=e155]:
+          - generic [ref=e156]: Bối cảnh mua
+          - generic [ref=e157]: Đang so sánh nhiều model để chọn cấu hình phù hợp với nhu cầu.
+        - generic [ref=e158]:
+          - generic [ref=e159]: Sản phẩm
+          - generic [ref=e160]: Máy tính xách tay
+          - generic [ref=e161]: Máy tính để bàn
+          - generic [ref=e162]: Workstation
+          - generic [ref=e163]: Màn hình
+        - group [ref=e164]:
+          - generic "Quy tắc hành vi (4)" [ref=e165] [cursor=pointer]
+        - group [ref=e166]:
+          - generic "Câu mở đầu (5)" [ref=e167] [cursor=pointer]
+        - group [ref=e168]:
+          - generic "Câu hỏi hay gặp" [ref=e169] [cursor=pointer]
+        - group [ref=e170]:
+          - generic "Phản đối hay gặp" [ref=e171] [cursor=pointer]
+        - group [ref=e172]:
+          - generic "Điều kiện chốt" [ref=e173] [cursor=pointer]
+        - group [ref=e174]:
+          - generic "Training focus" [ref=e175] [cursor=pointer]
+        - group [ref=e176]:
+          - generic "⚠️ Risk flags" [ref=e177] [cursor=pointer]
+  - generic [ref=e59]:
+    - generic [ref=e60]:
+      - generic [ref=e61]:
+        - combobox [ref=e62]:
+          - option "auto_state" [selected]
+          - option "research_phase"
+          - option "pricing_phase"
+          - option "logistics_phase"
+          - option "payment_phase"
+          - option "operational_followup"
+          - option "passive_followup"
+          - option "uncertain_interest"
+        - button "▶ Khách AI bắt đầu" [ref=e63] [cursor=pointer]
+        - button "↺ Reset" [ref=e64] [cursor=pointer]
+      - generic [ref=e65]: "Auto state: logistics_phase · conf 0.78"
+    - generic [ref=e66]:
+      - generic [ref=e179]: "Khách AI: Mình đang tìm laptop văn phòng cho đội ngũ, bên em gửi giúp vài mẫu i5 phù hợp nhé."
+      - generic [ref=e181]: "Sale: Dạ bên em còn hàng chị."
+      - generic [ref=e183]: "Khách AI: Em gửi cho chị vài mẫu i5 phù hợp với nhu cầu văn phòng đi. Cho chị xem mấy lựa chọn nhé."
+    - generic [ref=e68]:
+      - textbox "Nhập tin nhắn Sale..." [ref=e69]
+      - button "Gửi" [active] [ref=e70] [cursor=pointer]

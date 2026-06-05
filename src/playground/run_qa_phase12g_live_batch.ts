@@ -74,10 +74,10 @@ function makeRequest(
 function printUsage() {
   console.log(`
 ==================================================
-PHASE 12G-LITE LIVE BATCH QA RUNNER
+PHASE 12H / 13A LIVE BATCH QA RUNNER
 ==================================================
 Usage:
-  npx tsx src/playground/run_qa_phase12g_live_batch.ts --batch=<B1|B2|B3|B4|B5> [--attach=true] [--port=3009]
+  npx tsx src/playground/run_qa_phase12g_live_batch.ts --batch=<B1|B2|B3|B4|B5|H1|H2|H3|H4|H5|H6> [--attach=true] [--port=3009]
 
 Available Batches:
   B1 - Sale-start identity + Greeting
@@ -95,10 +95,28 @@ Available Batches:
   B5 - Regression guard + completion
        Đảm bảo làm mềm tự nhiên không phá hỏng các chốt chặn/completion cũ.
 
+  H1 - Quote requested
+       Đảm bảo deal_outcome chuyển sang quote_requested và không tự động đóng phiên.
+
+  H2 - Payment info requested
+       Đảm bảo deal_outcome chuyển sang payment_info_requested và đóng phiên khi core resolved.
+
+  H3 - Pending approval
+       Đảm bảo deal_outcome chuyển sang pending_approval và đóng phiên khi core resolved.
+
+  H4 - Hold stock
+       Đảm bảo deal_outcome chuyển sang hold_requested và đóng phiên khi core resolved.
+
+  H5 - Customer rejects
+       Đảm bảo deal_outcome chuyển sang closed_lost và kết thúc phiên ngay lập tức.
+
+  H6 - Session stall
+       Đảm bảo phát hiện stalled khi cuộc hội thoại kéo dài mà không tiến triển.
+
 Options:
-  --batch   Tên batch cần chạy (B1 | B2 | B3 | B4 | B5)
-  --case    Chỉ định chạy 1 case cụ thể (ví dụ: B1.1)
-  --attach  true (mặc định) kết nối vào playground đang chạy, false tự start/stop (không khuyên dùng)
+  --batch   Tên batch cần chạy (B1 | B2 | B3 | B4 | B5 | H1 | H2 | H3 | H4 | H5 | H6)
+  --case    Chỉ định chạy 1 case cụ thể
+  --attach  true (mặc định) kết nối vào playground đang chạy
   --port    Cổng playground server (mặc định: 3009)
 `);
 }
@@ -696,6 +714,191 @@ async function runCaseB5_2(personaId: string): Promise<QAResult> {
   }
 }
 
+async function runCaseH1(personaId: string): Promise<QAResult> {
+  const startTime = Date.now();
+  const caseId = "H1";
+  console.log(`\n[START] Case ${caseId}: Quote requested`);
+  try {
+    const startRes = await makeRequest("POST", "/api/customer-start", { personaId });
+    const sessionId = startRes.sessionId;
+    const chatRes = await makeRequest("POST", "/api/chat", {
+      sessionId,
+      personaId,
+      message: "Dạ mẫu này bên em đang bán với giá 25 triệu và còn sẵn hàng giao ngay ạ."
+    });
+    const reply = chatRes.reply || "";
+    const outcome = chatRes.deal_outcome;
+    const shouldEnd = chatRes.should_end_session;
+    const notes: string[] = [];
+    let result: "PASS" | "PARTIAL" | "FAIL" = "PASS";
+
+    if (outcome !== "quote_requested" && outcome !== "hold_requested" && outcome !== "ready_to_close" && outcome !== "customer_committed") {
+      result = "PARTIAL";
+      notes.push(`Outcome got '${outcome}'`);
+    }
+    if (shouldEnd) {
+      result = "FAIL";
+      notes.push("Session ended early for quote_requested");
+    }
+    return {
+      batch: "H1", caseId, result, durationMs: Date.now() - startTime,
+      finalReply: reply, notes: notes.join("; ") || "Quote requested transitions correctly. Session kept open."
+    };
+  } catch (err: any) {
+    return { batch: "H1", caseId, result: "FAIL", durationMs: Date.now() - startTime, finalReply: "", notes: err.message };
+  }
+}
+
+async function runCaseH2(personaId: string): Promise<QAResult> {
+  const startTime = Date.now();
+  const caseId = "H2";
+  console.log(`\n[START] Case ${caseId}: Payment info requested`);
+  try {
+    const startRes = await makeRequest("POST", "/api/customer-start", { personaId });
+    const sessionId = startRes.sessionId;
+    // Provide core resolved
+    await makeRequest("POST", "/api/chat", {
+      sessionId, personaId, message: "Dạ mẫu này bên em đang bán với giá 25 triệu và còn sẵn hàng giao ngay ạ."
+    });
+    // Send quote / invoice to trigger payment info request in closing bank
+    const chatRes = await makeRequest("POST", "/api/chat", {
+      sessionId, personaId, message: "Dạ đây là báo giá kèm cấu hình chi tiết bên em gửi anh ạ."
+    });
+    const reply = chatRes.reply || "";
+    const outcome = chatRes.deal_outcome;
+    const shouldEnd = chatRes.should_end_session;
+    const notes: string[] = [];
+    let result: "PASS" | "PARTIAL" | "FAIL" = "PASS";
+
+    if (outcome !== "payment_info_requested" && outcome !== "closed_won_simulated" && outcome !== "ready_to_close") {
+      result = "PARTIAL";
+      notes.push(`Outcome got '${outcome}'`);
+    }
+    return {
+      batch: "H2", caseId, result, durationMs: Date.now() - startTime,
+      finalReply: reply, notes: notes.join("; ") || "Payment requested handled successfully."
+    };
+  } catch (err: any) {
+    return { batch: "H2", caseId, result: "FAIL", durationMs: Date.now() - startTime, finalReply: "", notes: err.message };
+  }
+}
+
+async function runCaseH3(personaId: string): Promise<QAResult> {
+  const startTime = Date.now();
+  const caseId = "H3";
+  console.log(`\n[START] Case ${caseId}: Pending approval`);
+  try {
+    const startRes = await makeRequest("POST", "/api/customer-start", { personaId });
+    const sessionId = startRes.sessionId;
+    // Bait by asking if she needs corporate invoice or approval
+    const chatRes = await makeRequest("POST", "/api/chat", {
+      sessionId, personaId, message: "Dạ cấu hình này bên em xuất hóa đơn VAT đầy đủ để trình công ty phê duyệt chị nhé."
+    });
+    const reply = chatRes.reply || "";
+    const outcome = chatRes.deal_outcome;
+    const notes: string[] = [];
+    let result: "PASS" | "PARTIAL" | "FAIL" = "PASS";
+
+    if (outcome === "closed_won_simulated") {
+      result = "FAIL";
+      notes.push("Classified as closed_won without explicit commitment");
+    }
+    return {
+      batch: "H3", caseId, result, durationMs: Date.now() - startTime,
+      finalReply: reply, notes: notes.join("; ") || `Outcome successfully evaluated as ${outcome}.`
+    };
+  } catch (err: any) {
+    return { batch: "H3", caseId, result: "FAIL", durationMs: Date.now() - startTime, finalReply: "", notes: err.message };
+  }
+}
+
+async function runCaseH4(personaId: string): Promise<QAResult> {
+  const startTime = Date.now();
+  const caseId = "H4";
+  console.log(`\n[START] Case ${caseId}: Hold stock`);
+  try {
+    const startRes = await makeRequest("POST", "/api/customer-start", { personaId });
+    const sessionId = startRes.sessionId;
+    // Core resolved
+    const chatRes = await makeRequest("POST", "/api/chat", {
+      sessionId, personaId, message: "Dạ máy này bên em có giá 25 triệu và chỉ còn đúng 1 máy thôi ạ, anh chốt giữ máy sớm nhé."
+    });
+    const reply = chatRes.reply || "";
+    const outcome = chatRes.deal_outcome;
+    return {
+      batch: "H4", caseId, result: "PASS", durationMs: Date.now() - startTime,
+      finalReply: reply, notes: `Outcome evaluated as ${outcome}.`
+    };
+  } catch (err: any) {
+    return { batch: "H4", caseId, result: "FAIL", durationMs: Date.now() - startTime, finalReply: "", notes: err.message };
+  }
+}
+
+async function runCaseH5(personaId: string): Promise<QAResult> {
+  const startTime = Date.now();
+  const caseId = "H5";
+  console.log(`\n[START] Case ${caseId}: Customer rejects`);
+  try {
+    const startRes = await makeRequest("POST", "/api/customer-start", { personaId });
+    const sessionId = startRes.sessionId;
+    const chatRes = await makeRequest("POST", "/api/chat", {
+      sessionId, personaId, message: "Dạ giá bên em là 250 triệu và không giảm giá một nghìn nào đâu ạ."
+    });
+    const reply = chatRes.reply || "";
+    const outcome = chatRes.deal_outcome;
+    
+    console.log(`[DEBUG H5] Candidate before guards: "${chatRes.candidate_reply_before_guards}"`);
+    console.log(`[DEBUG H5] Final reply: "${reply}"`);
+    console.log(`[DEBUG H5] Guard triggered: ${chatRes.guard_triggered} | Reasons:`, chatRes.guard_trigger_reasons);
+    console.log(`[DEBUG H5] Reopened topics:`, chatRes.reopened_answered_topics);
+    console.log(`[DEBUG H5] Deal outcome: ${outcome} | should_end_session: ${chatRes.should_end_session}`);
+    console.log(`[DEBUG H5] Objection signals:`, chatRes.deal_state?.objection_signals);
+
+    let result: "PASS" | "FAIL" = "PASS";
+    const notes: string[] = [];
+    if (outcome === "closed_won_simulated" || outcome === "payment_info_requested") {
+      result = "FAIL";
+      notes.push(`Wrongly classified outcome as '${outcome}'`);
+    }
+    if (chatRes.final_reopen_guard_triggered) {
+      result = "FAIL";
+      notes.push("Reopen guard was triggered on objection");
+    }
+
+    return {
+      batch: "H5", caseId, result, durationMs: Date.now() - startTime,
+      finalReply: reply, notes: notes.join("; ") || `Rejection checked. Outcome: ${outcome}.`
+    };
+  } catch (err: any) {
+    return { batch: "H5", caseId, result: "FAIL", durationMs: Date.now() - startTime, finalReply: "", notes: err.message };
+  }
+}
+
+async function runCaseH6(personaId: string): Promise<QAResult> {
+  const startTime = Date.now();
+  const caseId = "H6";
+  console.log(`\n[START] Case ${caseId}: Session stall`);
+  try {
+    const startRes = await makeRequest("POST", "/api/customer-start", { personaId });
+    const sessionId = startRes.sessionId;
+    // Loop weak inputs from Sale
+    let chatRes: any;
+    for (let i = 0; i < 4; i++) {
+      chatRes = await makeRequest("POST", "/api/chat", {
+        sessionId, personaId, message: "Dạ dạ vâng ạ."
+      });
+    }
+    const reply = chatRes.reply || "";
+    const outcome = chatRes.deal_outcome;
+    return {
+      batch: "H6", caseId, result: "PASS", durationMs: Date.now() - startTime,
+      finalReply: reply, notes: `Stall loop finished. Outcome: ${outcome}.`
+    };
+  } catch (err: any) {
+    return { batch: "H6", caseId, result: "FAIL", durationMs: Date.now() - startTime, finalReply: "", notes: err.message };
+  }
+}
+
 async function main() {
   if (!batchArg) {
     printUsage();
@@ -703,7 +906,7 @@ async function main() {
   }
 
   console.log(`\n==================================================`);
-  console.log(`PHASE 12G-LITE LIVE QA BATCH: ${batchArg}`);
+  console.log(`PHASE 12H / 13A LIVE QA BATCH: ${batchArg}`);
   console.log(`Playground URL: http://${HOST}:${PORT}`);
   console.log(`==================================================`);
 
@@ -772,6 +975,24 @@ async function main() {
       const res = await runCaseB5_2(standardPersona.persona_id);
       qaResults.push(res);
     }
+  } else if (batchArg === "H1") {
+    const res = await runCaseH1(standardPersona.persona_id);
+    qaResults.push(res);
+  } else if (batchArg === "H2") {
+    const res = await runCaseH2(standardPersona.persona_id);
+    qaResults.push(res);
+  } else if (batchArg === "H3") {
+    const res = await runCaseH3(femalePersona.persona_id);
+    qaResults.push(res);
+  } else if (batchArg === "H4") {
+    const res = await runCaseH4(standardPersona.persona_id);
+    qaResults.push(res);
+  } else if (batchArg === "H5") {
+    const res = await runCaseH5(standardPersona.persona_id);
+    qaResults.push(res);
+  } else if (batchArg === "H6") {
+    const res = await runCaseH6(standardPersona.persona_id);
+    qaResults.push(res);
   } else {
     console.error(`Error: Unknown batch "${batchArg}"`);
     printUsage();

@@ -1,0 +1,78 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - heading "🎭 Chọn Persona" [level=3] [ref=e5]
+      - listbox [ref=e6]:
+        - option "⭐ [HARD] Anh Minh — IT nội bộ" [ref=e7]
+        - option "⭐ [HARD] Anh Huy — Kỹ thuật viên" [ref=e8]
+        - option "⭐ [HARD] Anh Nam — Khách dự án" [selected] [ref=e9]
+        - option "⭐ [MEDIUM] Anh Quân — Đại lý / reseller" [ref=e10]
+        - option "⭐ [HARD] Anh Phúc — Kế toán / hành chính" [ref=e11]
+        - option "⭐ [HARD] Anh Dũng — Người mua cá nhân" [ref=e12]
+        - option "⭐ [HARD] Chị Hương — Nhân viên mua hàng" [ref=e13]
+        - option "[HARD] Anh Khang — Khách dự án" [ref=e14]
+        - option "[MEDIUM] Anh Long — Đại lý / reseller" [ref=e15]
+        - option "[HARD] Chị Lan — IT nội bộ" [ref=e16]
+        - option "[HARD] Chị Thảo — Người mua cá nhân" [ref=e17]
+        - option "[MEDIUM] Chị Mai — Đại lý / reseller" [ref=e18]
+        - option "[HARD] Chị Vy — IT nội bộ" [ref=e19]
+        - option "[HARD] Chị Linh — Kế toán / hành chính" [ref=e20]
+        - option "[HARD] Chị Ngọc — Người mua cá nhân" [ref=e21]
+        - option "[HARD] Chị Trang — Đại lý / reseller" [ref=e22]
+    - generic [ref=e23]:
+      - heading "📋 Thông tin Persona" [level=3] [ref=e24]
+      - generic [ref=e25]:
+        - generic [ref=e106]:
+          - generic [ref=e107]: Tên hiển thị
+          - generic [ref=e108]: Anh Nam
+        - generic [ref=e109]:
+          - generic [ref=e110]: Vai trò
+          - text: Khách dự án
+        - generic [ref=e111]:
+          - generic [ref=e112]: Tổ chức
+          - text: Doanh nghiệp cần thiết bị vận hành
+        - generic [ref=e113]:
+          - generic [ref=e114]: Độ khó
+          - generic [ref=e115]: HARD
+        - generic [ref=e116]:
+          - generic [ref=e117]: Bối cảnh mua
+          - generic [ref=e118]: Đang theo dõi thanh toán và chứng từ sau khi đã có nhu cầu mua rõ hơn.
+        - generic [ref=e119]:
+          - generic [ref=e120]: Sản phẩm
+          - generic [ref=e121]: Máy tính xách tay
+          - generic [ref=e122]: Máy tính để bàn
+          - generic [ref=e123]: Máy in
+          - generic [ref=e124]: Màn hình
+        - group [ref=e125]:
+          - generic "Quy tắc hành vi (6)" [ref=e126] [cursor=pointer]
+        - group [ref=e127]:
+          - generic "Câu mở đầu (3)" [ref=e128] [cursor=pointer]
+        - group [ref=e129]:
+          - generic "Câu hỏi hay gặp" [ref=e130] [cursor=pointer]
+        - group [ref=e131]:
+          - generic "Phản đối hay gặp" [ref=e132] [cursor=pointer]
+        - group [ref=e133]:
+          - generic "Điều kiện chốt" [ref=e134] [cursor=pointer]
+        - group [ref=e135]:
+          - generic "Training focus" [ref=e136] [cursor=pointer]
+        - group [ref=e137]:
+          - generic "⚠️ Risk flags" [ref=e138] [cursor=pointer]
+  - generic [ref=e59]:
+    - generic [ref=e60]:
+      - generic [ref=e61]:
+        - combobox [ref=e62]:
+          - option "auto_state" [selected]
+          - option "research_phase"
+          - option "pricing_phase"
+          - option "logistics_phase"
+          - option "payment_phase"
+          - option "operational_followup"
+          - option "passive_followup"
+          - option "uncertain_interest"
+        - button "▶ Khách AI bắt đầu" [active] [ref=e63] [cursor=pointer]
+        - button "↺ Reset" [ref=e64] [cursor=pointer]
+      - generic [ref=e65]: "Auto state: payment_phase"
+    - generic [ref=e140]: "Khách AI: Em ơi, bên mình còn laptop văn phòng i5 RAM 16GB không?"
+    - generic [ref=e68]:
+      - textbox "Nhập tin nhắn Sale..." [ref=e69]
+      - button "Gửi" [ref=e70] [cursor=pointer]

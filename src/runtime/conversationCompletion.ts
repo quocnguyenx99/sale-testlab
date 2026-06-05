@@ -21,6 +21,8 @@ export interface ConversationCompletionState {
   missing_topics: ConversationTopic[];
   resolved_topics: ConversationTopic[];
   recommended_action: CompletionRecommendedAction;
+  completion_blocked_by_product_context?: boolean;
+  completion_block_reason?: string;
 }
 
 export interface ConversationCompletionInput {
@@ -79,9 +81,16 @@ function normalize(input: string): string {
 }
 
 function render(text: string, identity: ConversationIdentityProfile): string {
+  const self = identity.customer_self_pronoun;
+  const selfCap = self.charAt(0).toUpperCase() + self.slice(1);
+  const sale = identity.customer_target_pronoun;
+  const saleCap = sale.charAt(0).toUpperCase() + sale.slice(1);
+
   return text
-    .replaceAll("{self}", identity.customer_self_pronoun)
-    .replaceAll("{sale}", identity.customer_target_pronoun);
+    .replaceAll("{self}", self)
+    .replaceAll("{self_cap}", selfCap)
+    .replaceAll("{sale}", sale)
+    .replaceAll("{sale_cap}", saleCap);
 }
 
 function isResolved(progress: ConversationProgress, topic: ConversationTopic): boolean {
@@ -193,11 +202,23 @@ const REOPEN_PATTERNS: Record<ConversationTopic, RegExp[]> = {
   next_step: [/\b(chot|giu hang|buoc tiep theo)\b/]
 };
 
+function hasObjectionIntent(text: string): boolean {
+  const t = normalize(text);
+  const objectionKeywords = [
+    "gia hoi cao", "gia cao", "dat nhi", "hoi dat", "dat qua", "gia vay cao", "gia nay", "gia vay em", "gia vay chi", "gia nay de",
+    "de anh xem", "de chi xem", "de em xem", "can nhac", "de xem lai", "tinh lai", "de tinh lai", "de anh tinh", "de chi tinh",
+    "sep chua duyet", "cho duyet", "cho trinh", "trinh sep", "phai trinh", "hoi lai cong ty", "hoi lai sop", "hoi lai shop",
+    "khong mua", "khong lay nua", "mua ben khac", "huy don", "khong can nua", "de sau nhe", "de sau nha", "luc khac"
+  ];
+  return objectionKeywords.some(kw => t.includes(normalize(kw)));
+}
+
 export function detectReopenedAnsweredTopics(
   candidateReply: string,
   progress: ConversationProgress
 ): ConversationTopic[] {
   if (!hasQuestionIntent(candidateReply)) return [];
+  if (hasObjectionIntent(candidateReply)) return [];
   const t = normalize(candidateReply);
   const safeProgress = ensureConversationProgress(progress);
   const reopened: ConversationTopic[] = [];
@@ -212,12 +233,38 @@ export function detectReopenedAnsweredTopics(
   return reopened;
 }
 
-export function evaluateConversationCompletion(input: ConversationCompletionInput): ConversationCompletionState {
+export function evaluateConversationCompletion(
+  input: ConversationCompletionInput,
+  productContextStatus?: "unknown" | "vague" | "specific",
+  hasSelectedModel?: boolean,
+  stockStatus?: "in_stock" | "out_of_stock" | "unknown"
+): ConversationCompletionState {
   const resolved_topics = getResolvedTopics(input.conversation_progress);
   const missing_topics = getMissingTopics(input.conversation_progress);
-  const completion_ready = hasRequiredCompletion(input.conversation_progress) && hasUsefulOptionalCompletion(input.conversation_progress);
+  let completion_ready = hasRequiredCompletion(input.conversation_progress) && hasUsefulOptionalCompletion(input.conversation_progress);
   const recommended_action = pickRecommendedAction(input.conversation_progress);
   const completion_reason = pickCompletionReason(input.conversation_progress);
+
+  let completion_blocked_by_product_context = false;
+  let completion_block_reason: string | undefined = undefined;
+
+  if (productContextStatus === "unknown") {
+    completion_ready = false;
+    completion_blocked_by_product_context = true;
+    completion_block_reason = "product_context_unknown";
+  } else if (productContextStatus === "vague") {
+    if (!hasSelectedModel) {
+      completion_ready = false;
+      completion_blocked_by_product_context = true;
+      completion_block_reason = "product_context_vague_not_specific";
+    }
+  } else if (productContextStatus === "specific") {
+    if (stockStatus === "out_of_stock") {
+      completion_ready = false;
+      completion_blocked_by_product_context = true;
+      completion_block_reason = "product_stock_out_of_stock";
+    }
+  }
 
   return {
     completion_ready,
@@ -226,7 +273,9 @@ export function evaluateConversationCompletion(input: ConversationCompletionInpu
     resolved_topics,
     recommended_action: completion_ready && hasAllMajorTopics(input.conversation_progress)
       ? "end_session"
-      : recommended_action
+      : recommended_action,
+    completion_blocked_by_product_context,
+    completion_block_reason
   };
 }
 
@@ -237,6 +286,22 @@ export function buildCompletionReply(input: {
   nextUnresolvedTopic: ConversationTopic | null;
 }): CompletionReplyResult {
   const topic = input.nextUnresolvedTopic;
+
+  if (input.completion.completion_blocked_by_product_context) {
+    if (input.completion.completion_block_reason === "product_stock_out_of_stock") {
+      return {
+        reply: render("Mẫu này hiện hết hàng rồi hả {sale}? Vậy {sale} gửi {self} mẫu tương đương còn hàng với giá sỉ gần gần giúp {self} nhé.", input.identity),
+        variant_id: "product_context_gating_out_of_stock",
+        topic_used: topic
+      };
+    }
+    return {
+      reply: render("{self_cap} chưa chốt model cụ thể đâu {sale}. {sale_cap} gửi {self} vài mẫu phù hợp để {self} so sánh giá sỉ với cấu hình trước nhé.", input.identity),
+      variant_id: "product_context_gating_clarify",
+      topic_used: topic
+    };
+  }
+
   const action = input.completion.completion_ready ? "end_session" : input.completion.recommended_action;
   const variants = CLOSING_BANK[action];
   const chosen = chooseVariant(variants, input.recentReplies);
@@ -257,6 +322,10 @@ export function shouldForceCompletionReply(input: {
   recentReplies: string[];
   nextUnresolvedTopic: ConversationTopic | null;
 }): boolean {
+  if (hasObjectionIntent(input.candidateReply)) {
+    return false;
+  }
+
   if (input.completion.completion_ready) return true;
   if (input.nextUnresolvedTopic === "next_step") return true;
 

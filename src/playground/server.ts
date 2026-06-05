@@ -45,6 +45,11 @@ import {
   shouldForceCompletionReply,
   detectReopenedAnsweredTopics
 } from "../runtime/conversationCompletion";
+import {
+  processDealState,
+  DealState,
+  getTerminalReply
+} from "../runtime/dealState";
 
 type RuntimePersonaRecord = RuntimePersonaForPrompt & {
   source_entity_id: string;
@@ -140,6 +145,45 @@ function shouldForceRegenerate(turns: ChatTurn[], candidate: string): boolean {
   return false;
 }
 
+function isDirectQuestion(text: string): boolean {
+  const t = text.toLowerCase().normalize("NFD").replace(/\p{M}/gu).replace(/[đĐ]/g, "d").replace(/\s+/g, " ").trim();
+  return text.includes("?") || /\b(nao|gi|khong|chua|may)\b/.test(t);
+}
+
+function isPriceActuallyQuoted(recentTurns: Array<{ role: "sale" | "customer_ai"; text: string }>, latestMessage: string): boolean {
+  const saleMessages = [...recentTurns.filter(t => t.role === "sale").map(t => t.text), latestMessage];
+  const joined = saleMessages.join(" ").toLowerCase();
+  const PRICE_QUOTE_PATTERN = /\b\d+(?:\.\d{3})*(?:\s*(?:tr|trieu|vnd|vnđ|trđ|k|m))\b|\b\d+(?:\.\d{3}){2,}\b|\b\d+tr\d*\b/;
+  return PRICE_QUOTE_PATTERN.test(joined);
+}
+
+function hasGatedTerms(text: string): boolean {
+  const t = normalizeForMatch(text);
+  const gatedPatterns = [
+    "mau nay",
+    "model nay",
+    "giu mau nay",
+    "chot mau nay",
+    "stk",
+    "so tai khoan",
+    "thanh toan",
+    "chuyen khoan",
+    "chot luon"
+  ];
+  return gatedPatterns.some(pat => t.includes(pat));
+}
+
+function hasSupportPhrases(text: string): boolean {
+  const t = normalizeForMatch(text);
+  const supportPhrases = [
+    "em ho tro giu mau nay",
+    "minh ho tro",
+    "ben minh ho tro",
+    "ben em dang san hang"
+  ];
+  return supportPhrases.some(pat => t.includes(pat));
+}
+
 function isGreeting(text: string): boolean {
   const n = normalizeForMatch(text);
   return /^(xin(\s+ch[a-z]*)?|chao|hello|hi)\b/.test(n);
@@ -192,6 +236,8 @@ function chooseResponseBankReply(input: {
     behavior_rules?: string[];
     difficulty?: string;
   };
+  product_context_status?: string; // Phase 12H.1-C
+  is_price_quoted?: boolean; // Nhánh C
 }): { reply: string; variant_id: string; topic_used: string | null } {
   const bank = buildResponseBankReply({
     topic: input.topic,
@@ -199,7 +245,9 @@ function chooseResponseBankReply(input: {
     identity: input.identity,
     recentFallbackVariantIds: input.recentFallbackVariantIds,
     recentReplies: input.recentReplies,
-    persona: input.persona
+    persona: input.persona,
+    product_context_status: input.product_context_status,
+    is_price_quoted: input.is_price_quoted
   });
   return bank;
 }
@@ -764,8 +812,20 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
   const personaSalutationStyle = ep.salutation_style || "";
   const scenarioContext = existing?.scenarioContext;
 
-  const route = routeRuntimeState({ latestSaleMessage: message, recentMessages: recentSale, selectedPersona: rp, debugOverrideState: body.runtimeState || "auto_state" });
-  const nextState = route.runtime_state;
+  const routeBefore = routeRuntimeState({
+    latestSaleMessage: message,
+    recentMessages: recentSale,
+    selectedPersona: rp,
+    debugOverrideState: body.runtimeState || "auto_state"
+  });
+  const routeAfter = routeRuntimeState({
+    latestSaleMessage: message,
+    recentMessages: recentSale,
+    selectedPersona: rp,
+    debugOverrideState: body.runtimeState || "auto_state",
+    product_context_status: memorySlots.product_context_status
+  });
+  const nextState = routeAfter.runtime_state;
   const greetingOnly = isGreeting(message);
   const recent = turns.slice(-10).map(t => `${t.role === "sale" ? "Sale" : "Khach AI"}: ${t.text}`);
 
@@ -813,6 +873,8 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
   const guardTriggerReasons: string[] = [];
   let reopenedAnsweredTopics: ConversationTopic[] = [];
 
+  const isPriceQuoted = isPriceActuallyQuoted(turns, message);
+
   const applyBankFallback = (reasonTopic: ConversationTopic | null): void => {
     const bank = chooseResponseBankReply({
       topic: reasonTopic,
@@ -825,7 +887,9 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
         purchase_context: ep.purchase_context,
         behavior_rules: ep.behavior_rules,
         difficulty: ep.difficulty
-      }
+      },
+      product_context_status: memorySlots.product_context_status,
+      is_price_quoted: isPriceQuoted
     });
     reply = bank.reply;
     finalReplySource = "deterministic_fallback";
@@ -861,23 +925,49 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
     }
   }
 
+  let greetingOverrideUsed = false;
+  let greetingOverrideReason: string | null = null;
+
   if (greetingOnly) {
-    const self = identityProfile.customer_self_pronoun;
-    const target = identityProfile.customer_target_pronoun;
-    const selfCap = self.charAt(0).toUpperCase() + self.slice(1);
-    const targetCap = target.charAt(0).toUpperCase() + target.slice(1);
+    const modelReplyEmpty = !candidateReplyBeforeGuards || candidateReplyBeforeGuards.trim().length === 0;
+    const modelCallFailed = finalReplySource === "deterministic_fallback";
     
-    if ((self === "anh" || self === "chị") && target === "em") {
-      reply = `${selfCap} chào ${target}, ${self} đang tham khảo sản phẩm bên ${target}. ${targetCap} tư vấn ngắn gọn giúp ${self} nhé.`;
-    } else if (self === "em" && (target === "anh" || target === "chị")) {
-      reply = `Em chào ${target}, em đang tham khảo sản phẩm bên mình. ${targetCap} tư vấn ngắn gọn giúp em nhé.`;
+    const greetIdentityDrift = detectIdentityDrift(candidateReplyBeforeGuards || "", identityProfile);
+    const hasSevereDrift = greetIdentityDrift.identity_drift_detected || greetIdentityDrift.role_inversion_detected;
+
+    if (modelReplyEmpty || modelCallFailed || hasSevereDrift) {
+      greetingOverrideUsed = true;
+      greetingOverrideReason = modelReplyEmpty 
+        ? "model_reply_empty" 
+        : (modelCallFailed ? "model_call_failed" : "severe_role_drift");
+
+      const self = identityProfile.customer_self_pronoun;
+      const target = identityProfile.customer_target_pronoun;
+      const selfCap = self.charAt(0).toUpperCase() + self.slice(1);
+      const targetCap = target.charAt(0).toUpperCase() + target.slice(1);
+      
+      if ((self === "anh" || self === "chị") && target === "em") {
+        reply = `${selfCap} chào ${target}, ${self} đang tham khảo sản phẩm bên ${target}. ${targetCap} tư vấn ngắn gọn giúp ${self} nhé.`;
+      } else if (self === "em" && (target === "anh" || target === "chị")) {
+        reply = `Em chào ${target}, em đang tham khảo sản phẩm bên mình. ${targetCap} tư vấn ngắn gọn giúp em nhé.`;
+      } else {
+        reply = `Chào bạn, mình đang tham khảo sản phẩm bên mình. Bạn tư vấn ngắn gọn giúp mình nhé.`;
+      }
+      finalReplySource = "deterministic_fallback";
     } else {
-      reply = `Chào bạn, mình đang tham khảo sản phẩm bên mình. Bạn tư vấn ngắn gọn giúp mình nhé.`;
+      reply = candidateReplyBeforeGuards;
+      finalReplySource = "local_ai_generated";
     }
   }
-  const repeatedTopics = detectRepeatedTopicAsking(reply, conversationProgress);
-  const previousAiReplies = recentReplies;
-  const genericLoopDetected = isRepeatedGenericFallback(reply, previousAiReplies);
+  const directQuestion = isDirectQuestion(message);
+  let repeatedTopics: ConversationTopic[] = [];
+  let genericLoopDetected = false;
+
+  if (!directQuestion) {
+    repeatedTopics = detectRepeatedTopicAsking(reply, conversationProgress);
+    genericLoopDetected = isRepeatedGenericFallback(reply, recentReplies);
+  }
+
   if (repeatedTopics.length > 0 || genericLoopDetected || freeFormLoopDetected || isGenericConfirmationIntent(reply)) {
     applyBankFallback(fallbackTopic);
     guardTriggered = true;
@@ -887,19 +977,36 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
     if (isGenericConfirmationIntent(reply)) guardTriggerReasons.push("generic_confirmation");
   }
 
-  reopenedAnsweredTopics = detectReopenedAnsweredTopics(reply, conversationProgress);
+  if (!directQuestion) {
+    reopenedAnsweredTopics = detectReopenedAnsweredTopics(reply, conversationProgress);
+  }
   if (reopenedAnsweredTopics.length > 0) {
     applyBankFallback(fallbackTopic);
     guardTriggered = true;
     guardTriggerReasons.push(`reopened_topic:${reopenedAnsweredTopics.join(",")}`);
   }
 
-  const completion = evaluateConversationCompletion({
-    conversation_progress: conversationProgress,
-    identity_profile: identityProfile,
-    next_unresolved_topic: nextUnresolvedTopic,
-    recent_turns: turns
-  });
+  let stockStatus: "in_stock" | "out_of_stock" | "unknown" = "unknown";
+  if (memorySlots.selected_product_model_code && memorySlots.product_candidates_summary) {
+    const candidate = memorySlots.product_candidates_summary.find(
+      c => c.model_code === memorySlots.selected_product_model_code
+    );
+    if (candidate) {
+      stockStatus = candidate.stock_status;
+    }
+  }
+
+  const completion = evaluateConversationCompletion(
+    {
+      conversation_progress: conversationProgress,
+      identity_profile: identityProfile,
+      next_unresolved_topic: nextUnresolvedTopic,
+      recent_turns: turns
+    },
+    memorySlots.product_context_status,
+    memorySlots.selected_product_model_code !== null,
+    stockStatus
+  );
   const safeNextUnresolvedTopic =
     nextUnresolvedTopic ?? (completion.completion_ready ? "next_step" : completion.missing_topics[0] ?? null);
   let completionForcedReply = false;
@@ -959,12 +1066,106 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
     fallbackTopicUsed = null;
   }
 
-  const progressAfter = updateProgressFromCustomerMessage(snapshotProgress(progressBeforeReply), reply);
+  // ==========================================
+  // PHASE 12H.1-C RUNTIME GUARDS & GATING
+  // ==========================================
+  let ambiguous_model_guard_triggered = false;
+  let ambiguous_model_guard_reason: string | null = null;
+  let stock_quantity_hidden_from_customer = false;
+  let consultant_tone_blocked = false;
 
-  const newTurns: ChatTurn[] = [...turns,
+  const isSpecific = memorySlots.product_context_status === "specific";
+
+  // Guard 1: Consultant Tone Blocker (Check this first)
+  if (hasSupportPhrases(reply)) {
+    consultant_tone_blocked = true;
+    let modelCode = memorySlots.selected_product_model_code || "";
+    let priceStr = "";
+    
+    const priceMatch = reply.match(/\b\d{1,3}(\.\d{3})*(\.\d{3})?\b/);
+    if (priceMatch) {
+      priceStr = priceMatch[0];
+    } else if (memorySlots.product_candidates_summary && memorySlots.product_candidates_summary.length > 0) {
+      const p = memorySlots.product_candidates_summary.find(c => c.model_code === modelCode);
+      if (p && p.price_si) {
+        priceStr = p.price_si.toLocaleString("vi-VN");
+      }
+    }
+
+    if (!modelCode) modelCode = "mẫu này";
+    if (!priceStr) priceStr = "giá sỉ";
+
+    const self = identityProfile.customer_self_pronoun;
+    const target = identityProfile.customer_target_pronoun;
+    reply = `À mã ${modelCode} còn hàng đúng không ${target}? Giá sỉ ${priceStr} thì ${target} báo thêm giúp ${self} thời gian giao nhé.`;
+    finalReplySource = "deterministic_fallback";
+    guardTriggered = true;
+    guardTriggerReasons.push("consultant_tone_blocked");
+  }
+
+  // Guard 2: Ambiguous Model Guard
+  if (!isSpecific && hasGatedTerms(reply)) {
+    ambiguous_model_guard_triggered = true;
+    ambiguous_model_guard_reason = "product_context_not_specific_with_gated_terms";
+    
+    const self = identityProfile.customer_self_pronoun;
+    const selfCap = self.charAt(0).toUpperCase() + self.slice(1);
+    const sale = identityProfile.customer_target_pronoun;
+    const saleCap = sale.charAt(0).toUpperCase() + sale.slice(1);
+    reply = `${selfCap} chưa chốt model cụ thể đâu ${sale}. ${saleCap} gửi ${self} vài mẫu phù hợp để ${self} so sánh giá sỉ với cấu hình trước nhé.`;
+    finalReplySource = "deterministic_fallback";
+    guardTriggered = true;
+    guardTriggerReasons.push("ambiguous_model_guard_triggered");
+  }
+
+  // Guard 3: Proactive Stock Leak Blocker
+  if (memorySlots.product_candidates_summary) {
+    const saleTextHistory = turns.filter(t => t.role === "sale").map(t => t.text).join(" ");
+    
+    for (const c of memorySlots.product_candidates_summary) {
+      const qtyStr = String(c.stock_qty);
+      const isMentionedByAI = new RegExp(`\\b${qtyStr}\\b`).test(reply);
+      const wasMentionedBySale = new RegExp(`\\b${qtyStr}\\b`).test(saleTextHistory) || new RegExp(`\\b${qtyStr}\\b`).test(message);
+      
+      if (isMentionedByAI && !wasMentionedBySale) {
+        stock_quantity_hidden_from_customer = true;
+        const self = identityProfile.customer_self_pronoun;
+        const target = identityProfile.customer_target_pronoun;
+        reply = `Mẫu này còn hàng không ${target}? Nếu ${self} lấy vài cái thì bên ${target} có đủ không?`;
+        finalReplySource = "deterministic_fallback";
+        guardTriggered = true;
+        guardTriggerReasons.push("stock_leak_blocked");
+        break;
+      }
+    }
+  }
+
+  const progressAfterRaw = updateProgressFromCustomerMessage(snapshotProgress(progressBeforeReply), reply);
+  const newTurnsRaw: ChatTurn[] = [...turns,
     { role: "sale" as const, text: message, state: nextState },
     { role: "customer_ai" as const, text: reply, state: nextState, reply_source: finalReplySource, latency_ms: latency, safety_flags: result.runtime_safety, constraint_triggers: usedConstraints }
-  ].slice(-30);
+  ];
+
+  const dealStateResult = processDealState({
+    progress: progressAfterRaw,
+    recent_turns: newTurnsRaw,
+    completion_ready: completion.completion_ready,
+    missing_topics: completion.missing_topics.map(t => String(t)),
+    product_context_status: memorySlots.product_context_status
+  });
+
+  if (dealStateResult.should_end_session) {
+    const terminalReply = getTerminalReply(dealStateResult.deal_outcome, identityProfile);
+    if (terminalReply) {
+      reply = terminalReply;
+      finalReplySource = "deterministic_fallback";
+      newTurnsRaw[newTurnsRaw.length - 1].text = reply;
+      newTurnsRaw[newTurnsRaw.length - 1].reply_source = "deterministic_fallback";
+    }
+  }
+
+  const progressAfter = updateProgressFromCustomerMessage(snapshotProgress(progressBeforeReply), reply);
+  const newTurns = newTurnsRaw.slice(-30);
 
   sessions.set(sessionId, {
     sessionId,
@@ -983,7 +1184,7 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
 
   return {
     sessionId, persona_id: ep.persona_id, runtime_state: nextState,
-    state_confidence: route.confidence, matched_rules: route.matched_rules,
+    state_confidence: routeAfter.confidence, matched_rules: routeAfter.matched_rules,
     reply, reply_source: finalReplySource,
     raw_model_reply: rawModelReply,
     candidate_reply_before_guards: candidateReplyBeforeGuards,
@@ -993,10 +1194,25 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
     customer_voice_guard_reason: customerVoiceGuardReason,
     sale_opening_identity_detected: isSaleOpening,
     vietnamese_accent_warning: hasVietnameseAccentWarning(reply),
+    greeting_override_used: greetingOverrideUsed,
+    greeting_override_reason: greetingOverrideReason,
     latency_ms: latency, safety_flags: result.runtime_safety, constraint_triggers: usedConstraints,
     blocked_behaviors: result.reply_reasoning.blocked_behaviors,
     scenario_context: scenarioContext,
     memory_slots: memorySlots,
+    selected_product_model: memorySlots.selected_product_model,
+    selected_product_model_code: memorySlots.selected_product_model_code,
+    product_context_status: memorySlots.product_context_status,
+    product_candidates_summary: memorySlots.product_candidates_summary,
+    product_knowledge_used: memorySlots.product_knowledge_used,
+    auto_state_before_product_gate: routeBefore.runtime_state,
+    auto_state_after_product_gate: routeAfter.runtime_state,
+    completion_blocked_by_product_context: completion.completion_blocked_by_product_context || false,
+    completion_block_reason: completion.completion_block_reason || null,
+    ambiguous_model_guard_triggered,
+    ambiguous_model_guard_reason,
+    stock_quantity_hidden_from_customer,
+    consultant_tone_blocked,
     progress_before: progressBeforeReply,
     progress_after: progressAfter,
     conversation_progress: progressAfter,
@@ -1027,6 +1243,15 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
     completion_forced_reply: completionForcedReply,
     completion_override_reason: completionOverrideReason,
     completion_variant_id: completionVariantId,
+    deal_state: dealStateResult,
+    deal_outcome: dealStateResult.deal_outcome,
+    training_success: dealStateResult.training_success,
+    should_end_session: dealStateResult.should_end_session,
+    end_reason: dealStateResult.end_reason,
+    next_best_action: dealStateResult.next_best_action,
+    buying_signals: dealStateResult.buying_signals,
+    closing_signals: dealStateResult.closing_signals,
+    objection_signals: dealStateResult.objection_signals,
     completion_topic_used: completionTopicUsed,
     forbidden_phrase_matches: Array.from(new Set([...assistantHits, ...identityDrift.forbidden_phrase_matches]))
   };
@@ -1057,6 +1282,14 @@ async function handleCustomerStartEnriched(bodyRaw: string, enriched: EnrichedPe
     safety_flags: { emotional_inference_blocked: false, unsupported_claim_blocked: false, operational_realism_preserved: true },
     constraint_triggers: ["enriched_persona_opening"]
   };
+  
+  const dealStateResult = processDealState({
+    progress: conversationProgress,
+    recent_turns: [turn],
+    completion_ready: false,
+    missing_topics: ["product_model", "configuration", "price", "stock"]
+  });
+
   sessions.set(sessionId, {
     sessionId,
     persona: {} as RuntimePersonaRecord,
@@ -1080,6 +1313,11 @@ async function handleCustomerStartEnriched(bodyRaw: string, enriched: EnrichedPe
     safety_flags: turn.safety_flags, constraint_triggers: turn.constraint_triggers,
     scenario_context: scenarioContext,
     memory_slots: memorySlots,
+    selected_product_model: memorySlots.selected_product_model,
+    selected_product_model_code: memorySlots.selected_product_model_code,
+    product_context_status: memorySlots.product_context_status,
+    product_candidates_summary: memorySlots.product_candidates_summary,
+    product_knowledge_used: memorySlots.product_knowledge_used,
     conversation_progress: conversationProgress,
     last_requested_topic: conversationProgress.last_requested_topic ?? null,
     last_answered_topic: conversationProgress.last_answered_topic ?? null,
@@ -1087,7 +1325,16 @@ async function handleCustomerStartEnriched(bodyRaw: string, enriched: EnrichedPe
     identity_profile: identityProfile,
     identity_source: identitySource,
     persona_salutation_style: personaSalutationStyle,
-    identity_drift_detected: false
+    identity_drift_detected: false,
+    deal_state: dealStateResult,
+    deal_outcome: dealStateResult.deal_outcome,
+    training_success: dealStateResult.training_success,
+    should_end_session: dealStateResult.should_end_session,
+    end_reason: dealStateResult.end_reason,
+    next_best_action: dealStateResult.next_best_action,
+    buying_signals: dealStateResult.buying_signals,
+    closing_signals: dealStateResult.closing_signals,
+    objection_signals: dealStateResult.objection_signals
   };
 }
 

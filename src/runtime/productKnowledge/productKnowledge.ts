@@ -9,7 +9,8 @@ let modelCodeMap: Map<string, ProductKnowledgeItem> | null = null;
 const STOPWORDS = new Set([
   "anh", "chi", "em", "con", "hang", "khong", "bao", "gia", "giup", "voi", "nhe",
   "co", "gi", "oi", "may", "in", "cho", "ban", "ben", "tim", "muon", "hoi", "la",
-  "va", "de", "cua", "dum", "nha", "xem", "mau", "dong", "khao", "tham"
+  "va", "de", "cua", "dum", "nha", "xem", "mau", "dong", "khao", "tham", "da", "do",
+  "nay", "kia", "ay", "nao", "nhi", "ma", "mua", "loai", "nhieu", "khac"
 ]);
 
 // Helper to normalize searchable text
@@ -67,6 +68,14 @@ export function findProductByModelCode(code: string): ProductKnowledgeItem | nul
   return modelCodeMap.get(normalized) || null;
 }
 
+const GENERIC_WORDS = new Set([
+  "canon", "epson", "brother", "hp", "hpe", "dell", "intel", "asus", "acer", "lenovo",
+  "sama", "cooler", "master", "transcend", "gigabyte", "wd", "western", "digital",
+  "silicon", "power", "kingston", "sandisk", "seagate", "apacer", "adata", "crucial",
+  "si", "le", "gia", "may", "in", "laptop", "pc", "ram", "ssd", "vga", "o", "cung",
+  "linh", "kien", "man", "hinh", "monitor", "nhan", "vien"
+]);
+
 // Extract product mentions from conversation text
 export function extractProductMentions(text: string): ProductKnowledgeItem[] {
   loadProductKnowledge();
@@ -75,6 +84,7 @@ export function extractProductMentions(text: string): ProductKnowledgeItem[] {
   const normalizedText = normalizeSearchable(text);
   const mentions: ProductKnowledgeItem[] = [];
   const seenIds = new Set<string>();
+  const resolvedTokens = new Set<string>();
 
   // 1. Tokenize text and look for exact model code match on each token
   const tokens = tokenizeText(text);
@@ -83,18 +93,36 @@ export function extractProductMentions(text: string): ProductKnowledgeItem[] {
     if (match && !seenIds.has(match.id)) {
       mentions.push(match);
       seenIds.add(match.id);
+      resolvedTokens.add(token);
     }
   }
 
-  // 2. Fallback: check if any model code (minimum 4 characters) is a substring of the text
-  if (mentions.length === 0) {
+  // 2. Also check if other model codes are mentioned as substrings of tokens
+  // to catch cases where the model code is e.g. "MICN_G1010" and the text contains "G1010".
+  // To avoid false positives on extremely short words, we only check tokens with length >= 4.
+  for (const token of tokens) {
+    if (token.length < 4) continue;
+    if (resolvedTokens.has(token)) {
+      continue;
+    }
+
+    const cleanToken = token.replace(/[\-_]+/g, "");
+    if (GENERIC_WORDS.has(cleanToken) || STOPWORDS.has(cleanToken)) {
+      continue;
+    }
+
     for (const item of cachedProducts) {
-      const codeLower = item.model_code.toLowerCase();
-      if (codeLower.length >= 4 && normalizedText.includes(codeLower)) {
-        if (!seenIds.has(item.id)) {
-          mentions.push(item);
-          seenIds.add(item.id);
-        }
+      if (seenIds.has(item.id)) continue;
+
+      const codeLowerClean = item.model_code.toLowerCase().replace(/[\-_]+/g, "");
+
+      // If the clean token is contained within the clean product model code (e.g. "g1010" inside "micng1010")
+      if (
+        codeLowerClean === cleanToken ||
+        codeLowerClean.includes(cleanToken)
+      ) {
+        mentions.push(item);
+        seenIds.add(item.id);
       }
     }
   }
@@ -240,7 +268,9 @@ export function buildProductPromptContext(products: ProductKnowledgeItem[]): str
   list.forEach((p, idx) => {
     const priceSiFormatted = p.price_si !== null ? `${p.price_si.toLocaleString("vi-VN")} VNĐ` : "Liên hệ";
     const priceLeFormatted = p.price_le !== null ? `${p.price_le.toLocaleString("vi-VN")} VNĐ` : "Liên hệ";
-    const stockText = p.stock_status === "in_stock" ? `Còn hàng (SL: ${p.stock_qty})` : "Hết hàng";
+    const stockText = p.stock_status === "in_stock"
+      ? `Còn hàng [INTERNAL_STOCK_REFERENCE_DO_NOT_MENTION: ${p.stock_qty}]`
+      : `Hết hàng [INTERNAL_STOCK_REFERENCE_DO_NOT_MENTION: ${p.stock_qty}]`;
 
     context += `${idx + 1}. [Sản phẩm] ${p.display_name}\n`;
     context += `   - Mã sản phẩm: ${p.model_code}\n`;

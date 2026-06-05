@@ -12,6 +12,7 @@ export interface RuntimeStateRouterInput {
     };
   };
   debugOverrideState?: string;
+  product_context_status?: string; // Phase 12H.1-C
 }
 
 export interface RuntimeStateRouterOutput {
@@ -158,21 +159,39 @@ export function routeRuntimeState(input: RuntimeStateRouterInput): RuntimeStateR
   }
 
   const sorted = [...ORDER].sort((a, b) => score[b] - score[a]);
-  const best = sorted[0];
-  const bestScore = score[best];
-  if (bestScore > 0) {
-    return {
-      runtime_state: best,
-      confidence: Number(Math.min(0.98, 0.5 + bestScore).toFixed(2)),
-      matched_rules: matched.filter((m) => m.includes(`:${best}:`))
-    };
+  let best = sorted[0];
+  let bestScore = score[best];
+  let matchedRules = matched.filter((m) => m.includes(`:${best}:`));
+  let isFallback = false;
+
+  if (bestScore === 0) {
+    best = getPersonaFallbackState(input);
+    isFallback = true;
+  }
+
+  // Phase 12H.1-C Product Context Routing Gates
+  const status = input.product_context_status;
+  if (status === "unknown") {
+    if (best === "pricing_phase" || best === "payment_phase" || best === "logistics_phase" || best === "operational_followup") {
+      const oldState = best;
+      best = score["uncertain_interest"] > 0 ? "uncertain_interest" : "research_phase";
+      matchedRules = [`product_context_unknown_gate_override_from_${oldState}`];
+    }
+  } else if (status === "vague") {
+    if (best === "payment_phase") {
+      const oldState = best;
+      best = score["pricing_phase"] > 0 || score["research_phase"] > 0
+        ? (score["pricing_phase"] >= score["research_phase"] ? "pricing_phase" : "research_phase")
+        : "pricing_phase";
+      matchedRules = [`product_context_vague_gate_override_from_${oldState}`];
+    }
   }
 
   return {
-    runtime_state: getPersonaFallbackState(input),
-    confidence: 0.4,
-    matched_rules: [],
-    fallback_reason: "no_keyword_match_use_persona_default"
+    runtime_state: best,
+    confidence: isFallback ? 0.4 : Number(Math.min(0.98, 0.5 + bestScore).toFixed(2)),
+    matched_rules: matchedRules,
+    fallback_reason: isFallback ? "no_keyword_match_use_persona_default" : undefined
   };
 }
 

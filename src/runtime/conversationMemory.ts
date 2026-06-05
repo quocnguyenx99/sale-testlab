@@ -1,4 +1,9 @@
-﻿export interface ConversationMemorySlots {
+import {
+  extractProductMentions,
+  searchProducts
+} from "./productKnowledge/productKnowledge";
+
+export interface ConversationMemorySlots {
   product_model_mentioned: boolean;
   configuration_discussed: boolean;
   price_discussed: boolean;
@@ -8,6 +13,21 @@
   payment_discussed: boolean;
   invoice_or_document_discussed: boolean;
   next_step_discussed: boolean;
+
+  // Product Context Grounding Fields (Phase 12H.1-B)
+  selected_product_model: string | null;
+  selected_product_model_code: string | null;
+  product_context_status: "unknown" | "vague" | "specific";
+  product_candidates_summary: Array<{
+    model_code: string;
+    display_name: string;
+    brand: string | null;
+    price_si: number | null;
+    price_le: number | null;
+    stock_status: "in_stock" | "out_of_stock" | "unknown";
+    stock_qty: number;
+  }>;
+  product_knowledge_used: boolean;
 }
 
 function normalize(input: string): string {
@@ -31,7 +51,14 @@ export function createEmptyMemory(): ConversationMemorySlots {
     warranty_discussed: false,
     payment_discussed: false,
     invoice_or_document_discussed: false,
-    next_step_discussed: false
+    next_step_discussed: false,
+
+    // Phase 12H.1-B fields
+    selected_product_model: null,
+    selected_product_model_code: null,
+    product_context_status: "unknown",
+    product_candidates_summary: [],
+    product_knowledge_used: false
   };
 }
 
@@ -74,6 +101,70 @@ export function updateMemorySlots(memory: ConversationMemorySlots, saleMessage: 
 
   if (/\b(chot|giu hang|em gui lai|buoc tiep theo|dat coc)\b/.test(text)) {
     newMemory.next_step_discussed = true;
+  }
+
+  // Product Grounding Logic (Phase 12H.1-B)
+  // 1. Try to extract exact mentions from the sale message
+  const mentions = extractProductMentions(saleMessage);
+
+  if (mentions.length > 0) {
+    newMemory.product_knowledge_used = true;
+    newMemory.product_model_mentioned = true;
+
+    const candidates = mentions.map(p => ({
+      model_code: p.model_code,
+      display_name: p.display_name,
+      brand: p.brand,
+      price_si: p.price_si,
+      price_le: p.price_le,
+      stock_status: p.stock_status,
+      stock_qty: p.stock_qty
+    }));
+    newMemory.product_candidates_summary = candidates;
+
+    if (mentions.length === 1) {
+      newMemory.selected_product_model = mentions[0].display_name;
+      newMemory.selected_product_model_code = mentions[0].model_code;
+      newMemory.product_context_status = "specific";
+    } else {
+      newMemory.selected_product_model = null;
+      newMemory.selected_product_model_code = null;
+      newMemory.product_context_status = "vague";
+    }
+  } else {
+    // 2. If no exact mentions, check if the Sale message refers to generic keywords or categories
+    const hasProductKeywords = /\b(may|in|man hinh|laptop|pc|ssd|ram|server|nuc|router|switch|chuot|phim|vga|o cung|linh kien|epson|canon|brother|hp|hpe|dell)\b/.test(text);
+
+    if (hasProductKeywords) {
+      const searchResults = searchProducts(saleMessage, { limit: 5 });
+      if (searchResults.length > 0) {
+        newMemory.product_knowledge_used = true;
+        newMemory.product_model_mentioned = true;
+
+        const candidates = searchResults.map(p => ({
+          model_code: p.model_code,
+          display_name: p.display_name,
+          brand: p.brand,
+          price_si: p.price_si,
+          price_le: p.price_le,
+          stock_status: p.stock_status,
+          stock_qty: p.stock_qty
+        }));
+        newMemory.product_candidates_summary = candidates;
+
+        if (searchResults.length === 1) {
+          newMemory.selected_product_model = searchResults[0].display_name;
+          newMemory.selected_product_model_code = searchResults[0].model_code;
+          newMemory.product_context_status = "specific";
+        } else {
+          newMemory.selected_product_model = null;
+          newMemory.selected_product_model_code = null;
+          newMemory.product_context_status = "vague";
+        }
+      }
+    }
+    // 3. Persistence: if no product mentions or matches are found in this turn,
+    // we keep the previous memory values untouched.
   }
 
   return newMemory;
