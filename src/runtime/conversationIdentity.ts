@@ -11,6 +11,7 @@ export interface IdentityDriftResult {
   identity_drift_detected: boolean;
   role_inversion_detected: boolean;
   forbidden_phrase_matches: string[];
+  is_recoverable?: boolean;
 }
 
 export interface IdentitySourcePersona {
@@ -25,6 +26,10 @@ const SUPPORT_PHRASES = [
   "chị cần cho em biết",
   "tôi hỗ trợ bạn"
 ];
+
+const SELF_REFERENCE_VERBS = ["dang", "can", "muon", "se", "da", "hoi", "xem", "lay"];
+const SELF_REFERENCE_VERB_PATTERN = SELF_REFERENCE_VERBS.join("|");
+const RAW_SELF_REFERENCE_VERB_PATTERN = "đang|dang|cần|can|muốn|muon|sẽ|se|đã|da|hỏi|hoi|xem|lấy|lay";
 
 function normalize(input: string): string {
   return (input || "")
@@ -141,11 +146,11 @@ function sanitizeVietnamesePronounText(t: string): string {
 
 function detectSelfPronoun(text: string): ConversationIdentityProfile["customer_self_pronoun"] {
   const t = sanitizeVietnamesePronounText(normalize(text));
-  if (/\banh\s+(dang|can|muon|se|da)\b/.test(t)) return "anh";
-  if (/\bchi\s+(dang|can|muon|se|da)\b/.test(t)) return "chị";
-  if (/\bem\s+(dang|can|muon|se|da)\b/.test(t)) return "em";
-  if (/\bminh\s+(dang|can|muon|se|da)\b/.test(t)) return "mình";
-  if (/\btoi\s+(dang|can|muon|se|da)\b/.test(t)) return "tôi";
+  if (new RegExp(`\\banh\\s+(${SELF_REFERENCE_VERB_PATTERN})\\b`).test(t)) return "anh";
+  if (new RegExp(`\\bchi\\s+(${SELF_REFERENCE_VERB_PATTERN})\\b`).test(t)) return "\u0063\u0068\u1ecb";
+  if (new RegExp(`\\bem\\s+(${SELF_REFERENCE_VERB_PATTERN})\\b`).test(t)) return "em";
+  if (new RegExp(`\\bminh\\s+(${SELF_REFERENCE_VERB_PATTERN})\\b`).test(t)) return "\u006d\u00ec\u006e\u0068";
+  if (new RegExp(`\\btoi\\s+(${SELF_REFERENCE_VERB_PATTERN})\\b`).test(t)) return "\u0074\u00f4\u0069";
   if (/\banh\b/.test(t)) return "anh";
   if (/\bchi\b/.test(t)) return "chị";
   if (/\btoi\b/.test(t)) return "tôi";
@@ -364,25 +369,133 @@ export function detectIdentityDrift(
   const expectedTarget = normalize(identity.customer_target_pronoun);
   // Allow 'mình' as a natural alternative self-pronoun
   const disallowedRolePronouns = pronouns.filter((p) => p !== expectedSelf && p !== expectedTarget && p !== "minh");
+  const selfReferenceRegex = (pronounsToBlock: string[]) =>
+    new RegExp(`\\b(${pronounsToBlock.join("|")})\\s+(${SELF_REFERENCE_VERB_PATTERN})\\b`);
 
   const roleInversion = /\b(em can|em gui bao gia|em ho tro|de em tu van)\b/.test(t);
   if (roleInversion) forbidden.push("role_inversion");
-  if (expectedSelf === "em" && /\b(anh|chi|toi)\s+(dang|can|muon)\b/.test(t)) {
+  if (expectedSelf === "em" && selfReferenceRegex(["anh", "chi", "toi"]).test(t)) {
     forbidden.push("self_pronoun_drift");
   }
-  if (expectedSelf === "anh" && /\b(em|chi|toi)\s+(dang|can|muon)\b/.test(t)) {
+  if (expectedSelf === "anh" && selfReferenceRegex(["em", "chi", "toi"]).test(t)) {
     forbidden.push("self_pronoun_drift");
   }
-  if (expectedSelf === "chị" && /\b(anh|em|toi)\s+(dang|can|muon)\b/.test(t)) {
+  if (expectedSelf === "chi" && selfReferenceRegex(["anh", "em", "toi"]).test(t)) {
     forbidden.push("self_pronoun_drift");
   }
 
   const drift = forbidden.length > 0 || disallowedRolePronouns.length > 0;
+  
+  let is_recoverable = false;
+  if (drift) {
+    const hasRoleInversion = forbidden.includes("role_inversion");
+    const hasSupportPhrases = forbidden.some(f => SUPPORT_PHRASES.map(normalize).includes(normalize(f)));
+    if (!hasRoleInversion && !hasSupportPhrases) {
+      is_recoverable = true;
+    }
+  }
+
   return {
     identity_drift_detected: drift,
     role_inversion_detected: roleInversion,
-    forbidden_phrase_matches: Array.from(new Set([...forbidden, ...disallowedRolePronouns]))
+    forbidden_phrase_matches: Array.from(new Set([...forbidden, ...disallowedRolePronouns])),
+    is_recoverable
   };
+}
+
+export function repairPronounDrift(
+  reply: string,
+  identity: ConversationIdentityProfile
+): string {
+  const expectedSelf = identity.customer_self_pronoun;
+  const expectedSelfNormalized = normalize(expectedSelf);
+  const wrongSelfReferenceCandidates =
+    expectedSelfNormalized === "chi"
+      ? ["anh", "em", "toi"]
+      : expectedSelfNormalized === "anh"
+        ? ["chi", "em", "toi"]
+        : expectedSelfNormalized === "em"
+          ? ["anh", "chi", "toi"]
+          : [];
+
+  let replyAfterSelfRepair = reply;
+  if (wrongSelfReferenceCandidates.length > 0) {
+    const wrongSelfReferenceRegex = new RegExp(
+      `(^|[\\s,.:;?!\\-])((${wrongSelfReferenceCandidates.join("|")})\\s+(${RAW_SELF_REFERENCE_VERB_PATTERN}))(?=$|[\\s,.:;?!\\-])`,
+      "gi"
+    );
+    replyAfterSelfRepair = replyAfterSelfRepair.replace(wrongSelfReferenceRegex, (match, prefix, phrase) => {
+      const firstWord = phrase.split(/\s+/)[0] || "";
+      const replacedSelf =
+        firstWord === firstWord.toUpperCase()
+          ? expectedSelf.toUpperCase()
+          : firstWord.charAt(0) === firstWord.charAt(0).toUpperCase()
+            ? expectedSelf.charAt(0).toUpperCase() + expectedSelf.slice(1)
+            : expectedSelfNormalized;
+      return `${prefix}${phrase.replace(new RegExp(`^${firstWord}`, "i"), replacedSelf)}`;
+    });
+  }
+
+  let wrongSelf: string | null = null;
+  if (expectedSelf === "chị") wrongSelf = "anh";
+  else if (expectedSelf === "anh") wrongSelf = "chị";
+
+  if (!wrongSelf) return replyAfterSelfRepair;
+
+  const compPhrases = [
+    "tiếng anh", "tieng anh", "hình ảnh", "hinh anh", "phản ánh", "phan anh",
+    "chụp ảnh", "chup anh", "bức ảnh", "buc anh", "album ảnh", "album anh",
+    "file ảnh", "file anh", "ánh sáng", "anh sang", "ánh dương", "anh duong",
+    "ánh kim", "anh kim", "ánh sao", "anh sao", "ánh hoa", "anh hoa",
+    "tuấn anh", "tuan anh", "việt anh", "viet anh", "trâm anh", "tram anh",
+    "đức anh", "duc anh", "ngọc anh", "ngoc anh", "duy anh", "duy anh",
+    "hoàng anh", "hoang anh", "thế anh", "the anh", "quốc anh", "quoc anh",
+    "trung anh", "trung anh", "minh anh", "minh anh", "kiều anh", "kieu anh",
+    "phương anh", "phuong anh", "mai anh", "mai anh", "hà anh", "ha anh",
+    "tú anh", "tu anh", "vân anh", "van anh",
+    "chi tiết", "chi tiet", "chi phí", "chi phi", "chi nhánh", "chi nhanh",
+    "chi tiêu", "chi tieu", "địa chỉ", "dia chi", "thậm chí", "tham chi",
+    "du chi", "du chi", "thu chi", "thu chi", "chỉ có", "chi co",
+    "chỉ còn", "chi con", "chỉ cần", "chi can", "chỉ muốn", "chi muon",
+    "chỉ lấy", "chi lay", "chỉ giao", "chi giao", "chỉ được", "chi duoc",
+    "chỉ chuyển", "chi chuyen", "chỉ khoảng", "chi khoang", "chỉ tầm", "chi tam",
+    "chỉ tự", "chi tu", "chỉ dùng", "chi dung", "chỉ thôi", "chi thoi",
+    "chỉ để", "chi de", "chỉ là", "chi la"
+  ];
+
+  let tempText = replyAfterSelfRepair;
+  const placeholders: { placeholder: string; original: string }[] = [];
+  let phCounter = 0;
+
+  const sortedCompPhrases = [...compPhrases].sort((a, b) => b.length - a.length);
+
+  for (const phrase of sortedCompPhrases) {
+    const escaped = phrase.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const regex = new RegExp(`(?<=^|[\\s,.:;?!\\-])(${escaped})(?=$|[\\s,.:;?!\\-])`, 'gi');
+    tempText = tempText.replace(regex, (match) => {
+      const ph = `__COMP_PH_${phCounter++}__`;
+      placeholders.push({ placeholder: ph, original: match });
+      return ph;
+    });
+  }
+
+  const wrongRegex = new RegExp(`(?<=^|[\\s,.:;?!\\-])(${wrongSelf})(?=$|[\\s,.:;?!\\-])`, 'gi');
+  tempText = tempText.replace(wrongRegex, (match) => {
+    if (match === match.toUpperCase()) {
+      return expectedSelf.toUpperCase();
+    }
+    if (match.charAt(0) === match.charAt(0).toUpperCase()) {
+      return expectedSelf.charAt(0).toUpperCase() + expectedSelf.slice(1);
+    }
+    return expectedSelf.toLowerCase();
+  });
+
+  for (let i = placeholders.length - 1; i >= 0; i--) {
+    const { placeholder, original } = placeholders[i];
+    tempText = tempText.replace(placeholder, original);
+  }
+
+  return tempText;
 }
 
 export interface CustomerVoiceGuardResult {

@@ -34,7 +34,8 @@ import {
   buildIdentityProfileFromPersona,
   detectIdentityDrift,
   runCustomerVoiceGuard,
-  rewriteVoiceDrift
+  rewriteVoiceDrift,
+  repairPronounDrift
 } from "../runtime/conversationIdentity";
 import {
   buildResponseBankReply
@@ -50,6 +51,15 @@ import {
   DealState,
   getTerminalReply
 } from "../runtime/dealState";
+import {
+  isDirectQuestion,
+  isPriceActuallyQuoted,
+  isActualStockLeak,
+  hasGatedTerms,
+  hasSupportPhrases,
+  applySafetyGuards,
+  RuntimeReplySource
+} from "../runtime/safetyGuards";
 
 type RuntimePersonaRecord = RuntimePersonaForPrompt & {
   source_entity_id: string;
@@ -88,7 +98,7 @@ type ChatTurn = {
   role: "sale" | "customer_ai";
   text: string;
   state: RuntimeState;
-  reply_source?: "local_ai_generated" | "deterministic_fallback";
+  reply_source?: RuntimeReplySource;
   latency_ms?: number;
   safety_flags?: {
     emotional_inference_blocked: boolean;
@@ -145,75 +155,6 @@ function shouldForceRegenerate(turns: ChatTurn[], candidate: string): boolean {
   return false;
 }
 
-function isDirectQuestion(text: string): boolean {
-  const t = text.toLowerCase().normalize("NFD").replace(/\p{M}/gu).replace(/[đĐ]/g, "d").replace(/\s+/g, " ").trim();
-  return text.includes("?") || /\b(nao|gi|khong|chua|may)\b/.test(t);
-}
-
-function isPriceActuallyQuoted(recentTurns: Array<{ role: "sale" | "customer_ai"; text: string }>, latestMessage: string): boolean {
-  const saleMessages = [...recentTurns.filter(t => t.role === "sale").map(t => t.text), latestMessage];
-  const joined = saleMessages.join(" ").toLowerCase();
-  const PRICE_QUOTE_PATTERN = /\b\d+(?:\.\d{3})*(?:\s*(?:tr|trieu|vnd|vnđ|trđ|k|m))\b|\b\d+(?:\.\d{3}){2,}\b|\b\d+tr\d*\b/;
-  return PRICE_QUOTE_PATTERN.test(joined);
-}
-
-function isActualStockLeak(reply: string, qtyStr: string): boolean {
-  const t = reply.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[đĐ]/g, "d").replace(/\s+/g, " ");
-  const regex = new RegExp(`\\b${qtyStr}\\b`, 'g');
-  let match;
-  
-  const stockKeywords = ["con", "ton", "kho", "san", "hang"];
-  const unitKeywords = ["cai", "chiec", "may", "bo", "con"];
-
-  while ((match = regex.exec(t)) !== null) {
-    const idx = match.index;
-    const start = Math.max(0, idx - 30);
-    const end = Math.min(t.length, idx + qtyStr.length + 30);
-    const windowText = t.substring(start, end);
-    
-    const hasKeyword = stockKeywords.some(kw => {
-      const kwRegex = new RegExp(`\\b${kw}\\b`);
-      return kwRegex.test(windowText);
-    });
-    
-    const hasUnit = unitKeywords.some(unit => {
-      const unitRegex = new RegExp(`\\b${unit}\\b`);
-      return unitRegex.test(windowText);
-    });
-    
-    if (hasKeyword && hasUnit) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function hasGatedTerms(text: string): boolean {
-  const t = normalizeForMatch(text);
-  const gatedPatterns = [
-    "mau nay",
-    "model nay",
-    "giu mau nay",
-    "chot mau nay",
-    "stk",
-    "so tai khoan",
-    "thanh toan",
-    "chuyen khoan",
-    "chot luon"
-  ];
-  return gatedPatterns.some(pat => t.includes(pat));
-}
-
-function hasSupportPhrases(text: string): boolean {
-  const t = normalizeForMatch(text);
-  const supportPhrases = [
-    "em ho tro giu mau nay",
-    "minh ho tro",
-    "ben minh ho tro",
-    "ben em dang san hang"
-  ];
-  return supportPhrases.some(pat => t.includes(pat));
-}
 
 function isGreeting(text: string): boolean {
   const n = normalizeForMatch(text);
@@ -890,7 +831,7 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
   const latency = Date.now() - t0;
   let reply = result.generated_reply;
   const candidateReplyBeforeGuards = reply;
-  let finalReplySource: "local_ai_generated" | "deterministic_fallback" = result.reply_source;
+  let finalReplySource: RuntimeReplySource = result.reply_source;
   let assistantHits = detectAssistantStyle(reply);
   const recentFallbackVariantIds = existing?.recentFallbackVariantIds ?? [];
   const recentReplies = turns.filter((t) => t.role === "customer_ai").map((t) => t.text);
@@ -945,6 +886,7 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
     const rewritten = rewriteVoiceDrift(reply, identityProfile);
     if (rewritten !== reply) {
       reply = rewritten;
+      finalReplySource = "local_ai_rewritten";
       const recheck = runCustomerVoiceGuard(reply, identityProfile);
       customerVoiceDriftDetected = recheck.customer_voice_drift_detected;
       customerVoiceGuardReason = recheck.customer_voice_guard_reason;
@@ -1065,11 +1007,25 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
     guardTriggerReasons.push("completion_ready");
   }
 
-  const identityDrift = detectIdentityDrift(reply, identityProfile);
+  let identityDrift = detectIdentityDrift(reply, identityProfile);
   if (identityDrift.identity_drift_detected) {
-    applyBankFallback(fallbackTopic);
-    guardTriggered = true;
-    guardTriggerReasons.push("identity_drift");
+    if (identityDrift.is_recoverable) {
+      const repaired = repairPronounDrift(reply, identityProfile);
+      const redetect = detectIdentityDrift(repaired, identityProfile);
+      if (!redetect.identity_drift_detected) {
+        reply = repaired;
+        identityDrift.identity_drift_detected = false;
+        finalReplySource = "local_ai_rewritten";
+      } else {
+        applyBankFallback(fallbackTopic);
+        guardTriggered = true;
+        guardTriggerReasons.push("identity_drift");
+      }
+    } else {
+      applyBankFallback(fallbackTopic);
+      guardTriggered = true;
+      guardTriggerReasons.push("identity_drift");
+    }
   }
 
   if (!completion.completion_ready && shouldForceCompletionReply({
@@ -1103,75 +1059,18 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
   // ==========================================
   // PHASE 12H.1-C RUNTIME GUARDS & GATING
   // ==========================================
-  let ambiguous_model_guard_triggered = false;
-  let ambiguous_model_guard_reason: string | null = null;
-  let stock_quantity_hidden_from_customer = false;
-  let consultant_tone_blocked = false;
+  const guardsResult = applySafetyGuards(reply, memorySlots, identityProfile, message, turns, safeNextUnresolvedTopic);
+  
+  let ambiguous_model_guard_triggered = guardsResult.ambiguous_model_guard_triggered;
+  let ambiguous_model_guard_reason: string | null = ambiguous_model_guard_triggered ? "product_context_not_specific_with_gated_terms" : null;
+  let stock_quantity_hidden_from_customer = guardsResult.stock_quantity_hidden_from_customer;
+  let consultant_tone_blocked = guardsResult.consultant_tone_blocked;
 
-  const isSpecific = memorySlots.product_context_status === "specific";
-
-  // Guard 1: Consultant Tone Blocker (Check this first)
-  if (hasSupportPhrases(reply)) {
-    consultant_tone_blocked = true;
-    let modelCode = memorySlots.selected_product_model_code || "";
-    let priceStr = "";
-    
-    const priceMatch = reply.match(/\b\d{1,3}(\.\d{3})*(\.\d{3})?\b/);
-    if (priceMatch) {
-      priceStr = priceMatch[0];
-    } else if (memorySlots.product_candidates_summary && memorySlots.product_candidates_summary.length > 0) {
-      const p = memorySlots.product_candidates_summary.find(c => c.model_code === modelCode);
-      if (p && p.price_si) {
-        priceStr = p.price_si.toLocaleString("vi-VN");
-      }
-    }
-
-    if (!modelCode) modelCode = "mẫu này";
-    if (!priceStr) priceStr = "giá sỉ";
-
-    const self = identityProfile.customer_self_pronoun;
-    const target = identityProfile.customer_target_pronoun;
-    reply = `À mã ${modelCode} còn hàng đúng không ${target}? Giá sỉ ${priceStr} thì ${target} báo thêm giúp ${self} thời gian giao nhé.`;
-    finalReplySource = "deterministic_fallback";
+  if (guardsResult.guardTriggered) {
+    reply = guardsResult.reply;
+    finalReplySource = guardsResult.finalReplySource;
     guardTriggered = true;
-    guardTriggerReasons.push("consultant_tone_blocked");
-  }
-
-  // Guard 2: Ambiguous Model Guard
-  if (!isSpecific && hasGatedTerms(reply)) {
-    ambiguous_model_guard_triggered = true;
-    ambiguous_model_guard_reason = "product_context_not_specific_with_gated_terms";
-    
-    const self = identityProfile.customer_self_pronoun;
-    const selfCap = self.charAt(0).toUpperCase() + self.slice(1);
-    const sale = identityProfile.customer_target_pronoun;
-    const saleCap = sale.charAt(0).toUpperCase() + sale.slice(1);
-    reply = `${selfCap} chưa chốt model cụ thể đâu ${sale}. ${saleCap} gửi ${self} vài mẫu phù hợp để ${self} so sánh giá sỉ với cấu hình trước nhé.`;
-    finalReplySource = "deterministic_fallback";
-    guardTriggered = true;
-    guardTriggerReasons.push("ambiguous_model_guard_triggered");
-  }
-
-  // Guard 3: Proactive Stock Leak Blocker
-  if (memorySlots.product_candidates_summary) {
-    const saleTextHistory = turns.filter(t => t.role === "sale").map(t => t.text).join(" ");
-    
-    for (const c of memorySlots.product_candidates_summary) {
-      const qtyStr = String(c.stock_qty);
-      const isMentionedByAI = new RegExp(`\\b${qtyStr}\\b`).test(reply);
-      const wasMentionedBySale = new RegExp(`\\b${qtyStr}\\b`).test(saleTextHistory) || new RegExp(`\\b${qtyStr}\\b`).test(message);
-      
-      if (isMentionedByAI && !wasMentionedBySale && isActualStockLeak(reply, qtyStr)) {
-        stock_quantity_hidden_from_customer = true;
-        const self = identityProfile.customer_self_pronoun;
-        const target = identityProfile.customer_target_pronoun;
-        reply = `Mẫu này còn hàng không ${target}? Nếu ${self} lấy vài cái thì bên ${target} có đủ không?`;
-        finalReplySource = "deterministic_fallback";
-        guardTriggered = true;
-        guardTriggerReasons.push("stock_leak_blocked");
-        break;
-      }
-    }
+    guardTriggerReasons.push(...guardsResult.reasons);
   }
 
   const progressAfterRaw = updateProgressFromCustomerMessage(snapshotProgress(progressBeforeReply), reply);

@@ -37,7 +37,8 @@ import {
   buildIdentityProfileFromPersona,
   detectIdentityDrift,
   runCustomerVoiceGuard,
-  rewriteVoiceDrift
+  rewriteVoiceDrift,
+  repairPronounDrift
 } from "./conversationIdentity";
 import {
   RuntimeConversationContext,
@@ -45,77 +46,17 @@ import {
 } from "./runtimePromptBuilder";
 import { generateLocalAIReply } from "./localAIRuntimeAdapter";
 import { detectAssistantStyle } from "./runtimeConstraints";
+import {
+  isDirectQuestion,
+  isPriceActuallyQuoted,
+  isActualStockLeak,
+  hasGatedTerms,
+  hasSupportPhrases,
+  applySafetyGuards,
+  RuntimeReplySource
+} from "./safetyGuards";
 
-// Helpers copied from server.ts
-function isDirectQuestion(text: string): boolean {
-  const t = text.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[đĐ]/g, "d").replace(/\s+/g, " ").trim();
-  return text.includes("?") || /\b(nao|gi|khong|chua|may)\b/.test(t);
-}
 
-function isPriceActuallyQuoted(turns: Array<{ role: "sale" | "customer_ai"; text: string }>, latestMessage: string): boolean {
-  const saleMessages = [...turns.filter(t => t.role === "sale").map(t => t.text), latestMessage];
-  const joined = saleMessages.join(" ").toLowerCase();
-  const PRICE_QUOTE_PATTERN = /\b\d+(?:\.\d{3})*(?:\s*(?:tr|trieu|vnd|vnđ|trđ|k|m))\b|\b\d+(?:\.\d{3}){2,}\b|\b\d+tr\d*\b/;
-  return PRICE_QUOTE_PATTERN.test(joined);
-}
-
-function isActualStockLeak(reply: string, qtyStr: string): boolean {
-  const t = reply.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[đĐ]/g, "d").replace(/\s+/g, " ");
-  const regex = new RegExp(`\\b${qtyStr}\\b`, 'g');
-  let match;
-  
-  const stockKeywords = ["con", "ton", "kho", "san", "hang"];
-  const unitKeywords = ["cai", "chiec", "may", "bo", "con"];
-
-  while ((match = regex.exec(t)) !== null) {
-    const idx = match.index;
-    const start = Math.max(0, idx - 30);
-    const end = Math.min(t.length, idx + qtyStr.length + 30);
-    const windowText = t.substring(start, end);
-    
-    const hasKeyword = stockKeywords.some(kw => {
-      const kwRegex = new RegExp(`\\b${kw}\\b`);
-      return kwRegex.test(windowText);
-    });
-    
-    const hasUnit = unitKeywords.some(unit => {
-      const unitRegex = new RegExp(`\\b${unit}\\b`);
-      return unitRegex.test(windowText);
-    });
-    
-    if (hasKeyword && hasUnit) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function hasGatedTerms(text: string): boolean {
-  const t = text.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[đĐ]/g, "d").replace(/\s+/g, " ").trim();
-  const gatedPatterns = [
-    "mau nay",
-    "model nay",
-    "giu mau nay",
-    "chot mau nay",
-    "stk",
-    "so tai khoan",
-    "thanh toan",
-    "chuyen khoan",
-    "chot luon"
-  ];
-  return gatedPatterns.some(pat => t.includes(pat));
-}
-
-function hasSupportPhrases(text: string): boolean {
-  const t = text.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[đĐ]/g, "d").replace(/\s+/g, " ").trim();
-  const supportPhrases = [
-    "em ho tro giu mau nay",
-    "minh ho tro",
-    "ben minh ho tro",
-    "ben em dang san hang"
-  ];
-  return supportPhrases.some(pat => t.includes(pat));
-}
 
 // Simulated turn execution logic, matching server.ts exactly
 async function executeLiveTurn(input: {
@@ -185,7 +126,7 @@ async function executeLiveTurn(input: {
   
   let reply = result.generated_reply;
   const rawModelReply = reply;
-  let finalReplySource: "local_ai_generated" | "deterministic_fallback" = result.reply_source;
+  let finalReplySource: RuntimeReplySource = result.reply_source;
   const nextUnresolvedTopic = getFirstUnresolvedTopic(conversationProgress);
   const fallbackTopic = nextUnresolvedTopic ?? "next_step";
   
@@ -241,6 +182,7 @@ async function executeLiveTurn(input: {
     const rewritten = rewriteVoiceDrift(reply, identityProfile);
     if (rewritten !== reply) {
       reply = rewritten;
+      finalReplySource = "local_ai_rewritten";
       const recheck = runCustomerVoiceGuard(reply, identityProfile);
       if (recheck.customer_voice_drift_detected) {
         applyBankFallback(fallbackTopic);
@@ -329,11 +271,25 @@ async function executeLiveTurn(input: {
   }
 
   // Identity drift check on the final reply
-  const identityDrift = detectIdentityDrift(reply, identityProfile);
+  let identityDrift = detectIdentityDrift(reply, identityProfile);
   if (identityDrift.identity_drift_detected) {
-    applyBankFallback(fallbackTopic);
-    guardTriggered = true;
-    guardTriggerReasons.push("identity_drift");
+    if (identityDrift.is_recoverable) {
+      const repaired = repairPronounDrift(reply, identityProfile);
+      const redetect = detectIdentityDrift(repaired, identityProfile);
+      if (!redetect.identity_drift_detected) {
+        reply = repaired;
+        identityDrift.identity_drift_detected = false;
+        finalReplySource = "local_ai_rewritten";
+      } else {
+        applyBankFallback(fallbackTopic);
+        guardTriggered = true;
+        guardTriggerReasons.push("identity_drift");
+      }
+    } else {
+      applyBankFallback(fallbackTopic);
+      guardTriggered = true;
+      guardTriggerReasons.push("identity_drift");
+    }
   }
 
   // Gating check
@@ -365,58 +321,17 @@ async function executeLiveTurn(input: {
   }
 
   // 7. Gating & Guards Layer (Ambiguous Model, Consultant Tone Blocker, Stock Leak Blocker)
-  let ambiguous_model_guard_triggered = false;
-  let consultant_tone_blocked = false;
-  let stock_quantity_hidden_from_customer = false;
+  const guardsResult = applySafetyGuards(reply, memorySlots, identityProfile, message, turns as any, safeNextUnresolvedTopic);
+  
+  let ambiguous_model_guard_triggered = guardsResult.ambiguous_model_guard_triggered;
+  let stock_quantity_hidden_from_customer = guardsResult.stock_quantity_hidden_from_customer;
+  let consultant_tone_blocked = guardsResult.consultant_tone_blocked;
 
-  const isSpecific = memorySlots.product_context_status === "specific";
-
-  // Consultant Tone Blocker
-  if (hasSupportPhrases(reply)) {
-    consultant_tone_blocked = true;
-    let modelCode = memorySlots.selected_product_model_code || "mẫu này";
-    let priceStr = "giá sỉ";
-    
-    const self = identityProfile.customer_self_pronoun;
-    const target = identityProfile.customer_target_pronoun;
-    reply = `À mã ${modelCode} còn hàng đúng không ${target}? Giá sỉ ${priceStr} thì ${target} báo thêm giúp ${self} thời gian giao nhé.`;
-    finalReplySource = "deterministic_fallback";
+  if (guardsResult.guardTriggered) {
+    reply = guardsResult.reply;
+    finalReplySource = guardsResult.finalReplySource;
     guardTriggered = true;
-    guardTriggerReasons.push("consultant_tone_blocked");
-  }
-
-  // Ambiguous Model Guard
-  if (!isSpecific && hasGatedTerms(reply)) {
-    ambiguous_model_guard_triggered = true;
-    const self = identityProfile.customer_self_pronoun;
-    const selfCap = self.charAt(0).toUpperCase() + self.slice(1);
-    const sale = identityProfile.customer_target_pronoun;
-    const saleCap = sale.charAt(0).toUpperCase() + sale.slice(1);
-    reply = `${selfCap} chưa chốt model cụ thể đâu ${sale}. ${saleCap} gửi ${self} vài mẫu phù hợp để ${self} so sánh giá sỉ với cấu hình trước nhé.`;
-    finalReplySource = "deterministic_fallback";
-    guardTriggered = true;
-    guardTriggerReasons.push("ambiguous_model_guard_triggered");
-  }
-
-  // Proactive Stock Leak Blocker
-  if (memorySlots.product_candidates_summary) {
-    const saleTextHistory = turns.filter(t => t.role === "sale").map(t => t.text).join(" ");
-    for (const c of memorySlots.product_candidates_summary) {
-      const qtyStr = String(c.stock_qty);
-      const isMentionedByAI = new RegExp(`\\b${qtyStr}\\b`).test(reply);
-      const wasMentionedBySale = new RegExp(`\\b${qtyStr}\\b`).test(saleTextHistory) || new RegExp(`\\b${qtyStr}\\b`).test(message);
-      
-      if (isMentionedByAI && !wasMentionedBySale && isActualStockLeak(reply, qtyStr)) {
-        stock_quantity_hidden_from_customer = true;
-        const self = identityProfile.customer_self_pronoun;
-        const target = identityProfile.customer_target_pronoun;
-        reply = `Mẫu này còn hàng không ${target}? Nếu ${self} lấy vài cái thì bên ${target} có đủ không?`;
-        finalReplySource = "deterministic_fallback";
-        guardTriggered = true;
-        guardTriggerReasons.push("stock_leak_blocked");
-        break;
-      }
-    }
+    guardTriggerReasons.push(...guardsResult.reasons);
   }
 
   // 8. Deal State Outcome
@@ -764,28 +679,33 @@ async function runLiveQAGate() {
 
   // Compile final report metrics
   const total = results.length;
-  const localAISource = results.filter(r => r.metadata.reply_source === "local_ai_generated").length;
+  const localAIUntouchedSource = results.filter(r => r.metadata.reply_source === "local_ai_generated").length;
+  const localAIRewrittenSource = results.filter(r => r.metadata.reply_source === "local_ai_rewritten").length;
   const bankSource = results.filter(r => r.metadata.reply_source === "deterministic_fallback" && !r.metadata.completion_forced_reply).length;
   const forcedSource = results.filter(r => r.metadata.completion_forced_reply).length;
   
-  const local_ai_generated_rate = (localAISource / total) * 100;
+  const local_ai_generated_untouched_rate = (localAIUntouchedSource / total) * 100;
+  const local_ai_rewritten_rate = (localAIRewrittenSource / total) * 100;
   const fallback_rate = (bankSource / total) * 100;
   const forced_completion_rate = (forcedSource / total) * 100;
   const guard_rewrite_rate = (results.filter(r => r.metadata.guard_triggered || r.metadata.ambiguous_model_guard_triggered || r.metadata.consultant_tone_blocked).length / total) * 100;
   const average_naturalness = results.reduce((acc, r) => acc + r.naturalness, 0) / total;
   const critical_fail_count = results.reduce((acc, r) => acc + r.criticalIssues.length, 0);
+  const exact_template_usage_count = results.filter(r => r.metadata.reply_source === "deterministic_fallback").length;
 
   // Write structured JSON summary to logs for persistence
   const summaryJsonPath = path.join(process.cwd(), "logs", "live_qa_summary.json");
   fs.writeFileSync(summaryJsonPath, JSON.stringify({
-    timestamp: new Date().toISOString(),
+        timestamp: new Date().toISOString(),
     metrics: {
-      local_ai_generated_rate,
+      local_ai_generated_untouched_rate,
+      local_ai_rewritten_rate,
       fallback_rate,
       forced_completion_rate,
       guard_rewrite_rate,
-      average_naturalness,
-      critical_fail_count
+      exact_template_usage_count,
+      critical_fail_count,
+      average_naturalness
     },
     results
   }, null, 2), "utf8");
@@ -811,10 +731,12 @@ async function runLiveQAGate() {
   });
   
   mdReport += `\n### 2. Các Chỉ số Vận hành Đo lường (Live Operational Metrics)\n\n`;
-  mdReport += `- **Tỷ lệ Phản hồi AI Tự nhiên (local_ai_generated_rate)**: **${local_ai_generated_rate.toFixed(1)}%** (Kỳ vọng $\\ge 80\\%$)\n`;
+  mdReport += `- **Tỷ lệ Phản hồi AI Nguyên bản (local_ai_generated_untouched_rate)**: **${local_ai_generated_untouched_rate.toFixed(1)}%** (Kỳ vọng $\\ge 80\\%$)\n`;
+  mdReport += `- **Tỷ lệ Phản hồi AI Được sửa nhẹ (local_ai_rewritten_rate)**: **${local_ai_rewritten_rate.toFixed(1)}%**\n`;
   mdReport += `- **Tỷ lệ Trả Fallback Response Bank (fallback_rate)**: **${fallback_rate.toFixed(1)}%**\n`;
   mdReport += `- **Tỷ lệ Bắt buộc Kết thúc/Chặn (forced_completion_rate)**: **${forced_completion_rate.toFixed(1)}%** (Kỳ vọng $\\le 15\\%$)\n`;
   mdReport += `- **Tỷ lệ Kích hoạt Bộ lọc & Ghi đè (guard_rewrite_rate)**: **${guard_rewrite_rate.toFixed(1)}%**\n`;
+  mdReport += `- **Số lần sử dụng template cứng (exact_template_usage_count)**: **${exact_template_usage_count}**\n`;
   mdReport += `- **Điểm Tự nhiên Trung bình (average_naturalness)**: **${average_naturalness.toFixed(2)}/5** (Kỳ vọng $\\ge 3.5/5$)\n`;
   mdReport += `- **Số lỗi nghiêm trọng phát sinh (critical_fail_count)**: **${critical_fail_count}** (Kỳ vọng $= 0$)\n\n`;
 
@@ -838,13 +760,14 @@ async function runLiveQAGate() {
   }
 
   mdReport += `### 4. Kết luận Nghiệm thu & Khuyến nghị (Verdict)\n\n`;
-  const acceptText = (critical_fail_count === 0 && local_ai_generated_rate >= 80 && forced_completion_rate <= 15 && average_naturalness >= 3.5)
+  const acceptText = (critical_fail_count === 0 && local_ai_generated_untouched_rate >= 80 && forced_completion_rate <= 15 && average_naturalness >= 3.5)
     ? `Hệ thống hoàn toàn thỏa mãn tất cả các tiêu chí nghiệm thu khắt khe nhất của **Phase 12H.1-R**.`
     : `Hệ thống cơ bản ổn định nhưng cần căn chỉnh nhẹ một vài điểm trước khi freeze.`;
 
-  mdReport += `* **Đóng băng (Freeze) Phase 12H.1?**: **HOÀN TOÀN ĐỒNG Ý (YES)**. ${acceptText}\n`;
-  mdReport += `* **Sẵn sàng Nhập liệu dữ liệu (Ready for data import)?**: **ĐỒNG Ý (YES)**. Product Knowledge Foundation cực kỳ vững chãi và O(1) mention parser hoạt động siêu tốc.\n`;
-  mdReport += `* **Sẵn sàng chuyển sang Phase 12H.3 Natural Dialogue Calibration?**: **HOÀN TOÀN SẴN SÀNG (YES)**. Chốt chặn bảo mật Phase 12H.1 đã hoàn tất nhiệm vụ chốt chặn an toàn, giờ đây chúng ta có thể chuyển sang hiệu chuẩn dialogue tự nhiên chuyên sâu.\n`;
+  const freezeReady = critical_fail_count === 0 && local_ai_generated_untouched_rate >= 80 && forced_completion_rate <= 15 && average_naturalness >= 3.5;
+  mdReport += `* **Đóng băng (Freeze) Phase 12H.1?**: **${freezeReady ? "YES" : "NO"}**. ${acceptText}\n`;
+  mdReport += `* **Sẵn sàng Nhập liệu dữ liệu (Ready for data import)?**: **${freezeReady ? "YES" : "NO"}**.\n`;
+  mdReport += `* **Sẵn sàng chuyển sang Phase 12H.3 Natural Dialogue Calibration?**: **${freezeReady ? "YES" : "NO"}**.\n`;
 
   console.log(mdReport);
 

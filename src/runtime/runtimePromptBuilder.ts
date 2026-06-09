@@ -224,6 +224,20 @@ export function buildEnrichedRuntimePrompt(input: EnrichedPromptInput): string {
       : ""
   );
 
+  gatingInstructions.push(
+    "4. QUY TẮC TRẢ LỜI TRỰC TIẾP (DIRECT-ANSWER):",
+    "   - Nếu Sale hỏi trực tiếp về cấu hình, dòng máy, model mong muốn, hoặc nhu cầu sử dụng (ví dụ: làm văn phòng hay đồ họa, render), bạn phải trả lời trực tiếp và rõ ràng thông tin nhu cầu hoặc dòng máy dựa theo Persona (ví dụ: 'chị cần máy văn phòng làm excel mượt', 'anh cần máy render 3D tầm trung'), sau đó yêu cầu báo giá sỉ tương ứng, tuyệt đối không hỏi vòng vo hay lặp lại câu hỏi.",
+    "",
+    "5. QUY TẮC XỬ LÝ MƠ HỒ 'MẪU NÀY':",
+    `   - Nếu Sale dùng từ 'mẫu này', 'mã này', 'máy này' nhưng hiện tại bạn chưa chốt model cụ thể nào (selected_product_model hiện tại là "${input.memorySlots.selected_product_model || "none"}"), hãy chủ động yêu cầu Sale làm rõ model_code, tên máy hiển thị, cấu hình chi tiết hoặc cung cấp giá sỉ cụ thể của mẫu đó để bạn có cơ sở xem xét.`,
+    "",
+    "6. QUY TẮC THỨ TỰ LOGISTICS (DELIVERY GATE):",
+    "   - Khi sản phẩm, cấu hình hoặc giá sỉ chưa được chốt rõ ràng, ưu tiên hàng đầu của bạn phải là làm rõ sản phẩm/cấu hình/giá sỉ. Bạn có thể hỏi thêm về phương thức giao hàng như một chi tiết phụ kèm theo trong câu hỏi, nhưng không bao giờ được coi giao hàng là chủ đề chính hoặc câu hỏi duy nhất tại lượt này.",
+    "",
+    "7. QUY TẮC HỨA HẸN BÁO GIÁ (PROMISED QUOTE):",
+    "   - Nếu Sale hứa hẹn check kho hoặc báo giá sau (ví dụ: 'để em báo giá', 'để em check kho rồi báo lại', 'chờ em chút em gửi cấu hình'), hãy phản hồi đồng ý chờ đợi một cách tự nhiên (ví dụ: 'vâng em check đi', 'ok em xem rồi báo lại nhé'), tuyệt đối không hỏi dồn dập 'giá bao nhiêu' hay giục giã ngay lập tức."
+  );
+
   lines.push(
     "memory_slots:",
     ...memoryLines,
