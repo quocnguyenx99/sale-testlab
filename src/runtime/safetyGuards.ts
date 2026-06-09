@@ -1,5 +1,5 @@
-import { ConversationMemorySlots } from "./conversationMemory";
-import { ConversationIdentityProfile, detectIdentityDrift, repairPronounDrift } from "./conversationIdentity";
+﻿import { ConversationMemorySlots } from "./conversationMemory";
+import { ConversationIdentityProfile, repairPronounDrift } from "./conversationIdentity";
 
 export interface ChatTurn {
   role: "sale" | "customer_ai";
@@ -28,18 +28,60 @@ export function isDirectQuestion(text: string): boolean {
   return text.includes("?") || /\b(nao|gi|khong|chua|may)\b/.test(t);
 }
 
+type PriceQuoteCandidate = {
+  raw: string;
+  index: number;
+  normalized: string;
+};
+
+const PRICE_QUOTE_CANDIDATE_REGEX =
+  /\b\d{1,3}(?:[.,]\d{3})+(?:\s*(?:vnd|vnđ|đ))?\b|\b\d+(?:[.,]\d+)?\s*(?:triệu|trieu|tr|k|vnd|vnđ|đ)\b|\b\d+(?:[.,]\d+)?m\b/giu;
+
+function isBlockedNumericPriceContext(input: string, candidate: PriceQuoteCandidate): boolean {
+  const normalizedInput = normalizeForMatch(input);
+  const candidateOffset = normalizedInput.indexOf(candidate.normalized);
+  const index = candidateOffset >= 0 ? candidateOffset : candidate.index;
+  const start = Math.max(0, index - 24);
+  const end = Math.min(normalizedInput.length, index + candidate.normalized.length + 24);
+  const windowText = normalizedInput.slice(start, end);
+
+  if (/\b\d+\s*-\s*\d+\b/.test(windowText)) return true;
+  if (new RegExp(`${candidate.normalized}\\s*(?:gb|tb|ram|ssd|hdd|cpu|core|gen)\\b`).test(windowText)) return true;
+  if (new RegExp(`${candidate.normalized}\\s*(?:mau|option|dong may|dong|cai|chiec|bo)\\b`).test(windowText)) return true;
+  if (new RegExp(`\\bi[3579]\\s*/\\s*${candidate.normalized}\\b`).test(windowText)) return true;
+  if (/\bi[3579]\b/.test(windowText) || /\bryzen\s*\d+\b/.test(windowText)) return true;
+
+  return false;
+}
+
+function extractQuotedPriceText(input: string): string | null {
+  const matches = Array.from(input.matchAll(PRICE_QUOTE_CANDIDATE_REGEX));
+  for (const match of matches) {
+    const raw = match[0]?.trim();
+    if (!raw) continue;
+    const candidate: PriceQuoteCandidate = {
+      raw,
+      index: match.index ?? 0,
+      normalized: normalizeForMatch(raw)
+    };
+    if (isBlockedNumericPriceContext(input, candidate)) {
+      continue;
+    }
+    return raw;
+  }
+  return null;
+}
+
 export function isPriceActuallyQuoted(recentTurns: ChatTurn[], latestMessage: string): boolean {
   const saleMessages = [...recentTurns.filter(t => t.role === "sale").map(t => t.text), latestMessage];
-  const joined = saleMessages.join(" ").toLowerCase();
-  const PRICE_QUOTE_PATTERN = /\b\d+(?:\.\d{3})*(?:\s*(?:tr|trieu|vnd|vnđ|trđ|k|m))\b|\b\d+(?:\.\d{3}){2,}\b|\b\d+tr\d*\b/;
-  return PRICE_QUOTE_PATTERN.test(joined);
+  return saleMessages.some(message => extractQuotedPriceText(message) !== null);
 }
 
 export function isActualStockLeak(reply: string, qtyStr: string): boolean {
   const t = normalizeForMatch(reply);
-  const regex = new RegExp(`\\b${qtyStr}\\b`, 'g');
-  let match;
-  
+  const regex = new RegExp(`\\b${qtyStr}\\b`, "g");
+  let match: RegExpExecArray | null;
+
   const stockKeywords = ["con", "ton", "kho", "san", "hang"];
   const unitKeywords = ["cai", "chiec", "may", "bo", "con"];
 
@@ -48,17 +90,10 @@ export function isActualStockLeak(reply: string, qtyStr: string): boolean {
     const start = Math.max(0, idx - 30);
     const end = Math.min(t.length, idx + qtyStr.length + 30);
     const windowText = t.substring(start, end);
-    
-    const hasKeyword = stockKeywords.some(kw => {
-      const kwRegex = new RegExp(`\\b${kw}\\b`);
-      return kwRegex.test(windowText);
-    });
-    
-    const hasUnit = unitKeywords.some(unit => {
-      const unitRegex = new RegExp(`\\b${unit}\\b`);
-      return unitRegex.test(windowText);
-    });
-    
+
+    const hasKeyword = stockKeywords.some(kw => new RegExp(`\\b${kw}\\b`).test(windowText));
+    const hasUnit = unitKeywords.some(unit => new RegExp(`\\b${unit}\\b`).test(windowText));
+
     if (hasKeyword && hasUnit) {
       return true;
     }
@@ -103,11 +138,6 @@ export interface SafetyGuardsResult {
   consultant_tone_blocked: boolean;
 }
 
-function extractQuotedPriceText(input: string): string | null {
-  const match = input.match(/\b\d+(?:[.,]\d{3})*(?:\s*(?:triệu|trieu|tr|k|m|vnd|vnđ|đ))?\b/iu);
-  return match ? match[0].trim() : null;
-}
-
 function hasDeliveryAsMainQuestion(text: string): boolean {
   const t = normalizeForMatch(text);
   const hasDelivery = /\b(giao hang|giao khi nao|bao lau giao|ship|thoi gian giao|khi nao giao)\b/.test(t);
@@ -115,13 +145,56 @@ function hasDeliveryAsMainQuestion(text: string): boolean {
   return hasDelivery && !hasModelOrConfig;
 }
 
-function hasBuyerVoiceEcho(text: string): boolean {
+function hasBuyerVoiceEcho(text: string, saleMessage: string): boolean {
   const t = normalizeForMatch(text);
+  const sale = normalizeForMatch(saleMessage);
+  const repeatsSaleStyleMessage =
+    sale.length > 0 &&
+    /\b(anh nhe|chi nhe)\b/.test(sale) &&
+    t.includes(sale);
+
   return (
-    /\bmau nay gia si\b/.test(t) ||
-    /\b(gia si|gia nay).*(chi nhe|anh nhe)\b/.test(t) ||
-    /\b(vang em|ok em|duoc em).*(chi nhe|anh nhe)\b/.test(t)
+    repeatsSaleStyleMessage ||
+    /\b(mau nay|model nay).{0,40}\b(gia si|gia nay)\b.{0,20}\b(chi nhe|anh nhe)\b/.test(t) ||
+    /\bem\s+(ho tro|bao gia|tu van)\b/.test(t)
   );
+}
+
+function buildModelConfigRedirect(identity: ConversationIdentityProfile, includePrice: boolean): string {
+  const self = identity.customer_self_pronoun;
+  const target = identity.customer_target_pronoun;
+  const targetCap = target.charAt(0).toUpperCase() + target.slice(1);
+  if (includePrice) {
+    return `${targetCap} gửi ${self} model, cấu hình cụ thể với giá trước nhé, rồi mình chốt thời gian giao sau.`;
+  }
+  return `${targetCap} gửi ${self} model và cấu hình cụ thể trước nhé, rồi mình bàn tiếp giá và giao hàng sau.`;
+}
+
+function replaceDeliveryQuestionWithRedirect(
+  reply: string,
+  identity: ConversationIdentityProfile,
+  includePrice: boolean
+): string {
+  const deliveryCueRegex = /\b(vậy\s+)?(thời gian giao hàng|thoi gian giao|giao hàng|giao hang|giao khi nào|giao khi nao|bao lâu giao|bao lau giao|khi nào giao|khi nao giao|ship)\b/iu;
+  const deliverySentenceRegex = /(^|[.!?]\s*)([^.!?]*\b(giao hàng|giao hang|giao khi nào|giao khi nao|bao lâu giao|bao lau giao|ship|thời gian giao|thoi gian giao|khi nào giao|khi nao giao)\b[^.!?]*[.!?]?)/iu;
+  const redirect = buildModelConfigRedirect(identity, includePrice);
+  const cueMatch = reply.match(deliveryCueRegex);
+  if (cueMatch && cueMatch.index !== undefined) {
+    const prefix = reply.slice(0, cueMatch.index).trim().replace(/[,:;\s]+$/u, "");
+    if (prefix.length > 0) {
+      const normalizedPrefix = /[.!?]$/.test(prefix) ? prefix : `${prefix}.`;
+      return `${normalizedPrefix} ${redirect}`;
+    }
+  }
+  if (deliverySentenceRegex.test(reply)) {
+    const stripped = reply.replace(deliverySentenceRegex, "$1").trim().replace(/\s+/g, " ");
+    if (stripped.length > 0) {
+      const normalized = /[.!?]$/.test(stripped) ? stripped : `${stripped}.`;
+      return `${normalized} ${redirect}`;
+    }
+    return redirect;
+  }
+  return `${reply.trim()} ${redirect}`.trim();
 }
 
 function buildBuyerVoiceRepair(input: {
@@ -130,24 +203,23 @@ function buildBuyerVoiceRepair(input: {
   identity: ConversationIdentityProfile;
   nextUnresolvedTopic?: string | null;
 }): { reply: string; reasons: string[] } | null {
-  const normalizedReply = normalizeForMatch(input.reply);
   const self = input.identity.customer_self_pronoun;
   const target = input.identity.customer_target_pronoun;
-  const selfCap = self.charAt(0).toUpperCase() + self.slice(1);
   const targetCap = target.charAt(0).toUpperCase() + target.slice(1);
   const reasons: string[] = [];
 
   let nextReply = input.reply;
-  let workingReply = repairPronounDrift(nextReply, input.identity);
-  if (workingReply !== nextReply) {
-    nextReply = workingReply;
+  const repairedPronounReply = repairPronounDrift(nextReply, input.identity);
+  if (repairedPronounReply !== nextReply) {
+    nextReply = repairedPronounReply;
     reasons.push("buyer_voice_self_pronoun_repaired");
   }
 
-  const hasEcho = hasBuyerVoiceEcho(nextReply);
+  const hasEcho = hasBuyerVoiceEcho(nextReply, input.saleMessage);
   const mustGateDelivery =
     input.nextUnresolvedTopic === "product_model" ||
-    input.nextUnresolvedTopic === "configuration";
+    input.nextUnresolvedTopic === "configuration" ||
+    input.nextUnresolvedTopic === "price";
   const deliveryMainQuestion = hasDeliveryAsMainQuestion(nextReply);
 
   if (!hasEcho && !deliveryMainQuestion) {
@@ -156,8 +228,7 @@ function buildBuyerVoiceRepair(input: {
 
   const quotedPriceText =
     extractQuotedPriceText(input.saleMessage) ||
-    extractQuotedPriceText(nextReply) ||
-    "giá sỉ này";
+    extractQuotedPriceText(nextReply);
 
   if (hasEcho) {
     reasons.push("buyer_voice_sale_echo_repaired");
@@ -166,22 +237,24 @@ function buildBuyerVoiceRepair(input: {
     reasons.push("delivery_main_topic_blocked");
   }
 
-  const shouldAskModelFirst =
-    mustGateDelivery ||
-    /\bmau nay gia si\b/.test(normalizedReply) ||
-    /\b(giao hang|ship|thoi gian giao)\b/.test(normalizedReply);
-
-  if (shouldAskModelFirst) {
+  if (hasEcho) {
+    const askPrice = quotedPriceText ? `giá sỉ ${quotedPriceText} đúng không? ` : "";
     return {
-      reply: `Vâng ${target}, giá sỉ ${quotedPriceText} đúng không? ${targetCap} gửi ${self} model và cấu hình cụ thể trước nhé.`,
+      reply: `Vâng ${target}, ${askPrice}${targetCap} gửi ${self} model và cấu hình cụ thể trước nhé.`
+        .replace(/\s+/g, " ")
+        .trim(),
       reasons
     };
   }
 
-  return {
-    reply: `${selfCap} muốn xác nhận thêm thông tin cụ thể trước rồi mới hỏi tiếp về giao hàng nhé.`,
-    reasons
-  };
+  if (deliveryMainQuestion && mustGateDelivery) {
+    return {
+      reply: replaceDeliveryQuestionWithRedirect(nextReply, input.identity, Boolean(quotedPriceText)),
+      reasons
+    };
+  }
+
+  return reasons.length > 0 ? { reply: nextReply, reasons } : null;
 }
 
 export function applySafetyGuards(
@@ -196,7 +269,7 @@ export function applySafetyGuards(
   let finalReplySource: RuntimeReplySource = "local_ai_generated";
   let guardTriggered = false;
   const reasons: string[] = [];
-  
+
   let ambiguous_model_guard_triggered = false;
   let stock_quantity_hidden_from_customer = false;
   let consultant_tone_blocked = false;
@@ -216,15 +289,14 @@ export function applySafetyGuards(
     reasons.push(...buyerVoiceRepair.reasons);
   }
 
-  // Guard 1: Consultant Tone Blocker
   if (hasSupportPhrases(reply)) {
     consultant_tone_blocked = true;
     let modelCode = memorySlots.selected_product_model_code || "";
     let priceStr = "";
-    
-    const priceMatch = reply.match(/\b\d{1,3}(\.\d{3})*(\.\d{3})?\b/);
+
+    const priceMatch = extractQuotedPriceText(reply);
     if (priceMatch) {
-      priceStr = priceMatch[0];
+      priceStr = priceMatch;
     } else if (memorySlots.product_candidates_summary && memorySlots.product_candidates_summary.length > 0) {
       const p = memorySlots.product_candidates_summary.find(c => c.model_code === modelCode);
       if (p && p.price_si) {
@@ -237,42 +309,42 @@ export function applySafetyGuards(
 
     const self = identity.customer_self_pronoun;
     const target = identity.customer_target_pronoun;
-    
+
     reply = `À mã ${modelCode} còn hàng đúng không ${target}? Giá sỉ ${priceStr} thì ${target} báo thêm giúp ${self} thời gian giao nhé.`;
     finalReplySource = "deterministic_fallback";
     guardTriggered = true;
     reasons.push("consultant_tone_blocked");
   }
 
-  // Guard 2: Ambiguous Model Guard
   if (!consultant_tone_blocked && !isSpecific && hasGatedTerms(reply)) {
     ambiguous_model_guard_triggered = true;
-    
+
     const self = identity.customer_self_pronoun;
     const selfCap = self.charAt(0).toUpperCase() + self.slice(1);
     const sale = identity.customer_target_pronoun;
     const saleCap = sale.charAt(0).toUpperCase() + sale.slice(1);
-    
+
     reply = `${selfCap} chưa chốt model cụ thể đâu ${sale}. ${saleCap} gửi ${self} vài mẫu phù hợp để ${self} so sánh giá sỉ với cấu hình trước nhé.`;
     finalReplySource = "deterministic_fallback";
     guardTriggered = true;
     reasons.push("ambiguous_model_guard_triggered");
   }
 
-  // Guard 3: Proactive Stock Leak Blocker
   if (!consultant_tone_blocked && !ambiguous_model_guard_triggered && memorySlots.product_candidates_summary) {
     const saleTextHistory = turns.filter(t => t.role === "sale").map(t => t.text).join(" ");
-    
+
     for (const c of memorySlots.product_candidates_summary) {
       const qtyStr = String(c.stock_qty);
       const isMentionedByAI = new RegExp(`\\b${qtyStr}\\b`).test(reply);
-      const wasMentionedBySale = new RegExp(`\\b${qtyStr}\\b`).test(saleTextHistory) || new RegExp(`\\b${qtyStr}\\b`).test(saleMessage);
-      
+      const wasMentionedBySale =
+        new RegExp(`\\b${qtyStr}\\b`).test(saleTextHistory) ||
+        new RegExp(`\\b${qtyStr}\\b`).test(saleMessage);
+
       if (isMentionedByAI && !wasMentionedBySale && isActualStockLeak(reply, qtyStr)) {
         stock_quantity_hidden_from_customer = true;
         const self = identity.customer_self_pronoun;
         const target = identity.customer_target_pronoun;
-        
+
         reply = `Mẫu này còn hàng không ${target}? Nếu ${self} lấy vài cái thì bên ${target} có đủ không?`;
         finalReplySource = "deterministic_fallback";
         guardTriggered = true;
