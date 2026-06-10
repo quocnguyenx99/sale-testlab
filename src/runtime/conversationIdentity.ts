@@ -503,6 +503,135 @@ export interface CustomerVoiceGuardResult {
   customer_voice_guard_reason: string | null;
 }
 
+export interface BuyerVoiceStyleMetrics {
+  buyer_voice_score: number;
+  sale_tone_risk: "low" | "medium" | "high";
+  over_polite_marker_count: number;
+  sale_echo_marker_count: number;
+  support_phrase_count: number;
+  buyer_request_marker_count: number;
+}
+
+function countMatches(input: string, regex: RegExp): number {
+  const matches = input.match(regex);
+  return matches ? matches.length : 0;
+}
+
+function countSupportPhraseMatches(input: string): number {
+  const supportLikePatterns = [
+    /\btoi co the ho tro\b/g,
+    /\bem bao gia\b/g,
+    /\bem ho tro\b/g,
+    /\bem tu van\b/g,
+    /\bem gui stk\b/g,
+    /\bben em (?:dang co san|co san|ho tro)\b/g,
+    /\bminh ho tro\b/g,
+    /\bminh tu van\b/g
+  ];
+  return supportLikePatterns.reduce((acc, pattern) => acc + countMatches(input, pattern), 0);
+}
+
+function countSaleEchoMarkers(replyNorm: string, saleNorm: string): number {
+  if (!saleNorm) return 0;
+
+  let count = 0;
+  if (replyNorm.includes(saleNorm) && saleNorm.split(/\s+/).length >= 4) {
+    count += 2;
+  }
+  if (/\b(mau nay|model nay)\b/.test(saleNorm) && /\b(mau nay|model nay)\b/.test(replyNorm)) {
+    count += 1;
+  }
+  if (/\bchi nhe\b|\banh nhe\b/.test(saleNorm) && /\bchi nhe\b|\banh nhe\b/.test(replyNorm)) {
+    count += 2;
+  }
+  if (/\bben em con \d+\s+(cai|chiec|may|bo)\b/.test(saleNorm) && /\bben em con \d+\s+(cai|chiec|may|bo)\b/.test(replyNorm)) {
+    count += 1;
+  }
+  return count;
+}
+
+function countBuyerRequestMarkers(input: string): number {
+  const buyerRequestPatterns = [
+    /\b(ok|uh|um)\s+em\b/g,
+    /\b(em gui|gui)\s+(anh|chi)\b/g,
+    /\b(em co|co)\s+mau nao\b/g,
+    /\bben em\s+con hang\s+khong\b/g,
+    /\b(em gui|gui)\s+(anh|chi)\s+\d+\s*-\s*\d+\s+mau\b/g,
+    /\b(em gui|gui)\s+(anh|chi)\s+vai\s+(mau|cai)\b/g,
+    /\b(anh|chi)\s+(can|muon|dang can|dang xem|doi)\b/g,
+    /\bgia\s+(si\s+)?[0-9.,a-z]*\s*dung khong\b/g
+  ];
+  return buyerRequestPatterns.reduce((acc, pattern) => acc + countMatches(input, pattern), 0);
+}
+
+function countSaleStyleEndings(input: string): number {
+  const strongSaleAssertionPatterns = [
+    /\b(vang|da)\b[^.!?]*\b(anh|chi)\s+nhe\b/g,
+    /\b(gia|gia si|bao gia|ben em|dang co san|san hang|ho tro|tu van|gui stk)\b[^.!?]{0,40}\b(anh|chi)\s+nhe\b/g,
+    /\b(mau nay|model nay)\b[^.!?]{0,50}\b(anh|chi)\s+nhe\b/g
+  ];
+  return strongSaleAssertionPatterns.reduce((acc, pattern) => acc + countMatches(input, pattern), 0);
+}
+
+export function analyzeBuyerVoiceStyle(
+  reply: string,
+  saleMessage: string,
+  identity: ConversationIdentityProfile
+): BuyerVoiceStyleMetrics {
+  const replyNorm = normalize(reply);
+  const saleNorm = normalize(saleMessage);
+  const drift = detectIdentityDrift(reply, identity);
+
+  const overPoliteMarkerCount =
+    countMatches(replyNorm, /\b(vang|da)\b/g) +
+    countMatches(replyNorm, /\ba\b/g) +
+    countMatches(replyNorm, /\bnhe\b/g);
+  const supportPhraseCount = countSupportPhraseMatches(replyNorm);
+  const saleEchoMarkerCount = countSaleEchoMarkers(replyNorm, saleNorm);
+  const buyerRequestMarkerCount = countBuyerRequestMarkers(replyNorm);
+  const saleStyleEndingCount = countSaleStyleEndings(replyNorm);
+  const leadingPoliteMarker = /^\s*(vang|da)\b/.test(replyNorm);
+
+  let buyerVoiceScore = 100;
+  buyerVoiceScore -= supportPhraseCount * 20;
+  buyerVoiceScore -= saleEchoMarkerCount * 10;
+  buyerVoiceScore -= saleStyleEndingCount * 18;
+  buyerVoiceScore -= Math.max(0, overPoliteMarkerCount - 1) * 4;
+  if (leadingPoliteMarker) {
+    buyerVoiceScore -= 6;
+  }
+  if (drift.identity_drift_detected) {
+    buyerVoiceScore -= drift.is_recoverable ? 10 : 22;
+  }
+  buyerVoiceScore += Math.min(8, buyerRequestMarkerCount * 2);
+  buyerVoiceScore = Math.max(0, Math.min(100, buyerVoiceScore));
+
+  let saleToneRisk: "low" | "medium" | "high" = "low";
+  if (
+    supportPhraseCount > 0 ||
+    saleStyleEndingCount > 0 ||
+    saleEchoMarkerCount >= 3 ||
+    (!drift.is_recoverable && drift.identity_drift_detected)
+  ) {
+    saleToneRisk = "high";
+  } else if (
+    saleEchoMarkerCount > 0 ||
+    overPoliteMarkerCount >= 3 ||
+    leadingPoliteMarker
+  ) {
+    saleToneRisk = "medium";
+  }
+
+  return {
+    buyer_voice_score: buyerVoiceScore,
+    sale_tone_risk: saleToneRisk,
+    over_polite_marker_count: overPoliteMarkerCount,
+    sale_echo_marker_count: saleEchoMarkerCount,
+    support_phrase_count: supportPhraseCount,
+    buyer_request_marker_count: buyerRequestMarkerCount
+  };
+}
+
 export function runCustomerVoiceGuard(
   reply: string,
   identity: ConversationIdentityProfile
@@ -565,22 +694,20 @@ export function rewriteVoiceDrift(reply: string, identity: ConversationIdentityP
   const selfCap = self.charAt(0).toUpperCase() + self.slice(1);
   const target = identity.customer_target_pronoun;
 
-  // Xử lý viết lại mẫu câu lỗi: "(chị/anh) đang tìm ... ạ" -> "(Chị/Anh) đang tìm ... cho công việc, em tư vấn giúp chị vài mẫu phù hợp nhé."
+  // Rewrite only severe voice drift into buyer-neutral phrasing.
   const match = reply.match(/^(chị|anh)\s+đang\s+tìm\s+([^]*?)\s+ạ\s*[?.!]*$/i);
   if (match) {
     const product = match[2].trim();
-    return `${selfCap} đang tìm ${product} cho công việc, ${target} tư vấn giúp ${self} vài mẫu phù hợp nhé.`;
+    return `${selfCap} đang tìm ${product} cho công việc. ${target} gửi ${self} vài mẫu phù hợp để ${self} so sánh nhé.`;
   }
 
-  // Viết lại mẫu câu lỗi: "(chị/anh) muốn xem mẫu này ạ" -> "(Chị/Anh) muốn xem mẫu này, em gửi giúp cấu hình chi tiết nhé."
   const matchWant = reply.match(/^(chị|anh)\s+muốn\s+xem\s+([^]*?)\s+ạ\s*[?.!]*$/i);
   if (matchWant) {
     const model = matchWant[2].trim();
-    return `${selfCap} muốn xem mẫu ${model}, ${target} gửi giúp ${self} cấu hình chi tiết nhé.`;
+    return `${selfCap} muốn xem ${model}. ${target} gửi ${self} cấu hình chi tiết trước nhé.`;
   }
 
-  // Loại bỏ từ "ạ" hoặc "ạ?" ở cuối một cách an toàn và thay bằng "nhé", "nha", hoặc câu tự nhiên của khách
-  let cleaned = reply.replace(/\s+ạ\s*([?.!]*)$/i, " nhé$1");
+  const cleaned = reply.replace(/\s+ạ\s*([?.!]*)$/i, "$1").trim();
   if (cleaned !== reply) return cleaned;
 
   return reply;

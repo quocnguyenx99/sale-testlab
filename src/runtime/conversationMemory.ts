@@ -41,6 +41,15 @@ function normalize(input: string): string {
     .trim();
 }
 
+function hasSpecificProductEvidence(input: string): boolean {
+  const text = normalize(input);
+  if (/\b[a-z]{1,6}-[a-z0-9]{1,8}(?:-[a-z0-9]{1,8})+\b/.test(text)) return true;
+  if (/\b\d{5,}[a-z-]*\b/.test(text)) return true;
+  if (/\b(thinkpad|latitude|probook|aspire|vivobook|macbook|elitebook|ideapad|nuc|optiplex|prodesk|zbook)\b/.test(text)) return true;
+  if (/\b(i[3579]-\d{3,5}[a-z]{0,2}|ryzen\s*\d)\b/.test(text)) return true;
+  return false;
+}
+
 export function createEmptyMemory(): ConversationMemorySlots {
   return {
     product_model_mentioned: false,
@@ -65,6 +74,10 @@ export function createEmptyMemory(): ConversationMemorySlots {
 export function updateMemorySlots(memory: ConversationMemorySlots, saleMessage: string): ConversationMemorySlots {
   const text = normalize(saleMessage);
   const newMemory = { ...memory };
+  const preserveSpecificContext =
+    newMemory.product_context_status === "specific" &&
+    newMemory.selected_product_model_code !== null &&
+    !hasSpecificProductEvidence(saleMessage);
 
   if (/\b(thinkpad|latitude|probook|aspire|vivobook|macbook|elitebook|ideapad|nuc|optiplex|prodesk|model|ma\s?\w+)\b/.test(text)) {
     newMemory.product_model_mentioned = true;
@@ -105,7 +118,7 @@ export function updateMemorySlots(memory: ConversationMemorySlots, saleMessage: 
 
   // Product Grounding Logic (Phase 12H.1-B)
   // 1. Try to extract exact mentions from the sale message
-  const mentions = extractProductMentions(saleMessage);
+  const mentions = preserveSpecificContext ? [] : extractProductMentions(saleMessage);
 
   if (mentions.length > 0) {
     newMemory.product_knowledge_used = true;
@@ -132,6 +145,9 @@ export function updateMemorySlots(memory: ConversationMemorySlots, saleMessage: 
       newMemory.product_context_status = "vague";
     }
   } else {
+    if (preserveSpecificContext) {
+      return newMemory;
+    }
     // 2. If no exact mentions, check if the Sale message refers to generic keywords or categories
     const hasProductKeywords = /\b(may|in|man hinh|laptop|pc|ssd|ram|server|nuc|router|switch|chuot|phim|vga|o cung|linh kien|epson|canon|brother|hp|hpe|dell)\b/.test(text);
 

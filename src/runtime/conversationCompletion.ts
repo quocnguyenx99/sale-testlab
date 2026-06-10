@@ -192,7 +192,7 @@ function hasQuestionIntent(text: string): boolean {
 }
 
 const REOPEN_PATTERNS: Record<ConversationTopic, RegExp[]> = {
-  product_model: [/\b(model|ma may|may nao|dong nao)\b/],
+  product_model: [/\b(model|ma may|may nao|mau nao|dong nao)\b/],
   configuration: [/\b(cau hinh|i3|i5|i7|i9|ram|ssd|gen)\b/],
   price: [/\b(gia|bao gia|bao nhieu|trieu|vnd|vnđ|chi phi)\b/],
   stock: [/\b(con hang|san hang|co san|kho|con|co)\b/],

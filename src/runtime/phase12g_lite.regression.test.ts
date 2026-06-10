@@ -89,7 +89,7 @@ function run(): void {
   // Rewriting drift check
   const rewritten = rewriteVoiceDrift("chị đang tìm máy tính xách tay ạ", targetIdentity);
   assert.ok(rewritten.includes("Chị đang tìm máy tính xách tay cho công việc"));
-  assert.ok(rewritten.includes("em tư vấn giúp chị"));
+  assert.ok(rewritten.includes("em gửi chị vài mẫu phù hợp"));
 
   // Softened "mình" and "ạ" checks
   const maleIdentity = {

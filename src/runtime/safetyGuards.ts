@@ -103,9 +103,7 @@ export function isActualStockLeak(reply: string, qtyStr: string): boolean {
 
 export function hasGatedTerms(text: string): boolean {
   const t = normalizeForMatch(text);
-  const gatedPatterns = [
-    "mau nay",
-    "model nay",
+  const hardGatedPatterns = [
     "giu mau nay",
     "chot mau nay",
     "stk",
@@ -114,7 +112,10 @@ export function hasGatedTerms(text: string): boolean {
     "chuyen khoan",
     "chot luon"
   ];
-  return gatedPatterns.some(pat => t.includes(pat));
+  if (hardGatedPatterns.some(pat => t.includes(pat))) {
+    return true;
+  }
+  return /\b(mau nay|model nay)\b/.test(t);
 }
 
 export function hasSupportPhrases(text: string): boolean {
@@ -126,6 +127,27 @@ export function hasSupportPhrases(text: string): boolean {
     "ben em dang san hang"
   ];
   return supportPhrases.some(pat => t.includes(pat));
+}
+
+function hasSpecificModelEvidence(text: string): boolean {
+  const t = normalizeForMatch(text);
+  if (/\b[a-z]{1,6}-[a-z0-9]{1,8}(?:-[a-z0-9]{1,8})+\b/.test(t)) return true;
+  if (/\b\d{5,}[a-z-]*\b/.test(t)) return true;
+  if (/\b(hp|dell|asus|lenovo|acer|msi|apple|thinkpad|latitude|elitebook|zbook|probook|vivobook|macbook)\b/.test(t)) return true;
+  if (/\b(i[3579]-\d{3,5}[a-z]{0,2}|ryzen\s*\d)\b/.test(t)) return true;
+  return false;
+}
+
+function shouldBlockAmbiguousModelReply(reply: string, productContextStatus: ConversationMemorySlots["product_context_status"]): boolean {
+  const t = normalizeForMatch(reply);
+  const hasDeicticReference = /\b(mau nay|model nay)\b/.test(t);
+  if (!hasDeicticReference) return false;
+  if (productContextStatus === "specific") return false;
+  if (hasSpecificModelEvidence(reply)) return false;
+  if (/\b(gia|bao gia|gia si|con hang|san hang|co san)\b/.test(t)) {
+    return true;
+  }
+  return hasGatedTerms(reply);
 }
 
 export interface SafetyGuardsResult {
@@ -165,9 +187,9 @@ function buildModelConfigRedirect(identity: ConversationIdentityProfile, include
   const target = identity.customer_target_pronoun;
   const targetCap = target.charAt(0).toUpperCase() + target.slice(1);
   if (includePrice) {
-    return `${targetCap} gửi ${self} model, cấu hình cụ thể với giá trước nhé, rồi mình chốt thời gian giao sau.`;
+    return `${targetCap} gửi ${self} model và cấu hình cụ thể với giá trước nhé, rồi ${self} xem tiếp giao hàng sau.`;
   }
-  return `${targetCap} gửi ${self} model và cấu hình cụ thể trước nhé, rồi mình bàn tiếp giá và giao hàng sau.`;
+  return `${targetCap} gửi ${self} model và cấu hình cụ thể trước nhé, rồi ${self} xem tiếp giá và giao hàng sau.`;
 }
 
 function replaceDeliveryQuestionWithRedirect(
@@ -240,7 +262,7 @@ function buildBuyerVoiceRepair(input: {
   if (hasEcho) {
     const askPrice = quotedPriceText ? `giá sỉ ${quotedPriceText} đúng không? ` : "";
     return {
-      reply: `Vâng ${target}, ${askPrice}${targetCap} gửi ${self} model và cấu hình cụ thể trước nhé.`
+      reply: `${askPrice}${targetCap} gửi ${self} model và cấu hình cụ thể trước nhé.`
         .replace(/\s+/g, " ")
         .trim(),
       reasons
@@ -316,7 +338,7 @@ export function applySafetyGuards(
     reasons.push("consultant_tone_blocked");
   }
 
-  if (!consultant_tone_blocked && !isSpecific && hasGatedTerms(reply)) {
+  if (!consultant_tone_blocked && !isSpecific && shouldBlockAmbiguousModelReply(reply, memorySlots.product_context_status)) {
     ambiguous_model_guard_triggered = true;
 
     const self = identity.customer_self_pronoun;

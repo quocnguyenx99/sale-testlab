@@ -139,11 +139,14 @@ export function detectRepeatedFreeFormLoop(
 
   const recent = previousAiReplies.slice(-3);
   let best = 0;
+  let similarCount = 0;
   for (const prev of recent) {
     const score = jaccardSimilarity(currentTokens, tokenizeMeaningful(prev));
     if (score > best) best = score;
+    if (score >= 0.72) similarCount += 1;
   }
-  return best >= 0.72;
+  if (best >= 0.9) return true;
+  return similarCount >= 2;
 }
 
 export function buildProgressionInstruction(progress: ConversationProgress): string {
