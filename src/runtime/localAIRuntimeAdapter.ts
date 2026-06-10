@@ -440,6 +440,7 @@ export async function generateLocalAIReply(
       }
     };
   } catch (error) {
+    console.error("[LOCAL_AI_ADAPTER_ERROR] Failed to generate local AI reply:", error);
     const elapsed = Date.now() - t0;
     const isTimeout = error instanceof Error && /abort/i.test(error.name);
     const errorType = isTimeout ? "timeout" : "generation_failure";
