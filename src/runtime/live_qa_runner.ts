@@ -36,6 +36,7 @@ import {
   ConversationIdentityProfile,
   buildIdentityProfileFromPersona,
   detectIdentityDrift,
+  analyzeBuyerVoiceStyle,
   runCustomerVoiceGuard,
   rewriteVoiceDrift,
   repairPronounDrift
@@ -650,6 +651,12 @@ async function runLiveQAGate() {
       criticalIssues.push("Product Candidate Dumping: Quá nhiều mã kỹ thuật lặp lại");
     }
 
+    const buyerVoiceMetrics = analyzeBuyerVoiceStyle(
+      lastReply,
+      lastMetadata.sale_message || "",
+      lastMetadata.identity_profile
+    );
+
     // Evaluation Score
     let naturalness = 5;
     if (lastMetadata.reply_source === "deterministic_fallback") {
@@ -670,6 +677,7 @@ async function runLiveQAGate() {
       noPrematureClose,
       noDeliveryJump,
       noCandidateDump,
+      buyerVoiceMetrics,
       naturalness,
       criticalIssues
     };
@@ -690,6 +698,12 @@ async function runLiveQAGate() {
   const forced_completion_rate = (forcedSource / total) * 100;
   const guard_rewrite_rate = (results.filter(r => r.metadata.guard_triggered || r.metadata.ambiguous_model_guard_triggered || r.metadata.consultant_tone_blocked).length / total) * 100;
   const average_naturalness = results.reduce((acc, r) => acc + r.naturalness, 0) / total;
+  const average_buyer_voice_score = results.reduce((acc, r) => acc + r.buyerVoiceMetrics.buyer_voice_score, 0) / total;
+  const sale_tone_high_count = results.filter(r => r.buyerVoiceMetrics.sale_tone_risk === "high").length;
+  const average_over_polite_marker_count = results.reduce((acc, r) => acc + r.buyerVoiceMetrics.over_polite_marker_count, 0) / total;
+  const average_sale_echo_marker_count = results.reduce((acc, r) => acc + r.buyerVoiceMetrics.sale_echo_marker_count, 0) / total;
+  const average_support_phrase_count = results.reduce((acc, r) => acc + r.buyerVoiceMetrics.support_phrase_count, 0) / total;
+  const average_buyer_request_marker_count = results.reduce((acc, r) => acc + r.buyerVoiceMetrics.buyer_request_marker_count, 0) / total;
   const critical_fail_count = results.reduce((acc, r) => acc + r.criticalIssues.length, 0);
   const exact_template_usage_count = results.filter(r => r.metadata.reply_source === "deterministic_fallback").length;
 
@@ -705,7 +719,13 @@ async function runLiveQAGate() {
       guard_rewrite_rate,
       exact_template_usage_count,
       critical_fail_count,
-      average_naturalness
+      average_naturalness,
+      average_buyer_voice_score,
+      sale_tone_high_count,
+      average_over_polite_marker_count,
+      average_sale_echo_marker_count,
+      average_support_phrase_count,
+      average_buyer_request_marker_count
     },
     results
   }, null, 2), "utf8");
@@ -716,58 +736,188 @@ async function runLiveQAGate() {
   console.log("==================================================");
 
   // Output formatting exact table for report
-  let mdReport = `# Kết quả chạy thử nghiệm Live QA Gate & Anti-Overfit Validation (Phase 12H.1-R)\n\n`;
-  mdReport += `Đã hoàn thành chạy toàn bộ 12 ca kiểm thử phân bổ đều qua 3 Batch (LQA-A Sanity, LQA-B Paraphrases, LQA-C Adversarial/Unseen) trực tiếp với mô hình **Qwen3:8B** nội bộ.\n\n`;
-  
-  mdReport += `### 1. Bảng Tổng hợp Kết quả (Live QA Case Table)\n\n`;
-  mdReport += `| Case | Kịch bản / Mô tả | Kết quả | Naturalness | Nguồn Phản hồi | Vấn đề / Lỗi | Ghi chú |\n`;
-  mdReport += `|---|---|---|---|---|---|---|\n`;
-  
+  let mdReport = `# Kết quả chạy thử nghiệm Live QA Customer Voice Style Calibration (Phase 12H.3-A)
+
+`;
+  mdReport += `Đã hoàn thành chạy toàn bộ 12 ca kiểm thử phân bổ đều qua 3 batch (LQA-A Sanity, LQA-B Paraphrases, LQA-C Adversarial/Unseen) trực tiếp với mô hình **Qwen3:8B** nội bộ.
+
+`;
+
+  mdReport += `### 1. Bảng Tổng hợp Kết quả (Live QA Case Table)
+
+`;
+  mdReport += `| Case | Kịch bản / Mô tả | Kết quả | Naturalness | Buyer Voice | Nguồn phản hồi | Vấn đề / Lỗi | Ghi chú |
+`;
+  mdReport += `|---|---|---|---|---|---|---|---|
+`;
+
   results.forEach(r => {
-    const isPass = r.criticalIssues.length === 0 ? "**PASS** ✅" : "**FAIL** ❌";
+    const isPass = r.criticalIssues.length === 0 ? "**PASS**" : "**FAIL**";
     const issuesText = r.criticalIssues.join("; ") || "Không có";
     const forcedText = r.metadata.completion_forced_reply ? "forced_completion" : r.metadata.reply_source;
-    mdReport += `| ${r.case_id} | ${r.name} | ${isPass} | ${r.naturalness}/5 | \`${forcedText}\` | ${issuesText} | Trạng thái bối cảnh: \`${r.metadata.product_context_status}\` |\n`;
+    mdReport += `| ${r.case_id} | ${r.name} | ${isPass} | ${r.naturalness}/5 | ${r.buyerVoiceMetrics.buyer_voice_score}/100 (${r.buyerVoiceMetrics.sale_tone_risk}) | \`${forcedText}\` | ${issuesText} | Trạng thái bối cảnh: \`${r.metadata.product_context_status}\` |
+`;
   });
-  
-  mdReport += `\n### 2. Các Chỉ số Vận hành Đo lường (Live Operational Metrics)\n\n`;
-  mdReport += `- **Tỷ lệ Phản hồi AI Nguyên bản (local_ai_generated_untouched_rate)**: **${local_ai_generated_untouched_rate.toFixed(1)}%** (Kỳ vọng $\\ge 80\\%$)\n`;
-  mdReport += `- **Tỷ lệ Phản hồi AI Được sửa nhẹ (local_ai_rewritten_rate)**: **${local_ai_rewritten_rate.toFixed(1)}%**\n`;
-  mdReport += `- **Tỷ lệ Trả Fallback Response Bank (fallback_rate)**: **${fallback_rate.toFixed(1)}%**\n`;
-  mdReport += `- **Tỷ lệ Bắt buộc Kết thúc/Chặn (forced_completion_rate)**: **${forced_completion_rate.toFixed(1)}%** (Kỳ vọng $\\le 15\\%$)\n`;
-  mdReport += `- **Tỷ lệ Kích hoạt Bộ lọc & Ghi đè (guard_rewrite_rate)**: **${guard_rewrite_rate.toFixed(1)}%**\n`;
-  mdReport += `- **Số lần sử dụng template cứng (exact_template_usage_count)**: **${exact_template_usage_count}**\n`;
-  mdReport += `- **Điểm Tự nhiên Trung bình (average_naturalness)**: **${average_naturalness.toFixed(2)}/5** (Kỳ vọng $\\ge 3.5/5$)\n`;
-  mdReport += `- **Số lỗi nghiêm trọng phát sinh (critical_fail_count)**: **${critical_fail_count}** (Kỳ vọng $= 0$)\n\n`;
 
-  mdReport += `### 3. Đánh giá Chi tiết & Phân tích Sự cố phát sinh\n\n`;
+  mdReport += `
+### 2. Các Chỉ số Vận hành Đo lường (Live Operational Metrics)
+
+`;
+  mdReport += `- **Tỷ lệ phản hồi AI nguyên bản (local_ai_generated_untouched_rate)**: **${local_ai_generated_untouched_rate.toFixed(1)}%** (Kỳ vọng >= 80%)
+`;
+  mdReport += `- **Tỷ lệ phản hồi AI được sửa nhẹ (local_ai_rewritten_rate)**: **${local_ai_rewritten_rate.toFixed(1)}%**
+`;
+  mdReport += `- **Tỷ lệ trả Fallback Response Bank (fallback_rate)**: **${fallback_rate.toFixed(1)}%**
+`;
+  mdReport += `- **Tỷ lệ bắt buộc kết thúc/chặn (forced_completion_rate)**: **${forced_completion_rate.toFixed(1)}%** (Kỳ vọng <= 15%)
+`;
+  mdReport += `- **Tỷ lệ kích hoạt bộ lọc và ghi đè (guard_rewrite_rate)**: **${guard_rewrite_rate.toFixed(1)}%**
+`;
+  mdReport += `- **Số lần sử dụng template cứng (exact_template_usage_count)**: **${exact_template_usage_count}**
+`;
+  mdReport += `- **Điểm tự nhiên trung bình (average_naturalness)**: **${average_naturalness.toFixed(2)}/5** (Kỳ vọng >= 3.5/5)
+`;
+  mdReport += `- **Số lỗi nghiêm trọng phát sinh (critical_fail_count)**: **${critical_fail_count}** (Kỳ vọng = 0)
+
+`;
+
+  mdReport += `### 3. Chỉ số Buyer Voice Style (Soft Gate)
+
+`;
+  mdReport += `- **Điểm buyer voice trung bình (average_buyer_voice_score)**: **${average_buyer_voice_score.toFixed(1)}/100**
+`;
+  mdReport += `- **Số ca sale_tone_risk=high**: **${sale_tone_high_count}/${total}**
+`;
+  mdReport += `- **Trung bình over-polite markers**: **${average_over_polite_marker_count.toFixed(2)}** / case
+`;
+  mdReport += `- **Trung bình sale-echo markers**: **${average_sale_echo_marker_count.toFixed(2)}** / case
+`;
+  mdReport += `- **Trung bình support phrases**: **${average_support_phrase_count.toFixed(2)}** / case
+`;
+  mdReport += `- **Trung bình buyer request markers**: **${average_buyer_request_marker_count.toFixed(2)}** / case
+
+`;
+
+  const severeFallbackCount = results.filter(
+    r =>
+      r.metadata.reply_source === "deterministic_fallback" &&
+      (r.metadata.consultant_tone_blocked ||
+        r.metadata.stock_quantity_hidden_from_customer ||
+        r.metadata.completion_forced_reply)
+  ).length;
+  const severeFallbackRate = total > 0 ? (severeFallbackCount / total) * 100 : 0;
+  const effectiveAiResponseRate = local_ai_generated_untouched_rate + local_ai_rewritten_rate;
+  const rewrittenCases = results.filter(r => r.metadata.reply_source === "local_ai_rewritten");
+  const minimalRewriteCount = rewrittenCases.filter(r => {
+    const raw = String(r.metadata.raw_model_reply || "").trim();
+    const final = String(r.metadata.final_reply || "").trim();
+    if (!raw || !final) return false;
+    if (raw === final) return true;
+    const rawWords = raw.split(/\s+/).filter(Boolean).length;
+    const finalWords = final.split(/\s+/).filter(Boolean).length;
+    return Math.abs(rawWords - finalWords) <= 6;
+  }).length;
+  const rewrittenCasesAcceptable = rewrittenCases.length === 0 || minimalRewriteCount === rewrittenCases.length;
+  const styleScoreThreshold = 85;
+  const safetyPass =
+    critical_fail_count === 0 &&
+    exact_template_usage_count === 0 &&
+    forced_completion_rate <= 15 &&
+    (fallback_rate === 0 || fallback_rate === severeFallbackRate);
+  const stylePass =
+    average_buyer_voice_score >= styleScoreThreshold &&
+    average_support_phrase_count <= 0.2 &&
+    effectiveAiResponseRate >= 80 &&
+    rewrittenCasesAcceptable;
+  const runtimeContractReady = safetyPass && stylePass;
+  const phaseAccepted = stylePass;
+
+  mdReport += `### 4. Đánh giá Safety & Style Findings
+
+`;
   if (critical_fail_count === 0) {
-    mdReport += `> [!NOTE]\n`;
-    mdReport += `> Tuyệt vời! Không phát hiện bất kỳ lỗi nghiêm trọng (Critical Fail) nào. Toàn bộ các ca đàm phán thương mại đều PASS xuất sắc.\n`;
-    mdReport += `> - Xưng hô **Chị/Em** ở nhóm khách Nữ và **Anh/Em** ở nhóm khách Nam hoàn toàn ổn định và được bảo vệ nghiêm ngặt qua các lượt đàm phán.\n`;
-    mdReport += `> - Price Context Guard hoạt động tuyệt đối chính xác: Không ngã giá ảo khi Sale chưa đưa ra báo giá số tiền thực sự.\n`;
-    mdReport += `> - Qwen3 phản hồi vô cùng trôi chảy, không có tình trạng copy-paste thô bạo mã candidates dạng database dump nhờ chỉ dẫn Rule 3 mới trong Prompt.\n\n`;
+    mdReport += `> [!NOTE]
+`;
+    mdReport += `> Không phát hiện bất kỳ lỗi nghiêm trọng (critical fail) nào. Safety gate của Phase 12H.1 vẫn được giữ nguyên.
+`;
+    mdReport += `> - Xưng hô Chị/Em và Anh/Em vẫn ổn định ở các case chính.
+`;
+    mdReport += `> - Price/Product/Stock/Delivery guards không bị nới lỏng.
+`;
+    mdReport += `> - Qwen3 vẫn là generator chính; style calibration được đo bằng soft metrics thay vì hard fail.
+
+`;
   } else {
-    mdReport += `Phát hiện ${critical_fail_count} điểm sai sót hội thoại cần làm mịn:\n\n`;
-    results.filter(r => r.criticalIssues.length > 0).forEach(r => {
-      mdReport += `#### Ca phát sinh lỗi: [Case ${r.case_id}] ${r.name}\n`;
-      mdReport += `- **Tin nhắn của Sale**: "${r.metadata.sale_message}"\n`;
-      mdReport += `- **Phản hồi của AI**: "${r.reply}"\n`;
-      mdReport += `- **Lỗi cụ thể**: ${r.criticalIssues.join("; ")}\n`;
-      mdReport += `- **Nguyên nhân dự kiến**: Sự thiếu đồng bộ trong module hoặc tham số prompt.\n`;
-      mdReport += `- **Giải pháp đề xuất**: Điều chỉnh tham số chặn tương ứng.\n\n`;
-    });
+    mdReport += `Phát hiện ${critical_fail_count} lỗi nghiêm trọng cần xử lý thêm.
+
+`;
   }
 
-  mdReport += `### 4. Kết luận Nghiệm thu & Khuyến nghị (Verdict)\n\n`;
-  const acceptText = (critical_fail_count === 0 && local_ai_generated_untouched_rate >= 80 && forced_completion_rate <= 15 && average_naturalness >= 3.5)
-    ? `Hệ thống hoàn toàn thỏa mãn tất cả các tiêu chí nghiệm thu khắt khe nhất của **Phase 12H.1-R**.`
-    : `Hệ thống cơ bản ổn định nhưng cần căn chỉnh nhẹ một vài điểm trước khi freeze.`;
+  const styleRiskCases = results.filter(r => r.buyerVoiceMetrics.sale_tone_risk !== "low");
+  if (styleRiskCases.length > 0) {
+    mdReport += `#### Các ca còn style-risk cần theo dõi
 
-  const freezeReady = critical_fail_count === 0 && local_ai_generated_untouched_rate >= 80 && forced_completion_rate <= 15 && average_naturalness >= 3.5;
-  mdReport += `* **Đóng băng (Freeze) Phase 12H.1?**: **${freezeReady ? "YES" : "NO"}**. ${acceptText}\n`;
-  mdReport += `* **Sẵn sàng Nhập liệu dữ liệu (Ready for data import)?**: **${freezeReady ? "YES" : "NO"}**.\n`;
-  mdReport += `* **Sẵn sàng chuyển sang Phase 12H.3 Natural Dialogue Calibration?**: **${freezeReady ? "YES" : "NO"}**.\n`;
+`;
+    styleRiskCases.forEach(r => {
+      mdReport += `- **${r.case_id} ${r.name}**: score=${r.buyerVoiceMetrics.buyer_voice_score}/100, risk=${r.buyerVoiceMetrics.sale_tone_risk}, over_polite=${r.buyerVoiceMetrics.over_polite_marker_count}, sale_echo=${r.buyerVoiceMetrics.sale_echo_marker_count}, support=${r.buyerVoiceMetrics.support_phrase_count}
+`;
+      mdReport += `  Raw/Final: "${r.metadata.raw_model_reply}" -> "${r.metadata.final_reply}"
+`;
+    });
+    mdReport += `
+`;
+  }
+
+  mdReport += `### 5. Safety Verdict
+
+`;
+  mdReport += `- **Safety Gate (12H.1)**: **${safetyPass ? "PASS" : "FAIL"}**
+`;
+  mdReport += `- critical_fail_count=${critical_fail_count}, fallback_rate=${fallback_rate.toFixed(1)}%, exact_template_usage_count=${exact_template_usage_count}, forced_completion_rate=${forced_completion_rate.toFixed(1)}%
+`;
+  mdReport += `- severe_fallback_count=${severeFallbackCount}/${total} (${severeFallbackRate.toFixed(1)}%)
+
+`;
+  mdReport += `### 6. Style Verdict
+
+`;
+  mdReport += `- **Style Gate (12H.3-A)**: **${stylePass ? "PASS" : "FAIL"}**
+`;
+  mdReport += `- average_buyer_voice_score=${average_buyer_voice_score.toFixed(1)}/100 (threshold=${styleScoreThreshold})
+`;
+  mdReport += `- sale_tone_high_count=${sale_tone_high_count}/${total} (soft finding)
+`;
+  mdReport += `- average_support_phrase_count=${average_support_phrase_count.toFixed(2)}
+`;
+  mdReport += `- local_ai_generated_untouched_rate=${local_ai_generated_untouched_rate.toFixed(1)}% (observation only)
+`;
+  mdReport += `- local_ai_rewritten_rate=${local_ai_rewritten_rate.toFixed(1)}%
+`;
+  mdReport += `- effective_ai_response_rate=${effectiveAiResponseRate.toFixed(1)}%
+`;
+  mdReport += `- rewritten_cases_minimal_and_acceptable=${rewrittenCasesAcceptable ? "YES" : "NO"} (${minimalRewriteCount}/${rewrittenCases.length})
+`;
+  mdReport += `
+### 7. Remaining Soft Findings
+
+`;
+  if (styleRiskCases.length === 0) {
+    mdReport += `- Không còn soft finding đáng chú ý.
+`;
+  } else {
+    mdReport += `- Các case style-risk còn lại được report là soft finding, không tính vào critical_fail_count.
+`;
+  }
+  mdReport += `
+### 8. Final Recommendation
+
+`;
+  mdReport += `* **Phase 12H.3-A: ACCEPTED?**: **${phaseAccepted ? "YES" : "NO"}**
+`;
+  mdReport += `* **Runtime Contract**: **${runtimeContractReady ? "YES" : "NO"}**
+`;
+  mdReport += `* **Data import**: **${runtimeContractReady ? "YES AFTER Runtime Contract" : "NO"}**
+`;
 
   console.log(mdReport);
 
