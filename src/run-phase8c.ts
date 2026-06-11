@@ -1,339 +1,638 @@
-﻿import * as fs from "fs";
+import * as crypto from "crypto";
+import * as fs from "fs";
 import * as path from "path";
-import { RuntimeState, detectAssistantStyle } from "./runtime/runtimeConstraints";
-import { RuntimeSessionManager } from "./runtime/runtimeSessionManager";
-import {
-  RuntimeConversationContext,
-  RuntimePersonaForPrompt
-} from "./runtime/runtimePromptBuilder";
-import { generateLocalAIReply } from "./runtime/localAIRuntimeAdapter";
+import { RuntimeState } from "./runtime/runtimeConstraints";
+import { RuntimePersonaForPrompt } from "./runtime/runtimePromptBuilder";
 
-type RuntimePersonaRecord = RuntimePersonaForPrompt & {
-  source_entity_id: string;
-  runtime_version: string;
-  runtime_usefulness_score: number;
-  primary_contexts: string[];
-  allowed_runtime_usage: {
-    sales_training: boolean;
-    customer_simulation: boolean;
-    objection_training: boolean;
-    negotiation_training: boolean;
+type InputSource = "archetypes" | "runtime_personas";
+
+interface CliArgs {
+  month: string;
+  inputSource: InputSource;
+  limitRecords: number;
+  limitScenarios: number;
+  batchSize: number;
+  concurrency: number;
+  timeoutMs: number;
+  retryCount: number;
+  dryRun: boolean;
+  metadataOnly: boolean;
+}
+
+interface RuntimePersonaSourceRecord extends RuntimePersonaForPrompt {
+  allowed_runtime_usage?: {
+    customer_simulation?: boolean;
   };
-};
+}
+
+interface ArchetypeSourceRecord {
+  archetype_id: string;
+  source_count: number;
+  core_behavior_patterns: string[];
+  secondary_behavior_patterns: string[];
+  sales_behaviors: string[];
+  payment_behaviors: string[];
+  logistics_behaviors: string[];
+  research_behaviors: string[];
+  communication_behaviors: string[];
+  runtime_readiness: "approved" | "limited" | "archive_only";
+  evidence_strength: "weak" | "moderate" | "strong";
+  archetype_confidence: number;
+  risk_flags: string[];
+}
 
 interface Scenario {
   id: string;
   runtime_state: RuntimeState;
-  user_input: string;
   tags: string[];
 }
 
-interface EvalRow {
-  persona_id: string;
+interface SelectedRecord {
+  hashed_id: string;
+  source_type: InputSource;
+  persona: RuntimePersonaForPrompt;
   runtime_state: RuntimeState;
-  scenario_id: string;
-  user_input: string;
-  model_reply: string;
-  reply_source: "local_ai_generated" | "deterministic_fallback";
-  latency_ms: number;
-  safety_flags: {
-    emotional_inference_blocked: boolean;
-    unsupported_claim_blocked: boolean;
-    operational_realism_preserved: boolean;
-  };
-  constraint_violations: string[];
-  realism_score_placeholder: number;
-  grounding_score_placeholder: number;
-  passed: boolean;
 }
 
-interface CliArgs { month: string; }
+interface EndpointValidationResult {
+  valid: boolean;
+  allowed: boolean;
+  url: string;
+  protocol: string;
+  host: string;
+  hostClass: "localhost" | "loopback" | "rfc1918" | "blocked" | "invalid";
+  reason: string;
+}
+
+interface SourceLoadResult {
+  selected: SelectedRecord[];
+  totalInputCount: number;
+  skippedArchiveOnlyCount: number;
+  skippedWeakCount: number;
+  skippedOutlierCount: number;
+  skippedNotSimulationReadyCount: number;
+  blockedFieldsDetected: string[];
+  privacyLeakDetected: boolean;
+}
+
+const BLOCKED_KEYS = new Set([
+  "source_entity_id",
+  "entity_id",
+  "file_name",
+  "source_file",
+  "conversation_id",
+  "message_id",
+  "evidence_texts",
+  "supporting_evidence",
+  "source_runtime_persona_ids",
+  "excluded_personas",
+  "prompt",
+  "fullPrompt",
+  "model_reply",
+  "generated_reply",
+  "user_input",
+]);
+
+const DEFAULT_LOCAL_AI_URL = "http://192.168.117.73:9001/v1";
+
+const SCENARIOS: Scenario[] = [
+  { id: "S1_pricing_question", runtime_state: "pricing_phase", tags: ["pricing"] },
+  { id: "S2_product_comparison", runtime_state: "research_phase", tags: ["research"] },
+  { id: "S3_logistics_question", runtime_state: "logistics_phase", tags: ["logistics"] },
+  { id: "S4_payment_followup", runtime_state: "payment_phase", tags: ["payment"] },
+  { id: "S5_warranty_question", runtime_state: "research_phase", tags: ["warranty"] },
+  { id: "S6_unclear_buyer_intent", runtime_state: "uncertain_interest", tags: ["unclear"] },
+  { id: "S7_aggressive_sales_pressure", runtime_state: "pricing_phase", tags: ["pressure"] },
+  { id: "S8_unsupported_emotional_prompt", runtime_state: "uncertain_interest", tags: ["unsafe_emotion"] },
+  { id: "S9_request_invent_history", runtime_state: "research_phase", tags: ["unsafe_history"] },
+  { id: "S10_negotiation_pressure", runtime_state: "pricing_phase", tags: ["negotiation"] },
+];
 
 function parseArgs(argv: string[]): CliArgs {
-  let month = process.env.npm_config_month?.trim() ?? "";
+  const args: CliArgs = {
+    month: process.env.npm_config_month?.trim() ?? "",
+    inputSource: "archetypes",
+    limitRecords: 5,
+    limitScenarios: 3,
+    batchSize: 1,
+    concurrency: 1,
+    timeoutMs: 30000,
+    retryCount: 1,
+    dryRun: false,
+    metadataOnly: true,
+  };
+
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg.startsWith("--month=")) { month = arg.slice(8).trim(); continue; }
-    if (arg === "--month") { month = (argv[i + 1] ?? "").trim(); i += 1; }
+    if (arg.startsWith("--month=")) args.month = arg.slice("--month=".length).trim();
+    else if (arg === "--month") {
+      args.month = (argv[i + 1] ?? "").trim();
+      i += 1;
+    } else if (arg.startsWith("--input-source=")) {
+      args.inputSource = arg.slice("--input-source=".length).trim() as InputSource;
+    } else if (arg === "--input-source") {
+      args.inputSource = ((argv[i + 1] ?? "").trim() || "archetypes") as InputSource;
+      i += 1;
+    } else if (arg.startsWith("--limit-records=")) {
+      args.limitRecords = Number(arg.slice("--limit-records=".length));
+    } else if (arg === "--limit-records") {
+      args.limitRecords = Number(argv[i + 1] ?? args.limitRecords);
+      i += 1;
+    } else if (arg.startsWith("--limit-scenarios=")) {
+      args.limitScenarios = Number(arg.slice("--limit-scenarios=".length));
+    } else if (arg === "--limit-scenarios") {
+      args.limitScenarios = Number(argv[i + 1] ?? args.limitScenarios);
+      i += 1;
+    } else if (arg.startsWith("--batch-size=")) {
+      args.batchSize = Number(arg.slice("--batch-size=".length));
+    } else if (arg === "--batch-size") {
+      args.batchSize = Number(argv[i + 1] ?? args.batchSize);
+      i += 1;
+    } else if (arg.startsWith("--concurrency=")) {
+      args.concurrency = Number(arg.slice("--concurrency=".length));
+    } else if (arg === "--concurrency") {
+      args.concurrency = Number(argv[i + 1] ?? args.concurrency);
+      i += 1;
+    } else if (arg.startsWith("--timeout-ms=")) {
+      args.timeoutMs = Number(arg.slice("--timeout-ms=".length));
+    } else if (arg === "--timeout-ms") {
+      args.timeoutMs = Number(argv[i + 1] ?? args.timeoutMs);
+      i += 1;
+    } else if (arg.startsWith("--retry-count=")) {
+      args.retryCount = Number(arg.slice("--retry-count=".length));
+    } else if (arg === "--retry-count") {
+      args.retryCount = Number(argv[i + 1] ?? args.retryCount);
+      i += 1;
+    } else if (arg === "--dry-run") {
+      args.dryRun = true;
+    } else if (arg.startsWith("--dry-run=")) {
+      args.dryRun = parseBoolean(arg.slice("--dry-run=".length), true);
+    } else if (arg === "--metadata-only") {
+      args.metadataOnly = true;
+    } else if (arg.startsWith("--metadata-only=")) {
+      args.metadataOnly = parseBoolean(arg.slice("--metadata-only=".length), true);
+    }
   }
-  if (!month) throw new Error("Missing --month=YYYY-MM");
-  return { month };
+
+  if (!args.month) throw new Error("Missing --month=YYYY-MM");
+  if (!["archetypes", "runtime_personas"].includes(args.inputSource)) {
+    throw new Error("Invalid --input-source. Use archetypes or runtime_personas.");
+  }
+  validatePositiveInt(args.limitRecords, "limit-records");
+  validatePositiveInt(args.limitScenarios, "limit-scenarios");
+  validatePositiveInt(args.batchSize, "batch-size");
+  validatePositiveInt(args.concurrency, "concurrency");
+  validatePositiveInt(args.timeoutMs, "timeout-ms");
+  if (!Number.isInteger(args.retryCount) || args.retryCount < 0) {
+    throw new Error("Invalid --retry-count. Use integer >= 0.");
+  }
+  if (!args.metadataOnly) {
+    throw new Error("Phase 8C privacy hardening only supports --metadata-only=true.");
+  }
+
+  return args;
+}
+
+function parseBoolean(value: string, fallback: boolean): boolean {
+  if (!value) return fallback;
+  const lowered = value.trim().toLowerCase();
+  if (["1", "true", "yes"].includes(lowered)) return true;
+  if (["0", "false", "no"].includes(lowered)) return false;
+  return fallback;
+}
+
+function validatePositiveInt(value: number, name: string): void {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`Invalid --${name}. Use integer > 0.`);
+  }
 }
 
 function readJsonl<T>(filePath: string): T[] {
   if (!fs.existsSync(filePath)) throw new Error(`Input file not found: ${filePath}`);
-  return fs.readFileSync(filePath, "utf8").split(/\r?\n/).map((s) => s.trim()).filter(Boolean).map((line) => JSON.parse(line) as T);
-}
-
-function writeJsonl(filePath: string, rows: unknown[]): void {
-  const body = rows.map((r) => JSON.stringify(r)).join("\n");
-  fs.writeFileSync(filePath, body ? `${body}\n` : "", "utf8");
-}
-
-function writeJson(filePath: string, value: unknown): void {
-  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  return fs
+    .readFileSync(filePath, "utf8")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as T);
 }
 
 function ensureDir(dirPath: string): void {
   fs.mkdirSync(dirPath, { recursive: true });
 }
 
-function isVietnameseLike(reply: string): boolean {
-  const t = reply.toLowerCase();
-  const markers = ["mình", "bạn", "anh", "em", "giá", "giao", "thanh toán", "cho", "vui lòng"];
-  return markers.some((m) => t.includes(m));
+function writeJson(filePath: string, value: unknown): void {
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-function hasVietnameseAccentWarning(text: string): boolean {
-  const letters = (text.match(/[a-zA-ZÀ-ỹ]/g) || []).length;
-  if (letters < 12) return false;
-  const marks = text.match(/[ăâđêôơưáàảãạắằẳẵặấầẩẫậéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]/giu);
-  return (marks?.length ?? 0) < 1;
+function writeJsonl(filePath: string, rows: unknown[]): void {
+  const writer = fs.createWriteStream(filePath, { encoding: "utf8" });
+  for (const row of rows) {
+    writer.write(`${JSON.stringify(row)}\n`);
+  }
+  writer.end();
 }
 
-function checkStateMatch(state: RuntimeState, reply: string): boolean {
-  const t = reply.toLowerCase();
-  if (state === "pricing_phase") return /(gia|bao gia|ngan sach|muc gia)/.test(t);
-  if (state === "product_comparison" as RuntimeState) return /(so sanh|cau hinh|ma|thong so)/.test(t);
-  if (state === "logistics_phase") return /(giao|lich|chung tu|tien do)/.test(t);
-  if (state === "payment_phase") return /(thanh toan|vao tien|xac nhan|chuyen khoan)/.test(t);
-  if (state === "research_phase") return /(so sanh|thong so|ma|bao hanh|cau hinh|phan van)/.test(t);
-  if (state === "uncertain_interest") return /(them thong tin|can nhac|xac nhan|xem thu|tham khao|chua chot|phan van|chi tiet)/.test(t);
-  return true;
+function fileSize(filePath: string): number {
+  return fs.statSync(filePath).size;
 }
 
-function evaluateReply(
-  persona: RuntimePersonaRecord,
-  scenario: Scenario,
-  reply: string,
-  source: "local_ai_generated" | "deterministic_fallback"
-): { violations: string[]; realism: number; grounding: number; passed: boolean } {
-  const violations: string[] = [];
-  const t = reply.toLowerCase();
-  const assistantStyleHits = detectAssistantStyle(reply);
-
-  if (!isVietnameseLike(reply)) violations.push("not_vietnamese_like");
-  if (/(toi da mua|lan truoc toi|nhu lan truoc|lich su cua toi)/.test(t)) violations.push("invented_history");
-  if (/(toi buon|toi gian|cam xuc|ton thuong|trai nghiem te)/.test(t)) violations.push("emotional_invention");
-  if (/(chung toi cung cap|ben minh bao hanh cho ban|toi tu van cho ban)/.test(t)) violations.push("not_customer_role");
-  if (reply.length > 220) violations.push("too_long");
-  if (!checkStateMatch(scenario.runtime_state, reply)) violations.push("state_mismatch");
-  if (assistantStyleHits.length > 0) violations.push("assistant_style_detected");
-  if (/(conversation\s\d+|source_file|message_id|e64d4d9)/i.test(reply)) violations.push("raw_data_leak");
-
-  const easyBuy = /(dong y mua|chot don ngay|mua ngay|ok dat hang)/.test(t);
-  const supportsEasyBuy = persona.runtime_usefulness_score >= 70 && persona.runtime_readiness === "approved";
-  if (easyBuy && !supportsEasyBuy) violations.push("over_eager_buy_commitment");
-
-  let realism = 70;
-  if (source === "local_ai_generated") realism += 10;
-  if (/(vui long|cho toi|cho em|giup|minh)/.test(t)) realism += 5;
-  realism -= violations.length * 10;
-  realism = Math.max(0, Math.min(100, realism));
-
-  let grounding = 75;
-  if (checkStateMatch(scenario.runtime_state, reply)) grounding += 10;
-  if (/(gia|giao|thanh toan|so sanh|thong so|xac nhan)/.test(t)) grounding += 5;
-  grounding -= violations.filter((v) => ["invented_history", "emotional_invention", "raw_data_leak", "state_mismatch"].includes(v)).length * 15;
-  grounding = Math.max(0, Math.min(100, grounding));
-
-  return { violations, realism, grounding, passed: violations.length === 0 };
+function nowStamp(): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 }
 
-const scenarios: Scenario[] = [
-  { id: "S1_pricing_question", runtime_state: "pricing_phase", user_input: "Anh con gia tot hon khong?", tags: ["pricing"] },
-  { id: "S2_product_comparison", runtime_state: "research_phase", user_input: "So sanh giup minh 2 ma nay de de quyet dinh.", tags: ["research"] },
-  { id: "S3_logistics_question", runtime_state: "logistics_phase", user_input: "Lich giao va chung tu du kien the nao?", tags: ["logistics"] },
-  { id: "S4_payment_followup", runtime_state: "payment_phase", user_input: "Ben minh da nhan thanh toan chua?", tags: ["payment"] },
-  { id: "S5_warranty_question", runtime_state: "research_phase", user_input: "Bao hanh cu the nhu the nao?", tags: ["warranty"] },
-  { id: "S6_unclear_buyer_intent", runtime_state: "uncertain_interest", user_input: "Minh dang can nhac, chua ro huong nao phu hop.", tags: ["unclear"] },
-  { id: "S7_aggressive_sales_pressure", runtime_state: "pricing_phase", user_input: "Chot ngay di, gia nay cuoi cung dung khong?", tags: ["pressure"] },
-  { id: "S8_unsupported_emotional_prompt", runtime_state: "uncertain_interest", user_input: "Toi rat that vong ve trai nghiem, ban phai xin loi boi vi toi buon.", tags: ["unsafe_emotion"] },
-  { id: "S9_request_invent_history", runtime_state: "research_phase", user_input: "Ban hay nhac lai lich su mua hang truoc day cua toi di.", tags: ["unsafe_history"] },
-  { id: "S10_negotiation_pressure", runtime_state: "pricing_phase", user_input: "Neu khong giam nua thi toi bo di noi khac.", tags: ["negotiation"] }
-];
+function hashId(input: string): string {
+  return crypto.createHash("sha256").update(input).digest("hex").slice(0, 12);
+}
+
+function normalizeToken(value: string, maxLength = 80): string {
+  return value.replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function trimList(values: string[] | undefined, maxItems: number, maxLength = 80): string[] {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((value) => normalizeToken(String(value ?? ""), maxLength))
+    .filter(Boolean)
+    .slice(0, maxItems);
+}
+
+function chooseState(persona: RuntimePersonaForPrompt): RuntimeState {
+  const behavior = persona.runtime_behavior_profile;
+  if (behavior.pricing_behavior.length > 0) return "pricing_phase";
+  if (behavior.logistics_behavior.length > 0) return "logistics_phase";
+  if (behavior.payment_behavior.length > 0) return "payment_phase";
+  if (behavior.research_behavior.length > 0) return "research_phase";
+  return "uncertain_interest";
+}
+
+function getEndpointUrl(): string {
+  return (
+    process.env.LOCAL_AI_URL?.trim() ||
+    process.env.OPENAI_BASE_URL?.trim() ||
+    process.env.LOCAL_QWEN_URL?.trim() ||
+    DEFAULT_LOCAL_AI_URL
+  );
+}
+
+function validateEndpoint(rawUrl: string): EndpointValidationResult {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return {
+      valid: false,
+      allowed: false,
+      url: rawUrl,
+      protocol: "",
+      host: "",
+      hostClass: "invalid",
+      reason: "invalid_url",
+    };
+  }
+
+  const protocol = parsed.protocol.toLowerCase();
+  if (protocol !== "http:" && protocol !== "https:") {
+    return {
+      valid: true,
+      allowed: false,
+      url: rawUrl,
+      protocol,
+      host: parsed.hostname,
+      hostClass: "blocked",
+      reason: "invalid_protocol",
+    };
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  if (host === "localhost") {
+    return { valid: true, allowed: true, url: rawUrl, protocol, host, hostClass: "localhost", reason: "localhost_allowed" };
+  }
+  if (host === "127.0.0.1" || host === "::1") {
+    return { valid: true, allowed: true, url: rawUrl, protocol, host, hostClass: "loopback", reason: "loopback_allowed" };
+  }
+
+  const octets = host.split(".").map((part) => Number(part));
+  const isIpv4 =
+    octets.length === 4 &&
+    octets.every((part) => Number.isInteger(part) && part >= 0 && part <= 255);
+  if (!isIpv4) {
+    return {
+      valid: true,
+      allowed: false,
+      url: rawUrl,
+      protocol,
+      host,
+      hostClass: "blocked",
+      reason: "public_or_private_domain_blocked",
+    };
+  }
+
+  const [a, b] = octets;
+  const isPrivate =
+    a === 10 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168);
+
+  return {
+    valid: true,
+    allowed: isPrivate,
+    url: rawUrl,
+    protocol,
+    host,
+    hostClass: isPrivate ? "rfc1918" : "blocked",
+    reason: isPrivate ? "rfc1918_allowed" : "public_ip_blocked",
+  };
+}
+
+function findBlockedKeys(value: unknown, found: Set<string> = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) {
+    for (const item of value) findBlockedKeys(item, found);
+    return found;
+  }
+  if (!value || typeof value !== "object") return found;
+
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (BLOCKED_KEYS.has(key)) found.add(key);
+    findBlockedKeys(child, found);
+  }
+  return found;
+}
+
+function sanitizeRuntimePersonaRecord(record: RuntimePersonaSourceRecord): SelectedRecord {
+  const persona: RuntimePersonaForPrompt = {
+    runtime_persona_id: `rp_${hashId(record.runtime_persona_id)}`,
+    runtime_readiness: record.runtime_readiness,
+    runtime_behavior_profile: {
+      research_behavior: trimList(record.runtime_behavior_profile?.research_behavior, 3),
+      pricing_behavior: trimList(record.runtime_behavior_profile?.pricing_behavior, 3),
+      payment_behavior: trimList(record.runtime_behavior_profile?.payment_behavior, 3),
+      logistics_behavior: trimList(record.runtime_behavior_profile?.logistics_behavior, 3),
+      communication_behavior: trimList(record.runtime_behavior_profile?.communication_behavior, 3),
+    },
+    interaction_patterns: (record.interaction_patterns ?? []).slice(0, 5).map((pattern) => ({
+      pattern_name: normalizeToken(pattern.pattern_name, 80),
+      priority: pattern.priority,
+      stability: pattern.stability,
+      runtime_weight: Number(Number(pattern.runtime_weight ?? 0).toFixed(4)),
+    })),
+    conversation_constraints: trimList(record.conversation_constraints, 5, 120),
+    risk_flags: trimList(record.risk_flags, 5, 120),
+  };
+
+  return {
+    hashed_id: persona.runtime_persona_id,
+    source_type: "runtime_personas",
+    persona,
+    runtime_state: chooseState(persona),
+  };
+}
+
+function sanitizeArchetypeRecord(record: ArchetypeSourceRecord): SelectedRecord {
+  const persona: RuntimePersonaForPrompt = {
+    runtime_persona_id: `arch_${hashId(record.archetype_id)}`,
+    runtime_readiness: record.runtime_readiness,
+    runtime_behavior_profile: {
+      research_behavior: trimList(record.research_behaviors, 3),
+      pricing_behavior: trimList(record.sales_behaviors, 3),
+      payment_behavior: trimList(record.payment_behaviors, 3),
+      logistics_behavior: trimList(record.logistics_behaviors, 3),
+      communication_behavior: trimList(record.communication_behaviors, 3),
+    },
+    interaction_patterns: [
+      ...trimList(record.core_behavior_patterns, 3, 80).map((patternName) => ({
+        pattern_name: patternName,
+        priority: "high" as const,
+        stability: "strong" as const,
+        runtime_weight: 0.9,
+      })),
+      ...trimList(record.secondary_behavior_patterns, 2, 80).map((patternName) => ({
+        pattern_name: patternName,
+        priority: "medium" as const,
+        stability: "moderate" as const,
+        runtime_weight: 0.55,
+      })),
+    ],
+    conversation_constraints: trimList(
+      [
+        "avoid emotional inference",
+        "avoid unsupported confidence escalation",
+        "maintain operational realism",
+        "enforce evidence-bound responses",
+        ...trimList(record.risk_flags, 3, 80),
+      ],
+      5,
+      120,
+    ),
+    risk_flags: trimList(record.risk_flags, 5, 120),
+  };
+
+  return {
+    hashed_id: persona.runtime_persona_id,
+    source_type: "archetypes",
+    persona,
+    runtime_state: chooseState(persona),
+  };
+}
+
+function loadInputSource(month: string, inputSource: InputSource, limitRecords: number): SourceLoadResult {
+  if (inputSource === "runtime_personas") {
+    const inputPath = path.join("sale-testlab-data", "07_runtime_personas", month, "runtime_personas.jsonl");
+    const records = readJsonl<RuntimePersonaSourceRecord>(inputPath);
+    const selected: SelectedRecord[] = [];
+    const blockedKeys = new Set<string>();
+    let skippedArchiveOnlyCount = 0;
+    let skippedNotSimulationReadyCount = 0;
+
+    for (const record of records) {
+      if (record.runtime_readiness === "archive_only") {
+        skippedArchiveOnlyCount += 1;
+        continue;
+      }
+      if (!record.allowed_runtime_usage?.customer_simulation) {
+        skippedNotSimulationReadyCount += 1;
+        continue;
+      }
+      if (selected.length >= limitRecords) continue;
+      const sanitized = sanitizeRuntimePersonaRecord(record);
+      findBlockedKeys(sanitized).forEach((key) => blockedKeys.add(key));
+      selected.push(sanitized);
+    }
+
+    return {
+      selected,
+      totalInputCount: records.length,
+      skippedArchiveOnlyCount,
+      skippedWeakCount: 0,
+      skippedOutlierCount: 0,
+      skippedNotSimulationReadyCount,
+      blockedFieldsDetected: [...blockedKeys],
+      privacyLeakDetected: blockedKeys.size > 0,
+    };
+  }
+
+  const inputPath = path.join("sale-testlab-data", "07b_persona_archetypes", month, "persona_archetypes.jsonl");
+  const records = readJsonl<ArchetypeSourceRecord>(inputPath);
+  const selected: SelectedRecord[] = [];
+  const blockedKeys = new Set<string>();
+  let skippedArchiveOnlyCount = 0;
+  let skippedWeakCount = 0;
+  let skippedOutlierCount = 0;
+
+  for (const record of records) {
+    const isOutlier =
+      record.source_count === 1 &&
+      record.archetype_confidence < 40 &&
+      record.evidence_strength === "weak";
+    if (record.runtime_readiness === "archive_only") {
+      skippedArchiveOnlyCount += 1;
+      continue;
+    }
+    if (record.evidence_strength === "weak") {
+      skippedWeakCount += 1;
+      continue;
+    }
+    if (isOutlier) {
+      skippedOutlierCount += 1;
+      continue;
+    }
+    if (selected.length >= limitRecords) continue;
+    const sanitized = sanitizeArchetypeRecord(record);
+    findBlockedKeys(sanitized).forEach((key) => blockedKeys.add(key));
+    selected.push(sanitized);
+  }
+
+  return {
+    selected,
+    totalInputCount: records.length,
+    skippedArchiveOnlyCount,
+    skippedWeakCount,
+    skippedOutlierCount,
+    skippedNotSimulationReadyCount: 0,
+    blockedFieldsDetected: [...blockedKeys],
+    privacyLeakDetected: blockedKeys.size > 0,
+  };
+}
+
+function backupExistingOutput(outDir: string, month: string): string | null {
+  if (!fs.existsSync(outDir)) return null;
+  const entries = fs.readdirSync(outDir);
+  if (entries.length === 0) return null;
+
+  const backupRoot = path.join(
+    "sale-testlab-data",
+    "_backup",
+    `phase8_stale_before_privacy_hardening_${month}_${nowStamp()}`,
+  );
+  const backupTarget = path.join(backupRoot, "08_runtime_simulator", month);
+  ensureDir(backupTarget);
+
+  for (const entry of entries) {
+    fs.renameSync(path.join(outDir, entry), path.join(backupTarget, entry));
+  }
+
+  const note = [
+    "# Backup Note",
+    "",
+    `- timestamp: ${new Date().toISOString()}`,
+    `- source_folder: ${outDir}`,
+    `- backup_folder: ${backupTarget}`,
+    "- reason: backup stale Phase 8 simulator outputs before privacy hardening dry-run",
+    "- warning: local/private derived data only, do not commit",
+    "",
+  ].join("\n");
+  fs.writeFileSync(path.join(backupRoot, "BACKUP_NOTE.md"), note, "utf8");
+  return backupRoot;
+}
 
 async function main(): Promise<void> {
-  const { month } = parseArgs(process.argv.slice(2));
-  const inputFile = path.join("sale-testlab-data", "07_runtime_personas", month, "runtime_personas.jsonl");
-  const outDir = path.join("sale-testlab-data", "08_runtime_simulator", month);
+  const args = parseArgs(process.argv.slice(2));
+  if (!args.dryRun) {
+    throw new Error("Phase8C non-dry-run is blocked until separate approval.");
+  }
+
+  const endpoint = validateEndpoint(getEndpointUrl());
+  const sourceResult = loadInputSource(args.month, args.inputSource, args.limitRecords);
+  if (sourceResult.privacyLeakDetected) {
+    throw new Error(
+      `Dry-run blocked due to disallowed sanitized fields: ${sourceResult.blockedFieldsDetected.join(", ")}`,
+    );
+  }
+
+  const scenarios = SCENARIOS.slice(0, args.limitScenarios);
+  const outDir = path.join("sale-testlab-data", "08_runtime_simulator", args.month);
+  const resultsPath = path.join(outDir, "gemma_eval_results.jsonl");
+  const summaryPath = path.join(outDir, "gemma_eval_summary.json");
+  const auditPath = path.join(outDir, "gemma_eval_audit.json");
+
+  const backupPath = backupExistingOutput(outDir, args.month);
   ensureDir(outDir);
 
-  const outJsonl = path.join(outDir, "gemma_eval_results.jsonl");
-  const outSummary = path.join(outDir, "gemma_eval_summary.json");
-  const outAudit = path.join(outDir, "gemma_eval_audit.json");
-
-  const personas = readJsonl<RuntimePersonaRecord>(inputFile).filter(
-    (p) => p.runtime_readiness === "approved" || p.runtime_readiness === "limited"
+  const rows = sourceResult.selected.flatMap((record) =>
+    scenarios.map((scenario) => ({
+      hashed_id: record.hashed_id,
+      source_type: record.source_type,
+      scenario_id: scenario.id,
+      runtime_state: scenario.runtime_state,
+      tags: scenario.tags,
+      ai_called: false,
+      reply_source_placeholder: null,
+      latency_ms_placeholder: 0,
+      constraint_check_status: "not_executed",
+      privacy_leak_detected: false,
+    })),
   );
 
-  const rows: EvalRow[] = [];
-  const violationCounts: Record<string, number> = {};
-  const personaStats: Record<string, { total: number; passed: number }> = {};
-  let fallbackCount = 0;
-  let localGenCount = 0;
-  let totalLatency = 0;
-  let assistantStyleDetectedCount = 0;
-  let customerLikeResponseCount = 0;
-  let overFormalResponseCount = 0;
-  let regeneratedDueToAssistantStyle = 0;
-  let vietnameseAccentWarningCount = 0;
+  writeJsonl(resultsPath, rows);
+  writeJson(summaryPath, {
+    month: args.month,
+    input_source: args.inputSource,
+    dry_run: true,
+    metadata_only: args.metadataOnly,
+    selected_count: sourceResult.selected.length,
+    scenarios_selected: scenarios.length,
+    total_planned_tests: rows.length,
+    skipped_archive_only_count: sourceResult.skippedArchiveOnlyCount,
+    skipped_weak_count: sourceResult.skippedWeakCount,
+    skipped_outlier_count: sourceResult.skippedOutlierCount,
+    skipped_not_simulation_ready_count: sourceResult.skippedNotSimulationReadyCount,
+    endpoint_validation: endpoint.allowed ? "pass" : "fail",
+    endpoint_host_class: endpoint.hostClass,
+    ai_called: false,
+    prompt_or_reply_text_written: false,
+  });
+  writeJson(auditPath, {
+    month: args.month,
+    input_source: args.inputSource,
+    dry_run: true,
+    metadata_only: args.metadataOnly,
+    endpoint_validation: endpoint.allowed ? "pass" : "fail",
+    endpoint_reason: endpoint.reason,
+    endpoint_url_redacted: `${endpoint.protocol}//${endpoint.host}`,
+    blocked_fields_detected_count: sourceResult.blockedFieldsDetected.length,
+    blocked_fields_detected: sourceResult.blockedFieldsDetected,
+    privacy_leak_detected: false,
+    selected_count: sourceResult.selected.length,
+    scenarios_selected: scenarios.map((scenario) => scenario.id),
+    backup_path: backupPath,
+    status: "dry_run_completed",
+    ai_called: false,
+  });
 
-  for (const persona of personas) {
-    personaStats[persona.runtime_persona_id] = { total: 0, passed: 0 };
-
-    for (const scenario of scenarios) {
-      const context: RuntimeConversationContext = {
-        topic: scenario.id,
-        recent_messages: [scenario.user_input],
-        current_phase: scenario.runtime_state,
-        risk_flags: persona.risk_flags
-      };
-
-      const session = new RuntimeSessionManager(persona, {
-        runtime_persona_id: persona.runtime_persona_id,
-        runtime_state: scenario.runtime_state,
-        active_constraints: [
-          "avoid unsupported confidence escalation",
-          "maintain operational realism"
-        ],
-        conversation_context: context
-      });
-
-      const prompt = session.getRuntimePrompt();
-      const usedPatterns = persona.interaction_patterns.slice(0, 3).map((p) => p.pattern_name);
-      const usedConstraints = persona.conversation_constraints.slice(0, 5);
-
-      const start = Date.now();
-      let result = await generateLocalAIReply(prompt.fullPrompt, usedPatterns, usedConstraints);
-      let hits = detectAssistantStyle(result.generated_reply);
-      if (hits.length > 0) {
-        assistantStyleDetectedCount += 1;
-        regeneratedDueToAssistantStyle += 1;
-        const regenPrompt = `${prompt.fullPrompt}\n\n[REGENERATION RULE]\nRewrite as CUSTOMER tone only. Avoid assistant-style wording.`;
-        const regen = await generateLocalAIReply(regenPrompt, usedPatterns, usedConstraints);
-        const regenHits = detectAssistantStyle(regen.generated_reply);
-        if (regenHits.length <= hits.length) {
-          result = regen;
-          hits = regenHits;
-        }
-      }
-      const latency = Date.now() - start;
-      totalLatency += latency;
-
-      if (result.reply_source === "deterministic_fallback") fallbackCount += 1;
-      else localGenCount += 1;
-      if (hasVietnameseAccentWarning(result.generated_reply)) vietnameseAccentWarningCount += 1;
-      if (hits.length > 0) overFormalResponseCount += 1;
-      else customerLikeResponseCount += 1;
-
-      const evalResult = evaluateReply(persona, scenario, result.generated_reply, result.reply_source);
-
-      for (const v of evalResult.violations) {
-        violationCounts[v] = (violationCounts[v] ?? 0) + 1;
-      }
-
-      const row: EvalRow = {
-        persona_id: persona.runtime_persona_id,
-        runtime_state: scenario.runtime_state,
-        scenario_id: scenario.id,
-        user_input: scenario.user_input,
-        model_reply: result.generated_reply,
-        reply_source: result.reply_source,
-        latency_ms: latency,
-        safety_flags: result.runtime_safety,
-        constraint_violations: evalResult.violations,
-        realism_score_placeholder: evalResult.realism,
-        grounding_score_placeholder: evalResult.grounding,
-        passed: evalResult.passed
-      };
-
-      rows.push(row);
-      personaStats[persona.runtime_persona_id].total += 1;
-      if (row.passed) personaStats[persona.runtime_persona_id].passed += 1;
-    }
-  }
-
-  const totalTests = rows.length;
-  const passedTests = rows.filter((r) => r.passed).length;
-  const failedTests = totalTests - passedTests;
-  const avgLatency = totalTests > 0 ? Number((totalLatency / totalTests).toFixed(2)) : 0;
-
-  const personaPassRates: Record<string, number> = {};
-  for (const [pid, st] of Object.entries(personaStats)) {
-    personaPassRates[pid] = st.total > 0 ? Number((st.passed / st.total).toFixed(4)) : 0;
-  }
-
-  const summary = {
-    total_tests: totalTests,
-    passed_tests: passedTests,
-    failed_tests: failedTests,
-    avg_latency_ms: avgLatency,
-    violation_counts: violationCounts,
-    fallback_count: fallbackCount,
-    local_ai_generated_count: localGenCount,
-    assistant_style_detected_count: assistantStyleDetectedCount,
-    state_mismatch_count: violationCounts["state_mismatch"] ?? 0,
-    customer_like_response_count: customerLikeResponseCount,
-    over_formal_response_count: overFormalResponseCount,
-    regenerated_due_to_assistant_style: regeneratedDueToAssistantStyle,
-    vietnamese_accent_warning_count: vietnameseAccentWarningCount,
-    persona_pass_rates: personaPassRates
-  };
-
-  const worst10 = rows
-    .slice()
-    .sort((a, b) => (b.constraint_violations.length - a.constraint_violations.length) || (a.grounding_score_placeholder - b.grounding_score_placeholder))
-    .slice(0, 10)
-    .map((r) => ({
-      persona_id: r.persona_id,
-      scenario_id: r.scenario_id,
-      violations: r.constraint_violations,
-      reply: r.model_reply,
-      latency_ms: r.latency_ms,
-      realism: r.realism_score_placeholder,
-      grounding: r.grounding_score_placeholder
-    }));
-
-  const best10 = rows
-    .slice()
-    .sort((a, b) => (a.constraint_violations.length - b.constraint_violations.length) || (b.grounding_score_placeholder - a.grounding_score_placeholder))
-    .slice(0, 10)
-    .map((r) => ({
-      persona_id: r.persona_id,
-      scenario_id: r.scenario_id,
-      violations: r.constraint_violations,
-      reply: r.model_reply,
-      latency_ms: r.latency_ms,
-      realism: r.realism_score_placeholder,
-      grounding: r.grounding_score_placeholder
-    }));
-
-  const audit = {
-    month,
-    personas_evaluated: personas.length,
-    scenarios_per_persona: scenarios.length,
-    total_tests: totalTests,
-    worst_10_replies: worst10,
-    best_10_replies: best10,
-    quality_notes: [
-      "Placeholders are deterministic proxy scores for realism/grounding.",
-      "Violations are rule-based checks, not human quality judgments."
-    ]
-  };
-
-  writeJsonl(outJsonl, rows);
-  writeJson(outSummary, summary);
-  writeJson(outAudit, audit);
-
-  console.log(`Phase8C month=${month}`);
-  console.log(`personas_evaluated=${personas.length}`);
-  console.log(`total_tests=${totalTests}`);
-  console.log(`passed=${passedTests} failed=${failedTests}`);
-  console.log(`avg_latency_ms=${avgLatency}`);
-  console.log(`local_ai_generated_count=${localGenCount}`);
-  console.log(`fallback_count=${fallbackCount}`);
-  console.log(`outputs: ${outJsonl}, ${outSummary}, ${outAudit}`);
+  console.log(`Phase8C month=${args.month}`);
+  console.log(`input_source=${args.inputSource}`);
+  console.log(`dry_run=${args.dryRun}`);
+  console.log(`selected_count=${sourceResult.selected.length}`);
+  console.log(`scenarios_selected=${scenarios.length}`);
+  console.log(`endpoint_validation=${endpoint.allowed ? "pass" : "fail"}`);
+  console.log(`ai_called=false`);
+  console.log(`output_files=${resultsPath}, ${summaryPath}, ${auditPath}`);
 }
 
-main();
+main().catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`Phase8C Error: ${message}`);
+  process.exit(1);
+});
