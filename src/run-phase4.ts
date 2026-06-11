@@ -1,5 +1,6 @@
-﻿import * as fs from "fs";
+import * as fs from "fs";
 import * as path from "path";
+import * as readline from "readline";
 
 interface ClassifiedMessage {
   message_id: string;
@@ -86,9 +87,45 @@ interface Phase4Args {
 interface Phase4RuntimeStats {
   invalid_date_count: number;
   sessions_with_missing_messages: number;
+  invalid_json_line_count: number;
 }
 
-const ACK_TERMS = ["dạ", "ok", "rồi", "vâng", "có rồi", "em gửi", "gửi rồi", "done", "ib", "yes", "👍"];
+interface SummaryAccumulator {
+  total_sessions: number;
+  total_behavior_signals: number;
+  signal_family_counts: Record<string, number>;
+  signal_name_counts: Record<string, number>;
+  sessions_with_sales_signals: number;
+  sessions_with_operational_signals: number;
+  sessions_with_logistics_signals: number;
+  sessions_with_timing_signals: number;
+}
+
+interface AuditAccumulator {
+  sessions_with_no_signals: number;
+  weak_signal_count: number;
+  contradictory_signal_count: number;
+  low_evidence_signal_count: number;
+  high_confidence_low_evidence_count: number;
+  empty_evidence_text_count: number;
+  weak_single_evidence_count: number;
+  high_confidence_single_evidence_count: number;
+  signal_session_presence: Record<string, number>;
+}
+
+const ACK_TERMS = [
+  "dạ",
+  "ok",
+  "rồi",
+  "vâng",
+  "có rồi",
+  "em gửi",
+  "gửi rồi",
+  "done",
+  "ib",
+  "yes",
+  "👍"
+];
 
 const OPERATIONAL_CODE_RE = /\b[A-Z]{3}_[A-Z0-9]{2,5}_[A-Z]{2,3}_[A-Z0-9]+\b/g;
 const ORDER_CODE_RE = /\bX[0-9]{9,}-[A-Z]\b/g;
@@ -112,10 +149,7 @@ function safeJsonParse<T>(line: string): T | null {
 }
 
 function normalizeText(input: string): string {
-  return input
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
+  return input.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
 function toMs(ts: string): number | null {
@@ -127,6 +161,10 @@ function toMs(ts: string): number | null {
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
+}
+
+function incr(map: Record<string, number>, key: string, by = 1): void {
+  map[key] = (map[key] ?? 0) + by;
 }
 
 function pickRawField(raw: Record<string, unknown> | string | null, key: string): string {
@@ -205,9 +243,28 @@ function calcTimingFeatures(messages: ClassifiedMessage[], stats: Phase4RuntimeS
 
 function hasStrongContextKeyword(text: string): boolean {
   const strongKeywords = [
-    "xin gia", "bao gia", "gia", "con hang", "ton kho", "bao hanh", "model", "ma",
-    "unc", "tod", "cod", "duyet phieu", "coc", "treo don", "xin ma khach",
-    "kho", "xuat kho", "giao", "van chuyen", "vat", "co cq", "check tien"
+    "xin gia",
+    "bao gia",
+    "gia",
+    "con hang",
+    "ton kho",
+    "bao hanh",
+    "model",
+    "ma",
+    "unc",
+    "tod",
+    "cod",
+    "duyet phieu",
+    "coc",
+    "treo don",
+    "xin ma khach",
+    "kho",
+    "xuat kho",
+    "giao",
+    "van chuyen",
+    "vat",
+    "co cq",
+    "check tien"
   ];
   const norm = normalizeText(text);
   return strongKeywords.some((k) => norm.includes(k));
@@ -221,7 +278,14 @@ function isShortAck(text: string): boolean {
 
 function isDetailedQuestion(text: string): boolean {
   const norm = normalizeText(text);
-  return text.length > 80 && (text.includes("?") || norm.includes("khong") || norm.includes("chua") || norm.includes("sao") || norm.includes("the nao"));
+  return (
+    text.length > 80 &&
+    (text.includes("?") ||
+      norm.includes("khong") ||
+      norm.includes("chua") ||
+      norm.includes("sao") ||
+      norm.includes("the nao"))
+  );
 }
 
 function calcCommunicationFeatures(messages: ClassifiedMessage[]): CommunicationFeatures {
@@ -238,7 +302,13 @@ function calcCommunicationFeatures(messages: ClassifiedMessage[]): Communication
   for (const t of texts) {
     if (isShortAck(t)) shortAckCount += 1;
     if (isDetailedQuestion(t)) detailedQuestionCount += 1;
-    if (t.length > 0 && t.length <= 15 && containsAlphabeticToken(t) && !isShortAck(t) && !hasStrongContextKeyword(t)) {
+    if (
+      t.length > 0 &&
+      t.length <= 15 &&
+      containsAlphabeticToken(t) &&
+      !isShortAck(t) &&
+      !hasStrongContextKeyword(t)
+    ) {
       lowContextReplyCount += 1;
     }
   }
@@ -258,9 +328,20 @@ function evidenceStrengthForSignal(
   evidenceCount: number,
   triggerRules: string[]
 ): "weak" | "moderate" | "strong" {
-  const strongSignals = new Set(["operational_code_present", "sends_unc", "requests_tod_removal"]);
+  const strongSignals = new Set([
+    "operational_code_present",
+    "sends_unc",
+    "requests_tod_removal"
+  ]);
   if (strongSignals.has(signalName)) return "strong";
-  if (triggerRules.some((r) => normalizeText(r).includes("unc") || normalizeText(r).includes("gỡ tod") || normalizeText(r).includes("gỡ cod"))) {
+  if (
+    triggerRules.some(
+      (r) =>
+        normalizeText(r).includes("unc") ||
+        normalizeText(r).includes("gỡ tod") ||
+        normalizeText(r).includes("gỡ cod")
+    )
+  ) {
     return "strong";
   }
   if (evidenceCount >= 2) return "moderate";
@@ -278,7 +359,11 @@ function signalConfidence(
   let capped = clamp(boosted, 0, 1);
   if (weak) capped = Math.min(capped, 0.55);
   if (forceLowCap) capped = Math.min(capped, 0.35);
-  const strongSingleAllowed = new Set(["operational_code_present", "sends_unc", "requests_tod_removal"]);
+  const strongSingleAllowed = new Set([
+    "operational_code_present",
+    "sends_unc",
+    "requests_tod_removal"
+  ]);
   if (evidenceCount <= 1 && !strongSingleAllowed.has(signalName)) {
     capped = Math.min(capped, 0.8);
   }
@@ -301,7 +386,13 @@ function makeSignal(
   return {
     signal_name: name,
     signal_family: family,
-    confidence: signalConfidence(name, baseConfidence, evidenceMessageIds.length, weak, forceLowCap),
+    confidence: signalConfidence(
+      name,
+      baseConfidence,
+      evidenceMessageIds.length,
+      weak,
+      forceLowCap
+    ),
     evidence_strength: strength,
     evidence_message_ids: evidenceMessageIds,
     evidence_texts: evidenceTexts,
@@ -310,7 +401,11 @@ function makeSignal(
   };
 }
 
-function extractSignals(session: SessionInput, timing: TimingFeatures, comm: CommunicationFeatures): BehaviorSignal[] {
+function extractSignals(
+  session: SessionInput,
+  timing: TimingFeatures,
+  comm: CommunicationFeatures
+): BehaviorSignal[] {
   const evidenceMap: Record<string, Array<{ id: string; text: string; rules: string[] }>> = {};
 
   function addEvidence(signal: string, id: string, text: string, rules: string[]): void {
@@ -318,7 +413,14 @@ function extractSignals(session: SessionInput, timing: TimingFeatures, comm: Com
     evidenceMap[signal].push({ id, text, rules });
   }
 
-  const salesPriceIntent = ["xin giá", "báo giá", "cho giá", "giá bao nhiêu", "giá sao", "giá tốt không"];
+  const salesPriceIntent = [
+    "xin giá",
+    "báo giá",
+    "cho giá",
+    "giá bao nhiêu",
+    "giá sao",
+    "giá tốt không"
+  ];
   const salesPriceNegative = ["giảm cọc", "hoàn cọc", "cọc"];
   const salesStock = ["còn hàng", "hết kho", "có hàng", "tồn kho"];
   const salesWarranty = ["bảo hành"];
@@ -327,7 +429,17 @@ function extractSignals(session: SessionInput, timing: TimingFeatures, comm: Com
   const productInquiryIntent = ["?", "có mã", "mã này", "cho em xin", "còn mã", "model nào"];
 
   const sendsUnc = ["unc"];
-  const paymentCheckStrong = ["check tiền", "có tiền", "chưa có tiền", "vô tiền", "vào tiền", "nhận được tiền", "chuyển khoản", "ck chưa", "ck rồi"];
+  const paymentCheckStrong = [
+    "check tiền",
+    "có tiền",
+    "chưa có tiền",
+    "vô tiền",
+    "vào tiền",
+    "nhận được tiền",
+    "chuyển khoản",
+    "ck chưa",
+    "ck rồi"
+  ];
   const paymentCheckWeak = ["ck"];
   const todRemoval = ["gỡ tod", "gỡ cod"];
   const internalCoord = ["duyệt phiếu", "cọc", "treo đơn", "xin mã khách", "nhập ủng hộ"];
@@ -360,7 +472,12 @@ function extractSignals(session: SessionInput, timing: TimingFeatures, comm: Com
     if (warrantyRules.length) addEvidence("asks_warranty", m.message_id, snippet, warrantyRules);
     if (bulkRules.length) addEvidence("bulk_purchase_signal", m.message_id, snippet, bulkRules);
     if (hasProductInquiry) {
-      addEvidence("product_model_inquiry", m.message_id, snippet, [...productRules, ...productIntentRules]);
+      addEvidence(
+        "product_model_inquiry",
+        m.message_id,
+        snippet,
+        [...productRules, ...productIntentRules]
+      );
       productInquiryCount += 1;
     }
 
@@ -372,7 +489,10 @@ function extractSignals(session: SessionInput, timing: TimingFeatures, comm: Com
     const coordRules = containsAny(surface, internalCoord);
 
     if (uncRules.length) addEvidence("sends_unc", m.message_id, snippet, uncRules);
-    if (hasPaymentContext || (paymentWeakRules.length > 0 && /ck\\s*(chua|roi)/i.test(normSurface))) {
+    if (
+      hasPaymentContext ||
+      (paymentWeakRules.length > 0 && /ck\\s*(chua|roi)/i.test(normSurface))
+    ) {
       const rules = hasPaymentContext ? paymentStrongRules : ["ck contextualized"];
       addEvidence("requests_payment_check", m.message_id, snippet, rules);
       paymentRelatedCount += 1;
@@ -406,11 +526,25 @@ function extractSignals(session: SessionInput, timing: TimingFeatures, comm: Com
       addEvidence("short_ack", m.message_id, snippet, ["ack_dictionary"]);
     }
     if (isDetailedQuestion(m.text ?? "")) {
-      addEvidence("detailed_question", m.message_id, snippet, ["len>80", "question_or_interrogative"]);
+      addEvidence("detailed_question", m.message_id, snippet, [
+        "len>80",
+        "question_or_interrogative"
+      ]);
     }
     const trimmed = (m.text ?? "").trim();
     const hasOpCode = matchesAnyRegex(surface, [OPERATIONAL_CODE_RE, ORDER_CODE_RE]);
-    const blockedTerms = ["unc", "tod", "cod", "kho", "giao", "giá", "báo giá", "model", "mã", "check tiền"];
+    const blockedTerms = [
+      "unc",
+      "tod",
+      "cod",
+      "kho",
+      "giao",
+      "giá",
+      "báo giá",
+      "model",
+      "mã",
+      "check tiền"
+    ];
     const hasBlocked = containsAny(surface, blockedTerms).length > 0;
     const hasAlphabetic = containsAlphabeticToken(trimmed);
     const isContextLightReply =
@@ -422,14 +556,24 @@ function extractSignals(session: SessionInput, timing: TimingFeatures, comm: Com
       !hasStrongContextKeyword(normSurface) &&
       !hasBlocked;
     if (isContextLightReply) {
-      // Internal naming is context_light_reply; keep signal_name low_context_reply for compatibility.
-      addEvidence("low_context_reply", m.message_id, snippet, ["context_light_reply", "len<=15", "no_strong_keyword"]);
+      addEvidence("low_context_reply", m.message_id, snippet, [
+        "context_light_reply",
+        "len<=15",
+        "no_strong_keyword"
+      ]);
     }
   }
 
   const signals: BehaviorSignal[] = [];
 
-  function pushIfExists(name: string, family: string, base: number, weak: boolean, why: string, lowCap = false): void {
+  function pushIfExists(
+    name: string,
+    family: string,
+    base: number,
+    weak: boolean,
+    why: string,
+    lowCap = false
+  ): void {
     const ev = evidenceMap[name] ?? [];
     if (ev.length === 0) return;
     signals.push(makeSignal(name, family, ev, base, weak, why, lowCap));
@@ -443,7 +587,7 @@ function extractSignals(session: SessionInput, timing: TimingFeatures, comm: Com
 
   pushIfExists("sends_unc", "operational", 0.9, false, "UNC transfer evidence matched");
   {
-    const ev = evidenceMap["requests_payment_check"] ?? [];
+    const ev = evidenceMap.requests_payment_check ?? [];
     if (ev.length > 0) {
       const hasStrongPaymentPhrase = ev.some((e) =>
         e.rules.some((r) => {
@@ -486,183 +630,334 @@ function extractSignals(session: SessionInput, timing: TimingFeatures, comm: Com
   pushIfExists("low_context_reply", "communication", 0.25, true, "Low-context short reply detected", true);
 
   if (timing.avg_gap_minutes > 0 && timing.avg_gap_minutes <= 1 && session.message_count >= 4) {
-    const ev = session.messages.slice(0, 3).map((m) => ({ id: m.message_id, text: (m.text ?? "").slice(0, 120), rules: ["avg_gap<=1"] }));
-    signals.push(makeSignal("high_frequency_exchange", "timing", ev, 0.62, false, "Average gap indicates high-frequency exchange"));
+    const ev = session.messages.slice(0, 3).map((m) => ({
+      id: m.message_id,
+      text: (m.text ?? "").slice(0, 120),
+      rules: ["avg_gap<=1"]
+    }));
+    signals.push(
+      makeSignal(
+        "high_frequency_exchange",
+        "timing",
+        ev,
+        0.62,
+        false,
+        "Average gap indicates high-frequency exchange"
+      )
+    );
   }
   if (timing.avg_gap_minutes >= 5) {
-    const ev = session.messages.slice(0, 3).map((m) => ({ id: m.message_id, text: (m.text ?? "").slice(0, 120), rules: ["avg_gap>=5"] }));
-    signals.push(makeSignal("slow_paced_exchange", "timing", ev, 0.62, false, "Average gap indicates slow-paced exchange"));
+    const ev = session.messages.slice(0, 3).map((m) => ({
+      id: m.message_id,
+      text: (m.text ?? "").slice(0, 120),
+      rules: ["avg_gap>=5"]
+    }));
+    signals.push(
+      makeSignal(
+        "slow_paced_exchange",
+        "timing",
+        ev,
+        0.62,
+        false,
+        "Average gap indicates slow-paced exchange"
+      )
+    );
   }
   if (timing.has_reengagement_after_gap) {
-    const ev = session.messages.slice(0, 3).map((m) => ({ id: m.message_id, text: (m.text ?? "").slice(0, 120), rules: ["any_gap>=30m"] }));
-    signals.push(makeSignal("reengagement_after_gap", "timing", ev, 0.72, false, "Detected re-engagement after long gap"));
+    const ev = session.messages.slice(0, 3).map((m) => ({
+      id: m.message_id,
+      text: (m.text ?? "").slice(0, 120),
+      rules: ["any_gap>=30m"]
+    }));
+    signals.push(
+      makeSignal(
+        "reengagement_after_gap",
+        "timing",
+        ev,
+        0.72,
+        false,
+        "Detected re-engagement after long gap"
+      )
+    );
   }
 
   if (session.message_count >= 10) {
-    const ev = session.messages.slice(0, 3).map((m) => ({ id: m.message_id, text: (m.text ?? "").slice(0, 120), rules: ["message_count>=10"] }));
-    signals.push(makeSignal("long_session", "session_structure", ev, 0.68, false, "Long session threshold reached"));
+    const ev = session.messages.slice(0, 3).map((m) => ({
+      id: m.message_id,
+      text: (m.text ?? "").slice(0, 120),
+      rules: ["message_count>=10"]
+    }));
+    signals.push(
+      makeSignal(
+        "long_session",
+        "session_structure",
+        ev,
+        0.68,
+        false,
+        "Long session threshold reached"
+      )
+    );
   }
 
-  const hasOperational = ["sends_unc", "requests_payment_check", "requests_tod_removal", "internal_coordination", "operational_code_present"].some((n) => (evidenceMap[n] ?? []).length > 0);
-  const hasLogOrSales = ["warehouse_coordination", "delivery_followup", "document_request", "asks_price", "asks_stock", "product_model_inquiry", "bulk_purchase_signal"].some((n) => (evidenceMap[n] ?? []).length > 0);
+  const hasOperational = [
+    "sends_unc",
+    "requests_payment_check",
+    "requests_tod_removal",
+    "internal_coordination",
+    "operational_code_present"
+  ].some((n) => (evidenceMap[n] ?? []).length > 0);
+  const hasLogOrSales = [
+    "warehouse_coordination",
+    "delivery_followup",
+    "document_request",
+    "asks_price",
+    "asks_stock",
+    "product_model_inquiry",
+    "bulk_purchase_signal"
+  ].some((n) => (evidenceMap[n] ?? []).length > 0);
   if (hasOperational && hasLogOrSales) {
-    const ev = session.messages.slice(0, 4).map((m) => ({ id: m.message_id, text: (m.text ?? "").slice(0, 120), rules: ["operational+logistics_or_sales"] }));
-    signals.push(makeSignal("mixed_operation_session", "session_structure", ev, 0.7, false, "Both operational and logistics/sales evidence present"));
+    const ev = session.messages.slice(0, 4).map((m) => ({
+      id: m.message_id,
+      text: (m.text ?? "").slice(0, 120),
+      rules: ["operational+logistics_or_sales"]
+    }));
+    signals.push(
+      makeSignal(
+        "mixed_operation_session",
+        "session_structure",
+        ev,
+        0.7,
+        false,
+        "Both operational and logistics/sales evidence present"
+      )
+    );
   }
 
   if (operationalCodeCount > 1) {
-    const ev = evidenceMap["operational_code_present"] ?? [];
-    signals.push(makeSignal("repeated_operational_code_session", "session_structure", ev, 0.86, false, "Operational codes repeated in session"));
+    const ev = evidenceMap.operational_code_present ?? [];
+    signals.push(
+      makeSignal(
+        "repeated_operational_code_session",
+        "session_structure",
+        ev,
+        0.86,
+        false,
+        "Operational codes repeated in session"
+      )
+    );
   }
   if (paymentRelatedCount > 1) {
-    const ev = [...(evidenceMap["requests_payment_check"] ?? []), ...(evidenceMap["requests_tod_removal"] ?? [])];
-    signals.push(makeSignal("repeated_payment_followup_session", "session_structure", ev, 0.84, false, "Payment follow-up signals repeated"));
+    const ev = [
+      ...(evidenceMap.requests_payment_check ?? []),
+      ...(evidenceMap.requests_tod_removal ?? [])
+    ];
+    signals.push(
+      makeSignal(
+        "repeated_payment_followup_session",
+        "session_structure",
+        ev,
+        0.84,
+        false,
+        "Payment follow-up signals repeated"
+      )
+    );
   }
   if (productInquiryCount > 1) {
-    const ev = evidenceMap["product_model_inquiry"] ?? [];
-    signals.push(makeSignal("repeated_product_inquiry_session", "session_structure", ev, 0.7, false, "Product inquiry repeated"));
+    const ev = evidenceMap.product_model_inquiry ?? [];
+    signals.push(
+      makeSignal(
+        "repeated_product_inquiry_session",
+        "session_structure",
+        ev,
+        0.7,
+        false,
+        "Product inquiry repeated"
+      )
+    );
   }
 
+  void comm;
   return signals;
 }
 
-function buildSummary(records: SessionBehaviorRecord[]): Record<string, unknown> {
-  const signalFamilyCounts: Record<string, number> = {};
-  const signalNameCounts: Record<string, number> = {};
+function createSummaryAccumulator(): SummaryAccumulator {
+  return {
+    total_sessions: 0,
+    total_behavior_signals: 0,
+    signal_family_counts: {},
+    signal_name_counts: {},
+    sessions_with_sales_signals: 0,
+    sessions_with_operational_signals: 0,
+    sessions_with_logistics_signals: 0,
+    sessions_with_timing_signals: 0
+  };
+}
 
-  let totalSignals = 0;
-  let salesSessions = 0;
-  let opSessions = 0;
-  let logisticsSessions = 0;
-  let timingSessions = 0;
+function updateSummaryAccumulator(acc: SummaryAccumulator, record: SessionBehaviorRecord): void {
+  acc.total_sessions += 1;
+  acc.total_behavior_signals += record.behavior_signals.length;
 
-  for (const r of records) {
-    totalSignals += r.behavior_signals.length;
-    let hasSales = false;
-    let hasOp = false;
-    let hasLog = false;
-    let hasTiming = false;
+  let hasSales = false;
+  let hasOp = false;
+  let hasLog = false;
+  let hasTiming = false;
 
-    for (const s of r.behavior_signals) {
-      signalFamilyCounts[s.signal_family] = (signalFamilyCounts[s.signal_family] ?? 0) + 1;
-      signalNameCounts[s.signal_name] = (signalNameCounts[s.signal_name] ?? 0) + 1;
-      if (s.signal_family === "sales") hasSales = true;
-      if (s.signal_family === "operational") hasOp = true;
-      if (s.signal_family === "logistics") hasLog = true;
-      if (s.signal_family === "timing") hasTiming = true;
-    }
-    if (hasSales) salesSessions += 1;
-    if (hasOp) opSessions += 1;
-    if (hasLog) logisticsSessions += 1;
-    if (hasTiming) timingSessions += 1;
+  for (const signal of record.behavior_signals) {
+    incr(acc.signal_family_counts, signal.signal_family, 1);
+    incr(acc.signal_name_counts, signal.signal_name, 1);
+    if (signal.signal_family === "sales") hasSales = true;
+    if (signal.signal_family === "operational") hasOp = true;
+    if (signal.signal_family === "logistics") hasLog = true;
+    if (signal.signal_family === "timing") hasTiming = true;
   }
 
-  const topSignals = Object.entries(signalNameCounts)
+  if (hasSales) acc.sessions_with_sales_signals += 1;
+  if (hasOp) acc.sessions_with_operational_signals += 1;
+  if (hasLog) acc.sessions_with_logistics_signals += 1;
+  if (hasTiming) acc.sessions_with_timing_signals += 1;
+}
+
+function finalizeSummary(acc: SummaryAccumulator): Record<string, unknown> {
+  const topSignals = Object.entries(acc.signal_name_counts)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 20)
     .map(([signal_name, count]) => ({ signal_name, count }));
 
   return {
-    total_sessions: records.length,
-    total_behavior_signals: totalSignals,
-    signal_family_counts: signalFamilyCounts,
-    signal_name_counts: signalNameCounts,
-    avg_signals_per_session: records.length ? Number((totalSignals / records.length).toFixed(4)) : 0,
+    total_sessions: acc.total_sessions,
+    total_behavior_signals: acc.total_behavior_signals,
+    signal_family_counts: acc.signal_family_counts,
+    signal_name_counts: acc.signal_name_counts,
+    avg_signals_per_session: acc.total_sessions
+      ? Number((acc.total_behavior_signals / acc.total_sessions).toFixed(4))
+      : 0,
     top_signals: topSignals,
-    sessions_with_sales_signals: salesSessions,
-    sessions_with_operational_signals: opSessions,
-    sessions_with_logistics_signals: logisticsSessions,
-    sessions_with_timing_signals: timingSessions
+    sessions_with_sales_signals: acc.sessions_with_sales_signals,
+    sessions_with_operational_signals: acc.sessions_with_operational_signals,
+    sessions_with_logistics_signals: acc.sessions_with_logistics_signals,
+    sessions_with_timing_signals: acc.sessions_with_timing_signals
   };
 }
 
-function buildAudit(
-  records: SessionBehaviorRecord[],
-  stats: Phase4RuntimeStats
-): Record<string, unknown> {
-  let sessionsWithNoSignals = 0;
-  let weakSignalCount = 0;
-  let contradictorySignalCount = 0;
-  let lowEvidenceSignalCount = 0;
-  let highConfLowEvidenceCount = 0;
-  let emptyEvidenceTextCount = 0;
-  let weakSingleEvidenceCount = 0;
-  let highConfidenceSingleEvidenceCount = 0;
+function createAuditAccumulator(): AuditAccumulator {
+  return {
+    sessions_with_no_signals: 0,
+    weak_signal_count: 0,
+    contradictory_signal_count: 0,
+    low_evidence_signal_count: 0,
+    high_confidence_low_evidence_count: 0,
+    empty_evidence_text_count: 0,
+    weak_single_evidence_count: 0,
+    high_confidence_single_evidence_count: 0,
+    signal_session_presence: {}
+  };
+}
 
-  const overTriggeredCounts: Record<string, number> = {};
-  const signalSessionPresence: Record<string, number> = {};
+function updateAuditAccumulator(acc: AuditAccumulator, record: SessionBehaviorRecord): void {
+  if (record.behavior_signals.length === 0) acc.sessions_with_no_signals += 1;
 
-  for (const r of records) {
-    if (r.behavior_signals.length === 0) sessionsWithNoSignals += 1;
+  const names = new Set(record.behavior_signals.map((s) => s.signal_name));
+  if (names.has("high_frequency_exchange") && names.has("slow_paced_exchange")) {
+    acc.contradictory_signal_count += 1;
+  }
 
-    const names = new Set(r.behavior_signals.map((s) => s.signal_name));
-    if (names.has("high_frequency_exchange") && names.has("slow_paced_exchange")) {
-      contradictorySignalCount += 1;
+  const presentNames = new Set<string>();
+  for (const signal of record.behavior_signals) {
+    presentNames.add(signal.signal_name);
+    if (signal.confidence <= 0.55) acc.weak_signal_count += 1;
+    if (signal.evidence_message_ids.length <= 1) acc.low_evidence_signal_count += 1;
+    if (signal.confidence >= 0.85 && signal.evidence_message_ids.length <= 1) {
+      acc.high_confidence_low_evidence_count += 1;
     }
-
-    const presentNames = new Set<string>();
-    for (const s of r.behavior_signals) {
-      presentNames.add(s.signal_name);
-      if (s.confidence <= 0.55) weakSignalCount += 1;
-      if (s.evidence_message_ids.length <= 1) lowEvidenceSignalCount += 1;
-      if (s.confidence >= 0.85 && s.evidence_message_ids.length <= 1) {
-        highConfLowEvidenceCount += 1;
-      }
-      if ((s.evidence_texts ?? []).some((t) => !String(t ?? "").trim())) {
-        emptyEvidenceTextCount += 1;
-      }
-      if (s.evidence_strength === "weak" && s.evidence_message_ids.length <= 1) {
-        weakSingleEvidenceCount += 1;
-      }
-      if (s.confidence >= 0.85 && s.evidence_message_ids.length <= 1) {
-        highConfidenceSingleEvidenceCount += 1;
-      }
+    if ((signal.evidence_texts ?? []).some((t) => !String(t ?? "").trim())) {
+      acc.empty_evidence_text_count += 1;
     }
-
-    for (const n of presentNames) {
-      signalSessionPresence[n] = (signalSessionPresence[n] ?? 0) + 1;
+    if (signal.evidence_strength === "weak" && signal.evidence_message_ids.length <= 1) {
+      acc.weak_single_evidence_count += 1;
+    }
+    if (signal.confidence >= 0.85 && signal.evidence_message_ids.length <= 1) {
+      acc.high_confidence_single_evidence_count += 1;
     }
   }
 
-  const threshold = records.length * 0.3;
-  for (const [name, cnt] of Object.entries(signalSessionPresence)) {
+  for (const name of presentNames) {
+    incr(acc.signal_session_presence, name, 1);
+  }
+}
+
+function finalizeAudit(
+  acc: AuditAccumulator,
+  summaryAcc: SummaryAccumulator,
+  stats: Phase4RuntimeStats
+): Record<string, unknown> {
+  const overTriggeredCounts: Record<string, number> = {};
+  const threshold = summaryAcc.total_sessions * 0.3;
+  for (const [name, cnt] of Object.entries(acc.signal_session_presence)) {
     if (cnt > threshold) overTriggeredCounts[name] = cnt;
   }
 
   const riskFlagsSummary = {
-    no_signal_sessions: sessionsWithNoSignals,
-    high_confidence_low_evidence: highConfLowEvidenceCount,
+    no_signal_sessions: acc.sessions_with_no_signals,
+    high_confidence_low_evidence: acc.high_confidence_low_evidence_count,
     invalid_dates: stats.invalid_date_count,
     missing_messages_sessions: stats.sessions_with_missing_messages
   };
 
   const signalPrecisionWarnings: string[] = [];
-  if ((overTriggeredCounts.low_context_reply ?? 0) > records.length * 0.3) {
+  if ((overTriggeredCounts.low_context_reply ?? 0) > summaryAcc.total_sessions * 0.3) {
     signalPrecisionWarnings.push("low_context_reply appears over-triggered");
   }
-  if ((overTriggeredCounts.asks_price ?? 0) > records.length * 0.25) {
+  if ((overTriggeredCounts.asks_price ?? 0) > summaryAcc.total_sessions * 0.25) {
     signalPrecisionWarnings.push("asks_price appears over-triggered");
   }
-  if (highConfidenceSingleEvidenceCount > 0) {
+  if (acc.high_confidence_single_evidence_count > 0) {
     signalPrecisionWarnings.push("high-confidence single-evidence signals remain");
   }
 
   return {
-    total_sessions: records.length,
-    sessions_with_no_signals: sessionsWithNoSignals,
-    weak_signal_count: weakSignalCount,
-    contradictory_signal_count: contradictorySignalCount,
-    low_evidence_signal_count: lowEvidenceSignalCount,
-    high_confidence_low_evidence_count: highConfLowEvidenceCount,
-    empty_evidence_text_count: emptyEvidenceTextCount,
-    weak_single_evidence_count: weakSingleEvidenceCount,
-    high_confidence_single_evidence_count: highConfidenceSingleEvidenceCount,
+    total_sessions: summaryAcc.total_sessions,
+    sessions_with_no_signals: acc.sessions_with_no_signals,
+    weak_signal_count: acc.weak_signal_count,
+    contradictory_signal_count: acc.contradictory_signal_count,
+    low_evidence_signal_count: acc.low_evidence_signal_count,
+    high_confidence_low_evidence_count: acc.high_confidence_low_evidence_count,
+    empty_evidence_text_count: acc.empty_evidence_text_count,
+    weak_single_evidence_count: acc.weak_single_evidence_count,
+    high_confidence_single_evidence_count: acc.high_confidence_single_evidence_count,
     over_triggered_signal_counts: overTriggeredCounts,
     signal_precision_warnings: signalPrecisionWarnings,
     risk_flags_summary: riskFlagsSummary,
     invalid_date_count: stats.invalid_date_count,
     sessions_with_missing_messages: stats.sessions_with_missing_messages
   };
+}
+
+async function backupExistingPhase4Output(
+  dataDir: string,
+  month: string,
+  outDir: string
+): Promise<string | null> {
+  if (!fs.existsSync(outDir)) return null;
+
+  const existingFiles = await fs.promises.readdir(outDir);
+  if (existingFiles.length === 0) return null;
+
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\..+/, "")
+    .replace("T", "_");
+  const backupRoot = path.join(
+    dataDir,
+    "_backup",
+    `phase4_stale_before_stream_fix_${month}_${timestamp}`
+  );
+  const backupTarget = path.join(backupRoot, "04_behavior", month);
+
+  await fs.promises.mkdir(path.dirname(backupTarget), { recursive: true });
+  await fs.promises.cp(outDir, backupTarget, { recursive: true });
+  await fs.promises.rm(outDir, { recursive: true, force: true });
+  return backupTarget;
 }
 
 async function runPhase4(args: Phase4Args): Promise<void> {
@@ -677,79 +972,101 @@ async function runPhase4(args: Phase4Args): Promise<void> {
     throw new Error(`Input file not found: ${inputPath}`);
   }
 
-  const lines = fs
-    .readFileSync(inputPath, "utf8")
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
-
-  const sessions: SessionInput[] = [];
-  for (const line of lines) {
-    const parsed = safeJsonParse<SessionInput>(line);
-    if (parsed) sessions.push(parsed);
-  }
+  const backupTarget = await backupExistingPhase4Output(dataDir, args.month, outDir);
 
   const runtimeStats: Phase4RuntimeStats = {
     invalid_date_count: 0,
-    sessions_with_missing_messages: 0
+    sessions_with_missing_messages: 0,
+    invalid_json_line_count: 0
   };
 
-  const records: SessionBehaviorRecord[] = [];
-  for (const s of sessions) {
-    if (!Array.isArray(s.messages) || s.messages.length === 0) {
-      runtimeStats.sessions_with_missing_messages += 1;
-      records.push({
-        session_id: s.session_id,
-        conversation_id: s.conversation_id,
-        message_count: s.message_count ?? 0,
-        dominant_category: s.dominant_category ?? "unknown",
-        avg_confidence: s.avg_confidence ?? 0,
-        timing_features: {
-          duration_minutes: 0,
-          avg_gap_minutes: 0,
-          min_gap_minutes: 0,
-          max_gap_minutes: 0,
-          gap_buckets: { "0-1m": 0, "1-5m": 0, "5-30m": 0, "30m+": 0 },
-          has_reengagement_after_gap: false
-        },
-        communication_features: {
-          avg_text_length: 0,
-          max_text_length: 0,
-          min_text_length: 0,
-          short_ack_count: 0,
-          detailed_question_count: 0,
-          low_context_reply_count: 0
-        },
-        behavior_signals: []
-      });
-      continue;
-    }
-
-    const timing = calcTimingFeatures(s.messages, runtimeStats);
-    const communication = calcCommunicationFeatures(s.messages);
-    const behaviorSignals = extractSignals(s, timing, communication);
-
-    records.push({
-      session_id: s.session_id,
-      conversation_id: s.conversation_id,
-      message_count: s.message_count,
-      dominant_category: s.dominant_category,
-      avg_confidence: s.avg_confidence,
-      timing_features: timing,
-      communication_features: communication,
-      behavior_signals: behaviorSignals
-    });
-  }
-
-  const summary = buildSummary(records);
-  const audit = buildAudit(records, runtimeStats);
+  const summaryAcc = createSummaryAccumulator();
+  const auditAcc = createAuditAccumulator();
 
   await fs.promises.mkdir(outDir, { recursive: true });
-  await fs.promises.writeFile(
-    signalsPath,
-    records.length ? `${records.map((r) => JSON.stringify(r)).join("\n")}\n` : "",
-    "utf8"
-  );
+  const outputStream = fs.createWriteStream(signalsPath, { encoding: "utf8" });
+  const inputStream = fs.createReadStream(inputPath, { encoding: "utf8" });
+  const rl = readline.createInterface({
+    input: inputStream,
+    crlfDelay: Infinity
+  });
+
+  try {
+    for await (const rawLine of rl) {
+      const line = rawLine.trim();
+      if (!line) continue;
+
+      const session = safeJsonParse<SessionInput>(line);
+      if (!session) {
+        runtimeStats.invalid_json_line_count += 1;
+        continue;
+      }
+
+      let record: SessionBehaviorRecord;
+      if (!Array.isArray(session.messages) || session.messages.length === 0) {
+        runtimeStats.sessions_with_missing_messages += 1;
+        record = {
+          session_id: session.session_id,
+          conversation_id: session.conversation_id,
+          message_count: session.message_count ?? 0,
+          dominant_category: session.dominant_category ?? "unknown",
+          avg_confidence: session.avg_confidence ?? 0,
+          timing_features: {
+            duration_minutes: 0,
+            avg_gap_minutes: 0,
+            min_gap_minutes: 0,
+            max_gap_minutes: 0,
+            gap_buckets: { "0-1m": 0, "1-5m": 0, "5-30m": 0, "30m+": 0 },
+            has_reengagement_after_gap: false
+          },
+          communication_features: {
+            avg_text_length: 0,
+            max_text_length: 0,
+            min_text_length: 0,
+            short_ack_count: 0,
+            detailed_question_count: 0,
+            low_context_reply_count: 0
+          },
+          behavior_signals: []
+        };
+      } else {
+        const timing = calcTimingFeatures(session.messages, runtimeStats);
+        const communication = calcCommunicationFeatures(session.messages);
+        const behaviorSignals = extractSignals(session, timing, communication);
+
+        record = {
+          session_id: session.session_id,
+          conversation_id: session.conversation_id,
+          message_count: session.message_count,
+          dominant_category: session.dominant_category,
+          avg_confidence: session.avg_confidence,
+          timing_features: timing,
+          communication_features: communication,
+          behavior_signals: behaviorSignals
+        };
+      }
+
+      updateSummaryAccumulator(summaryAcc, record);
+      updateAuditAccumulator(auditAcc, record);
+
+      const serialized = `${JSON.stringify(record)}\n`;
+      if (!outputStream.write(serialized, "utf8")) {
+        await new Promise<void>((resolve) => outputStream.once("drain", resolve));
+      }
+    }
+  } finally {
+    rl.close();
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    outputStream.on("error", reject);
+    outputStream.on("finish", resolve);
+    outputStream.end();
+  });
+
+  const summary = finalizeSummary(summaryAcc);
+  const audit = finalizeAudit(auditAcc, summaryAcc, runtimeStats);
+
   await fs.promises.writeFile(summaryPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
   await fs.promises.writeFile(auditPath, `${JSON.stringify(audit, null, 2)}\n`, "utf8");
 
@@ -758,30 +1075,42 @@ async function runPhase4(args: Phase4Args): Promise<void> {
     const stat = fs.statSync(p);
     console.log(`[PHASE4_FILE] ${path.basename(p)} size=${stat.size}`);
   }
-
-  const preview = records.slice(0, 3);
-  console.log("[PHASE4_PREVIEW] first_3_records=");
-  console.log(JSON.stringify(preview, null, 2));
+  if (backupTarget) {
+    console.log(`[PHASE4_BACKUP] ${backupTarget}`);
+  }
 
   console.log("[PHASE4_SUMMARY]");
-  console.log(JSON.stringify({
-    total_sessions: summary.total_sessions,
-    total_behavior_signals: summary.total_behavior_signals,
-    avg_signals_per_session: summary.avg_signals_per_session,
-    top_signals: summary.top_signals
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        total_sessions: summary.total_sessions,
+        total_behavior_signals: summary.total_behavior_signals,
+        avg_signals_per_session: summary.avg_signals_per_session,
+        top_signals: summary.top_signals
+      },
+      null,
+      2
+    )
+  );
 
   console.log("[PHASE4_AUDIT]");
-  console.log(JSON.stringify({
-    total_sessions: audit.total_sessions,
-    sessions_with_no_signals: audit.sessions_with_no_signals,
-    weak_signal_count: audit.weak_signal_count,
-    contradictory_signal_count: audit.contradictory_signal_count,
-    low_evidence_signal_count: audit.low_evidence_signal_count,
-    high_confidence_low_evidence_count: audit.high_confidence_low_evidence_count,
-    invalid_date_count: audit.invalid_date_count,
-    sessions_with_missing_messages: audit.sessions_with_missing_messages
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        total_sessions: audit.total_sessions,
+        sessions_with_no_signals: audit.sessions_with_no_signals,
+        weak_signal_count: audit.weak_signal_count,
+        contradictory_signal_count: audit.contradictory_signal_count,
+        low_evidence_signal_count: audit.low_evidence_signal_count,
+        high_confidence_low_evidence_count: audit.high_confidence_low_evidence_count,
+        invalid_json_line_count: runtimeStats.invalid_json_line_count,
+        invalid_date_count: audit.invalid_date_count,
+        sessions_with_missing_messages: audit.sessions_with_missing_messages
+      },
+      null,
+      2
+    )
+  );
 }
 
 runPhase4(parseCliArgs(process.argv.slice(2))).catch((e) => {

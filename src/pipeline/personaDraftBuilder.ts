@@ -228,7 +228,7 @@ function mapSalesProfile(rels: PrunedRelationship[]): PersonaDraft["sales_intera
   };
 }
 
-function buildPersonaDraft(entity: PrunedEntityRecord): PersonaDraft {
+export function buildPersonaDraft(entity: PrunedEntityRecord): PersonaDraft {
   const kept = keptRelationships(entity);
   const dominant = pickDominantContexts(kept);
   const names = new Set(kept.map((r) => r.relationship_name));
@@ -348,80 +348,134 @@ function buildPersonaDraft(entity: PrunedEntityRecord): PersonaDraft {
   };
 }
 
-export function buildPersonaDrafts(
-  entities: PrunedEntityRecord[]
-): { drafts: PersonaDraft[]; summary: PersonaSummary; audit: PersonaAudit } {
-  const drafts = entities.map(buildPersonaDraft).sort((a, b) => a.entity_id.localeCompare(b.entity_id));
+export interface PersonaDraftAggregationState {
+  drafts: PersonaDraft[];
+  dominantDist: Record<string, number>;
+  tendencyCounts: Record<string, number>;
+  riskSummary: Record<string, number>;
+  strongCount: number;
+  moderateCount: number;
+  weakCount: number;
+  opHeavy: number;
+  salesProfiles: number;
+  commProfiles: number;
+  unsupportedClaimCount: number;
+  overgeneralizedCount: number;
+  timingNoiseDependency: number;
+  operationalOnlyCount: number;
+  unstableCount: number;
+  weakEvidenceCount: number;
+}
 
-  const dominantDist: Record<string, number> = {};
-  const tendencyCounts: Record<string, number> = {};
-  const riskSummary: Record<string, number> = {};
-  let strongCount = 0;
-  let moderateCount = 0;
-  let weakCount = 0;
-  let opHeavy = 0;
-  let salesProfiles = 0;
-  let commProfiles = 0;
+export function createPersonaDraftAggregationState(): PersonaDraftAggregationState {
+  return {
+    drafts: [],
+    dominantDist: {},
+    tendencyCounts: {},
+    riskSummary: {},
+    strongCount: 0,
+    moderateCount: 0,
+    weakCount: 0,
+    opHeavy: 0,
+    salesProfiles: 0,
+    commProfiles: 0,
+    unsupportedClaimCount: 0,
+    overgeneralizedCount: 0,
+    timingNoiseDependency: 0,
+    operationalOnlyCount: 0,
+    unstableCount: 0,
+    weakEvidenceCount: 0
+  };
+}
 
-  for (const d of drafts) {
-    for (const c of d.dominant_contexts) incr(dominantDist, c, 1);
-    for (const t of d.behavioral_tendencies) incr(tendencyCounts, t.tendency_name, 1);
-    for (const rf of d.risk_flags) incr(riskSummary, rf, 1);
+export function addPersonaDraftToAggregation(
+  state: PersonaDraftAggregationState,
+  draft: PersonaDraft
+): void {
+  state.drafts.push(draft);
+  for (const c of draft.dominant_contexts) incr(state.dominantDist, c, 1);
+  for (const t of draft.behavioral_tendencies) incr(state.tendencyCounts, t.tendency_name, 1);
+  for (const rf of draft.risk_flags) incr(state.riskSummary, rf, 1);
 
-    if (d.evidence_strength === "strong") strongCount += 1;
-    else if (d.evidence_strength === "moderate") moderateCount += 1;
-    else weakCount += 1;
+  if (draft.evidence_strength === "strong") state.strongCount += 1;
+  else if (draft.evidence_strength === "moderate") state.moderateCount += 1;
+  else state.weakCount += 1;
 
-    if (d.dominant_contexts.includes("operational_context")) opHeavy += 1;
-    if (d.sales_interaction_profile.research_behavior.length + d.sales_interaction_profile.price_behavior.length > 0) salesProfiles += 1;
-    if (d.communication_style.style_patterns.length + d.communication_style.contextual_behavior.length > 0) commProfiles += 1;
+  if (draft.dominant_contexts.includes("operational_context")) state.opHeavy += 1;
+  if (
+    draft.sales_interaction_profile.research_behavior.length +
+      draft.sales_interaction_profile.price_behavior.length >
+    0
+  ) {
+    state.salesProfiles += 1;
+  }
+  if (
+    draft.communication_style.style_patterns.length +
+      draft.communication_style.contextual_behavior.length >
+    0
+  ) {
+    state.commProfiles += 1;
   }
 
-  const topTendencies = Object.entries(tendencyCounts)
+  state.unsupportedClaimCount += draft.unsupported_claims_removed.length;
+  if (draft.risk_flags.includes("overgeneralized_behavior")) state.overgeneralizedCount += 1;
+  if (
+    draft.behavioral_tendencies.some((t) => t.tendency_name.includes("timing")) &&
+    draft.behavioral_tendencies.length <= 2
+  ) {
+    state.timingNoiseDependency += 1;
+  }
+  if (draft.risk_flags.includes("operational_only_profile")) state.operationalOnlyCount += 1;
+  if (draft.risk_flags.includes("unstable_behavior_profile")) state.unstableCount += 1;
+  if (
+    draft.evidence_strength === "weak" ||
+    draft.risk_flags.includes("weak_evidence_persona")
+  ) {
+    state.weakEvidenceCount += 1;
+  }
+}
+
+export function finalizePersonaDraftAggregation(
+  state: PersonaDraftAggregationState
+): { drafts: PersonaDraft[]; summary: PersonaSummary; audit: PersonaAudit } {
+  state.drafts.sort((a, b) => a.entity_id.localeCompare(b.entity_id));
+
+  const topTendencies = Object.entries(state.tendencyCounts)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 20)
     .map(([tendency_name, count]) => ({ tendency_name, count }));
 
   const summary: PersonaSummary = {
-    total_persona_drafts: drafts.length,
-    strong_persona_count: strongCount,
-    moderate_persona_count: moderateCount,
-    weak_persona_count: weakCount,
-    dominant_context_distribution: dominantDist,
+    total_persona_drafts: state.drafts.length,
+    strong_persona_count: state.strongCount,
+    moderate_persona_count: state.moderateCount,
+    weak_persona_count: state.weakCount,
+    dominant_context_distribution: state.dominantDist,
     top_behavioral_tendencies: topTendencies,
-    operational_heavy_profiles: opHeavy,
-    sales_behavior_profiles: salesProfiles,
-    communication_style_profiles: commProfiles
+    operational_heavy_profiles: state.opHeavy,
+    sales_behavior_profiles: state.salesProfiles,
+    communication_style_profiles: state.commProfiles
   };
-
-  let unsupportedClaimCount = 0;
-  let overgeneralizedCount = 0;
-  let timingNoiseDependency = 0;
-  let operationalOnlyCount = 0;
-  let unstableCount = 0;
-  let weakEvidenceCount = 0;
-
-  for (const d of drafts) {
-    unsupportedClaimCount += d.unsupported_claims_removed.length;
-    if (d.risk_flags.includes("overgeneralized_behavior")) overgeneralizedCount += 1;
-    if (d.behavioral_tendencies.some((t) => t.tendency_name.includes("timing")) && d.behavioral_tendencies.length <= 2) {
-      timingNoiseDependency += 1;
-    }
-    if (d.risk_flags.includes("operational_only_profile")) operationalOnlyCount += 1;
-    if (d.risk_flags.includes("unstable_behavior_profile")) unstableCount += 1;
-    if (d.evidence_strength === "weak" || d.risk_flags.includes("weak_evidence_persona")) weakEvidenceCount += 1;
-  }
 
   const audit: PersonaAudit = {
-    unsupported_claim_count: unsupportedClaimCount,
-    overgeneralized_behavior_count: overgeneralizedCount,
-    timing_noise_dependency_count: timingNoiseDependency,
-    operational_only_profile_count: operationalOnlyCount,
-    unstable_behavior_profile_count: unstableCount,
-    weak_evidence_persona_count: weakEvidenceCount,
-    risk_flags_summary: riskSummary
+    unsupported_claim_count: state.unsupportedClaimCount,
+    overgeneralized_behavior_count: state.overgeneralizedCount,
+    timing_noise_dependency_count: state.timingNoiseDependency,
+    operational_only_profile_count: state.operationalOnlyCount,
+    unstable_behavior_profile_count: state.unstableCount,
+    weak_evidence_persona_count: state.weakEvidenceCount,
+    risk_flags_summary: state.riskSummary
   };
 
-  return { drafts, summary, audit };
+  return { drafts: state.drafts, summary, audit };
 }
 
+export function buildPersonaDrafts(
+  entities: PrunedEntityRecord[]
+): { drafts: PersonaDraft[]; summary: PersonaSummary; audit: PersonaAudit } {
+  const state = createPersonaDraftAggregationState();
+  for (const entity of entities) {
+    addPersonaDraftToAggregation(state, buildPersonaDraft(entity));
+  }
+  return finalizePersonaDraftAggregation(state);
+}

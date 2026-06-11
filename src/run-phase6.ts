@@ -1,9 +1,12 @@
-﻿import * as fs from "fs";
+import * as fs from "fs";
 import * as path from "path";
+import * as readline from "readline";
 import {
-  buildPersonaDrafts,
-  PrunedEntityRecord,
-  PersonaDraft
+  addPersonaDraftToAggregation,
+  buildPersonaDraft,
+  createPersonaDraftAggregationState,
+  finalizePersonaDraftAggregation,
+  PrunedEntityRecord
 } from "./pipeline/personaDraftBuilder";
 
 interface CliArgs {
@@ -29,19 +32,6 @@ function parseArgs(argv: string[]): CliArgs {
   return { month };
 }
 
-function readJsonl<T>(filePath: string): T[] {
-  if (!fs.existsSync(filePath)) {
-    throw new Error(`Input file not found: ${filePath}`);
-  }
-  const content = fs.readFileSync(filePath, "utf8");
-  const lines = content.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  const out: T[] = [];
-  for (const line of lines) {
-    out.push(JSON.parse(line) as T);
-  }
-  return out;
-}
-
 function ensureDir(dirPath: string): void {
   fs.mkdirSync(dirPath, { recursive: true });
 }
@@ -50,33 +40,62 @@ function writeJson(filePath: string, value: unknown): void {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-function writeJsonl(filePath: string, rows: unknown[]): void {
-  const body = rows.map((r) => JSON.stringify(r)).join("\n");
-  fs.writeFileSync(filePath, body.length > 0 ? `${body}\n` : "", "utf8");
-}
-
 function fileSize(filePath: string): number {
   return fs.statSync(filePath).size;
 }
 
-function maskEntity(entityId: string): string {
-  if (!entityId) return "unknown***";
-  if (entityId.length <= 6) return `${entityId.slice(0, 2)}***`;
-  return `${entityId.slice(0, 3)}***${entityId.slice(-3)}`;
+async function buildPersonaDraftsLineByLine(
+  inputPath: string,
+  outputPath: string
+): Promise<{
+  processedEntities: number;
+  invalidJsonLineCount: number;
+  totalTendencies: number;
+  summary: ReturnType<typeof finalizePersonaDraftAggregation>["summary"];
+  audit: ReturnType<typeof finalizePersonaDraftAggregation>["audit"];
+}> {
+  const state = createPersonaDraftAggregationState();
+  let processedEntities = 0;
+  let invalidJsonLineCount = 0;
+  let totalTendencies = 0;
+
+  const reader = readline.createInterface({
+    input: fs.createReadStream(inputPath, { encoding: "utf8" }),
+    crlfDelay: Infinity
+  });
+  const writer = fs.createWriteStream(outputPath, { encoding: "utf8" });
+
+  for await (const rawLine of reader) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    let entity: PrunedEntityRecord;
+    try {
+      entity = JSON.parse(line) as PrunedEntityRecord;
+    } catch {
+      invalidJsonLineCount += 1;
+      continue;
+    }
+
+    const draft = buildPersonaDraft(entity);
+    addPersonaDraftToAggregation(state, draft);
+    totalTendencies += draft.behavioral_tendencies.length;
+    writer.write(`${JSON.stringify(draft)}\n`);
+    processedEntities += 1;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    writer.end((error?: Error | null) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+
+  const { summary, audit } = finalizePersonaDraftAggregation(state);
+  return { processedEntities, invalidJsonLineCount, totalTendencies, summary, audit };
 }
 
-function previewDraft(d: PersonaDraft): Record<string, unknown> {
-  return {
-    entity_id: maskEntity(d.entity_id),
-    evidence_strength: d.evidence_strength,
-    dominant_contexts: d.dominant_contexts,
-    tendency_count: d.behavioral_tendencies.length,
-    top_tendencies: d.behavioral_tendencies.slice(0, 3).map((t) => t.tendency_name),
-    risk_flags: d.risk_flags
-  };
-}
-
-function main(): void {
+async function main(): Promise<void> {
   const { month } = parseArgs(process.argv.slice(2));
   const inputDir = path.join("sale-testlab-data", "05c_pruned", month);
   const outputDir = path.join("sale-testlab-data", "06_persona_drafts", month);
@@ -86,11 +105,14 @@ function main(): void {
   const outSummary = path.join(outputDir, "persona_summary.json");
   const outAudit = path.join(outputDir, "persona_audit.json");
 
-  const entities = readJsonl<PrunedEntityRecord>(inputJsonl);
-  const { drafts, summary, audit } = buildPersonaDrafts(entities);
+  if (!fs.existsSync(inputJsonl)) {
+    throw new Error(`Input file not found: ${inputJsonl}`);
+  }
 
   ensureDir(outputDir);
-  writeJsonl(outDrafts, drafts);
+  const { processedEntities, invalidJsonLineCount, totalTendencies, summary, audit } =
+    await buildPersonaDraftsLineByLine(inputJsonl, outDrafts);
+
   writeJson(outSummary, summary);
   writeJson(outAudit, audit);
 
@@ -101,24 +123,23 @@ function main(): void {
     }
   }
 
-  const previews = drafts.slice(0, 3).map(previewDraft);
-
   console.log(`Phase6 month=${month}`);
-  console.log(`input_entities=${entities.length}`);
-  console.log(`generated_drafts=${drafts.length}`);
-  console.log(`total_tendencies=${drafts.reduce((a, d) => a + d.behavioral_tendencies.length, 0)}`);
+  console.log(`input_entities=${processedEntities}`);
+  console.log(`generated_drafts=${summary.total_persona_drafts}`);
+  console.log(`invalid_json=${invalidJsonLineCount}`);
+  console.log(`total_tendencies=${totalTendencies}`);
   console.log("files:");
   console.log(`- ${outDrafts} (${fileSize(outDrafts)} bytes)`);
   console.log(`- ${outSummary} (${fileSize(outSummary)} bytes)`);
   console.log(`- ${outAudit} (${fileSize(outAudit)} bytes)`);
-  console.log("preview_first_3_masked:");
-  for (const p of previews) {
-    console.log(JSON.stringify(p));
-  }
   console.log("summary_counts:");
   console.log(JSON.stringify(summary));
   console.log("audit_counts:");
   console.log(JSON.stringify(audit));
 }
 
-main();
+main().catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[ERROR] Phase6 failed: ${message}`);
+  process.exitCode = 1;
+});

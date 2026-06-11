@@ -1,7 +1,10 @@
 import * as fs from "fs";
 import * as path from "path";
+import * as readline from "readline";
 import {
-  aggregateBehaviorByConversation,
+  addBehaviorSessionToAggregation,
+  createBehaviorAggregationState,
+  finalizeBehaviorAggregation,
   type BehaviorSessionRecord
 } from "./pipeline/behaviorAggregator";
 
@@ -17,22 +20,63 @@ function parseCliArgs(argv: string[]): Phase5Args {
   return { month };
 }
 
-function parseJsonlFile<T>(filePath: string): T[] {
-  const lines = fs
-    .readFileSync(filePath, "utf8")
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
-
-  const out: T[] = [];
-  for (const line of lines) {
-    try {
-      out.push(JSON.parse(line) as T);
-    } catch {
-      // Deterministic skip for invalid lines.
-    }
+function safeJsonParse<T>(line: string): T | null {
+  try {
+    return JSON.parse(line) as T;
+  } catch {
+    return null;
   }
-  return out;
+}
+
+async function backupExistingPhase5Output(
+  baseDir: string,
+  month: string,
+  outDir: string
+): Promise<string | null> {
+  if (!fs.existsSync(outDir)) return null;
+
+  const existingFiles = await fs.promises.readdir(outDir);
+  if (existingFiles.length === 0) return null;
+
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\..+/, "")
+    .replace("T", "_");
+  const backupRoot = path.join(
+    baseDir,
+    "_backup",
+    `phase5_stale_before_stream_fix_${month}_${timestamp}`
+  );
+  const backupTarget = path.join(backupRoot, "05_aggregated", month);
+
+  await fs.promises.mkdir(path.dirname(backupTarget), { recursive: true });
+  await fs.promises.cp(outDir, backupTarget, { recursive: true });
+  await fs.promises.rm(outDir, { recursive: true, force: true });
+  return backupTarget;
+}
+
+async function writeJsonlStream(filePath: string, rows: unknown[]): Promise<void> {
+  await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+  const stream = fs.createWriteStream(filePath, { encoding: "utf8" });
+
+  try {
+    for (const row of rows) {
+      const line = `${JSON.stringify(row)}\n`;
+      if (!stream.write(line, "utf8")) {
+        await new Promise<void>((resolve) => stream.once("drain", resolve));
+      }
+    }
+  } catch (error) {
+    stream.destroy(error as Error);
+    throw error;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    stream.on("error", reject);
+    stream.on("finish", resolve);
+    stream.end();
+  });
 }
 
 async function runPhase5(args: Phase5Args): Promise<void> {
@@ -48,15 +92,42 @@ async function runPhase5(args: Phase5Args): Promise<void> {
     throw new Error(`Input file not found: ${inputPath}`);
   }
 
-  const sessions = parseJsonlFile<BehaviorSessionRecord>(inputPath);
-  const { records, summary, audit } = aggregateBehaviorByConversation(sessions, args.month);
+  const backupTarget = await backupExistingPhase5Output(baseDir, args.month, outDir);
+  const aggregationState = createBehaviorAggregationState();
+  let inputRecordCount = 0;
+  let invalidJsonLineCount = 0;
+
+  const inputStream = fs.createReadStream(inputPath, { encoding: "utf8" });
+  const rl = readline.createInterface({
+    input: inputStream,
+    crlfDelay: Infinity
+  });
+
+  try {
+    for await (const rawLine of rl) {
+      const line = rawLine.trim();
+      if (!line) continue;
+
+      const parsed = safeJsonParse<BehaviorSessionRecord>(line);
+      if (!parsed) {
+        invalidJsonLineCount += 1;
+        continue;
+      }
+
+      addBehaviorSessionToAggregation(aggregationState, parsed);
+      inputRecordCount += 1;
+    }
+  } finally {
+    rl.close();
+  }
+
+  const { records, summary, audit } = finalizeBehaviorAggregation(
+    aggregationState,
+    args.month
+  );
 
   await fs.promises.mkdir(outDir, { recursive: true });
-  await fs.promises.writeFile(
-    outAggregatedPath,
-    records.length ? `${records.map((r) => JSON.stringify(r)).join("\n")}\n` : "",
-    "utf8"
-  );
+  await writeJsonlStream(outAggregatedPath, records);
   await fs.promises.writeFile(outSummaryPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
   await fs.promises.writeFile(outAuditPath, `${JSON.stringify(audit, null, 2)}\n`, "utf8");
 
@@ -65,24 +136,42 @@ async function runPhase5(args: Phase5Args): Promise<void> {
     const stat = fs.statSync(p);
     console.log(`[PHASE5_FILE] ${path.basename(p)} size=${stat.size}`);
   }
+  if (backupTarget) {
+    console.log(`[PHASE5_BACKUP] ${backupTarget}`);
+  }
 
-  // Masked-safe preview (no raw message text fields in phase5 objects)
-  const preview = records.slice(0, 5).map((r) => ({
-    entity_id: r.entity_id,
-    aggregation_window: r.aggregation_window,
-    session_count: r.session_count,
-    message_count: r.message_count,
-    aggregated_pattern_count: r.aggregated_patterns.length,
-    top_pattern_names: r.aggregated_patterns.slice(0, 3).map((p) => p.pattern_name),
-    risk_flags: r.risk_flags
-  }));
-
-  console.log("[PHASE5_PREVIEW] first_5_records_masked=");
-  console.log(JSON.stringify(preview, null, 2));
   console.log("[PHASE5_SUMMARY]");
-  console.log(JSON.stringify(summary, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        input_records: inputRecordCount,
+        invalid_json_line_count: invalidJsonLineCount,
+        total_entities: summary.total_entities,
+        total_aggregated_patterns: summary.total_aggregated_patterns,
+        high_confidence_patterns: summary.high_confidence_patterns,
+        weak_patterns: summary.weak_patterns
+      },
+      null,
+      2
+    )
+  );
   console.log("[PHASE5_AUDIT]");
-  console.log(JSON.stringify(audit, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        contradictory_pattern_count: audit.contradictory_pattern_count,
+        weak_single_session_pattern_count: audit.weak_single_session_pattern_count,
+        unstable_pattern_count: audit.unstable_pattern_count,
+        over_aggregated_pattern_count: audit.over_aggregated_pattern_count,
+        unsupported_high_confidence_pattern_count:
+          audit.unsupported_high_confidence_pattern_count,
+        context_conflict_count: audit.context_conflict_count,
+        entities_with_no_patterns: audit.entities_with_no_patterns
+      },
+      null,
+      2
+    )
+  );
 }
 
 runPhase5(parseCliArgs(process.argv.slice(2))).catch((e) => {
@@ -90,4 +179,3 @@ runPhase5(parseCliArgs(process.argv.slice(2))).catch((e) => {
   console.error(`[ERROR] Phase5 failed: ${message}`);
   process.exitCode = 1;
 });
-

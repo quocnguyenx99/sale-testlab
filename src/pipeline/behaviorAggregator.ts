@@ -76,6 +76,10 @@ type EntityAccumulator = {
   session_ids: string[];
 };
 
+export interface BehaviorAggregationState {
+  entity_map: Map<string, EntityAccumulator>;
+}
+
 const STRONG_SIGNALS = new Set([
   "operational_code_present",
   "sends_unc",
@@ -92,6 +96,12 @@ function emptyAcc(id: string): EntityAccumulator {
     signal_sessions: {},
     signal_families: {},
     session_ids: []
+  };
+}
+
+export function createBehaviorAggregationState(): BehaviorAggregationState {
+  return {
+    entity_map: new Map<string, EntityAccumulator>()
   };
 }
 
@@ -477,35 +487,36 @@ function buildEntityRecord(acc: EntityAccumulator, month: string): AggregatedBeh
   };
 }
 
-export function aggregateBehaviorByConversation(
-  sessionRecords: BehaviorSessionRecord[],
+export function addBehaviorSessionToAggregation(
+  state: BehaviorAggregationState,
+  row: BehaviorSessionRecord
+): void {
+  const entityId = row.conversation_id || "unknown_conversation";
+  const acc = state.entity_map.get(entityId) ?? emptyAcc(entityId);
+  acc.session_count += 1;
+  acc.message_count += row.message_count ?? 0;
+  acc.avg_conf_sum += row.avg_confidence ?? 0;
+  acc.session_ids.push(row.session_id);
+
+  for (const sig of row.behavior_signals ?? []) {
+    incr(acc.signal_occurrence, sig.signal_name, 1);
+    incr(acc.signal_families, sig.signal_family, 1);
+    acc.signal_sessions[sig.signal_name] = acc.signal_sessions[sig.signal_name] ?? new Set<string>();
+    acc.signal_sessions[sig.signal_name].add(row.session_id);
+  }
+
+  state.entity_map.set(entityId, acc);
+}
+
+export function finalizeBehaviorAggregation(
+  state: BehaviorAggregationState,
   month: string
 ): {
   records: AggregatedBehaviorRecord[];
   summary: AggregationSummary;
   audit: AggregationAudit;
 } {
-  const entityMap = new Map<string, EntityAccumulator>();
-
-  for (const row of sessionRecords) {
-    const entityId = row.conversation_id || "unknown_conversation";
-    const acc = entityMap.get(entityId) ?? emptyAcc(entityId);
-    acc.session_count += 1;
-    acc.message_count += row.message_count ?? 0;
-    acc.avg_conf_sum += row.avg_confidence ?? 0;
-    acc.session_ids.push(row.session_id);
-
-    for (const sig of row.behavior_signals ?? []) {
-      incr(acc.signal_occurrence, sig.signal_name, 1);
-      incr(acc.signal_families, sig.signal_family, 1);
-      acc.signal_sessions[sig.signal_name] = acc.signal_sessions[sig.signal_name] ?? new Set<string>();
-      acc.signal_sessions[sig.signal_name].add(row.session_id);
-    }
-
-    entityMap.set(entityId, acc);
-  }
-
-  const records = Array.from(entityMap.values())
+  const records = Array.from(state.entity_map.values())
     .map((acc) => buildEntityRecord(acc, month))
     .sort((a, b) => a.entity_id.localeCompare(b.entity_id));
 
@@ -588,4 +599,19 @@ export function aggregateBehaviorByConversation(
   };
 
   return { records, summary, audit };
+}
+
+export function aggregateBehaviorByConversation(
+  sessionRecords: BehaviorSessionRecord[],
+  month: string
+): {
+  records: AggregatedBehaviorRecord[];
+  summary: AggregationSummary;
+  audit: AggregationAudit;
+} {
+  const state = createBehaviorAggregationState();
+  for (const row of sessionRecords) {
+    addBehaviorSessionToAggregation(state, row);
+  }
+  return finalizeBehaviorAggregation(state, month);
 }

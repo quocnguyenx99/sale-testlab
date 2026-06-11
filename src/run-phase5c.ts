@@ -1,7 +1,10 @@
 import * as fs from "fs";
 import * as path from "path";
+import * as readline from "readline";
 import {
   pruneContextRelationships,
+  type PruningAudit,
+  type PruningSummary,
   type ContextualRecord
 } from "./pipeline/relationshipPruner";
 
@@ -17,21 +20,73 @@ function parseCliArgs(argv: string[]): Phase5CArgs {
   return { month };
 }
 
-function parseJsonl<T>(filePath: string): T[] {
-  const lines = fs
-    .readFileSync(filePath, "utf8")
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
-  const out: T[] = [];
-  for (const line of lines) {
-    try {
-      out.push(JSON.parse(line) as T);
-    } catch {
-      // deterministic skip
-    }
+function createEmptySummary(): PruningSummary {
+  return {
+    total_entities: 0,
+    relationships_before: 0,
+    relationships_after: 0,
+    relationships_pruned: 0,
+    relationships_downgraded: 0,
+    relationships_kept: 0,
+    high_value_relationships: 0,
+    medium_value_relationships: 0,
+    low_value_relationships: 0,
+    timing_noise_removed: 0,
+    average_relationships_per_entity_before: 0,
+    average_relationships_per_entity_after: 0
+  };
+}
+
+function createEmptyAudit(): PruningAudit {
+  return {
+    overconnected_entities_before: 0,
+    overconnected_entities_after: 0,
+    timing_only_relationships_removed: 0,
+    weak_relationships_removed: 0,
+    operational_relationships_preserved: 0,
+    sales_relationships_preserved: 0,
+    high_value_relationship_loss: 0,
+    risk_flags_summary: {}
+  };
+}
+
+function mergeSummary(target: PruningSummary, source: PruningSummary): void {
+  target.total_entities += source.total_entities;
+  target.relationships_before += source.relationships_before;
+  target.relationships_after += source.relationships_after;
+  target.relationships_pruned += source.relationships_pruned;
+  target.relationships_downgraded += source.relationships_downgraded;
+  target.relationships_kept += source.relationships_kept;
+  target.high_value_relationships += source.high_value_relationships;
+  target.medium_value_relationships += source.medium_value_relationships;
+  target.low_value_relationships += source.low_value_relationships;
+  target.timing_noise_removed += source.timing_noise_removed;
+}
+
+function mergeAudit(target: PruningAudit, source: PruningAudit): void {
+  target.overconnected_entities_before += source.overconnected_entities_before;
+  target.overconnected_entities_after += source.overconnected_entities_after;
+  target.timing_only_relationships_removed += source.timing_only_relationships_removed;
+  target.weak_relationships_removed += source.weak_relationships_removed;
+  target.operational_relationships_preserved += source.operational_relationships_preserved;
+  target.sales_relationships_preserved += source.sales_relationships_preserved;
+  target.high_value_relationship_loss += source.high_value_relationship_loss;
+  for (const [key, value] of Object.entries(source.risk_flags_summary)) {
+    target.risk_flags_summary[key] = (target.risk_flags_summary[key] ?? 0) + value;
   }
-  return out;
+}
+
+function finalizeSummary(summary: PruningSummary): PruningSummary {
+  const total = summary.total_entities;
+  return {
+    ...summary,
+    average_relationships_per_entity_before: total
+      ? Number((summary.relationships_before / total).toFixed(4))
+      : 0,
+    average_relationships_per_entity_after: total
+      ? Number((summary.relationships_after / total).toFixed(4))
+      : 0
+  };
 }
 
 async function runPhase5C(args: Phase5CArgs): Promise<void> {
@@ -46,16 +101,51 @@ async function runPhase5C(args: Phase5CArgs): Promise<void> {
     throw new Error(`Input file not found: ${inputPath}`);
   }
 
-  const records = parseJsonl<ContextualRecord>(inputPath);
-  const { records: pruned, summary, audit } = pruneContextRelationships(records);
-
+  await fs.promises.rm(outDir, { recursive: true, force: true });
   await fs.promises.mkdir(outDir, { recursive: true });
-  await fs.promises.writeFile(
-    outPruned,
-    pruned.length ? `${pruned.map((r) => JSON.stringify(r)).join("\n")}\n` : "",
-    "utf8"
-  );
-  await fs.promises.writeFile(outSummary, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+
+  const summary = createEmptySummary();
+  const audit = createEmptyAudit();
+  let processedRecords = 0;
+  let invalidJsonLineCount = 0;
+
+  const reader = readline.createInterface({
+    input: fs.createReadStream(inputPath, { encoding: "utf8" }),
+    crlfDelay: Infinity
+  });
+  const writer = fs.createWriteStream(outPruned, { encoding: "utf8" });
+
+  for await (const rawLine of reader) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    let record: ContextualRecord;
+    try {
+      record = JSON.parse(line) as ContextualRecord;
+    } catch {
+      invalidJsonLineCount += 1;
+      continue;
+    }
+
+    const result = pruneContextRelationships([record]);
+    const prunedRecord = result.records[0];
+    if (!prunedRecord) continue;
+
+    writer.write(`${JSON.stringify(prunedRecord)}\n`);
+    mergeSummary(summary, result.summary);
+    mergeAudit(audit, result.audit);
+    processedRecords += 1;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    writer.end((error?: Error | null) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+
+  const finalizedSummary = finalizeSummary(summary);
+  await fs.promises.writeFile(outSummary, `${JSON.stringify(finalizedSummary, null, 2)}\n`, "utf8");
   await fs.promises.writeFile(outAudit, `${JSON.stringify(audit, null, 2)}\n`, "utf8");
 
   for (const p of [outPruned, outSummary, outAudit]) {
@@ -64,41 +154,9 @@ async function runPhase5C(args: Phase5CArgs): Promise<void> {
     console.log(`[PHASE5C_FILE] ${path.basename(p)} size=${stat.size}`);
   }
 
-  const topKept = pruned
-    .flatMap((r) =>
-      r.pruned_relationships
-        .filter((x) => x.pruning_status !== "pruned")
-        .map((x) => ({ entity_id: r.entity_id, relationship_name: x.relationship_name, relevance_score: x.relevance_score }))
-    )
-    .sort((a, b) => b.relevance_score - a.relevance_score)
-    .slice(0, 20);
-
-  const topPruned = pruned
-    .flatMap((r) =>
-      r.pruned_relationships
-        .filter((x) => x.pruning_status === "pruned")
-        .map((x) => ({ entity_id: r.entity_id, relationship_name: x.relationship_name, relevance_score: x.relevance_score, pruning_reason: x.pruning_reason }))
-    )
-    .sort((a, b) => b.relevance_score - a.relevance_score)
-    .slice(0, 20);
-
-  const preview = pruned.slice(0, 5).map((r) => ({
-    entity_id: r.entity_id,
-    relationships_before: r.relationships_before,
-    relationships_after: r.relationships_after,
-    kept_count: r.pruned_relationships.filter((x) => x.pruning_status === "kept").length,
-    downgraded_count: r.pruned_relationships.filter((x) => x.pruning_status === "downgraded").length,
-    pruned_count: r.pruned_relationships.filter((x) => x.pruning_status === "pruned").length
-  }));
-
-  console.log("[PHASE5C_TOP_KEPT]");
-  console.log(JSON.stringify(topKept, null, 2));
-  console.log("[PHASE5C_TOP_PRUNED]");
-  console.log(JSON.stringify(topPruned, null, 2));
-  console.log("[PHASE5C_PREVIEW] first_5_entities=");
-  console.log(JSON.stringify(preview, null, 2));
+  console.log(`[PHASE5C_RECORDS] processed=${processedRecords} invalid_json=${invalidJsonLineCount}`);
   console.log("[PHASE5C_SUMMARY]");
-  console.log(JSON.stringify(summary, null, 2));
+  console.log(JSON.stringify(finalizedSummary, null, 2));
   console.log("[PHASE5C_AUDIT]");
   console.log(JSON.stringify(audit, null, 2));
 }
@@ -108,4 +166,3 @@ runPhase5C(parseCliArgs(process.argv.slice(2))).catch((e) => {
   console.error(`[ERROR] Phase5C failed: ${message}`);
   process.exitCode = 1;
 });
-

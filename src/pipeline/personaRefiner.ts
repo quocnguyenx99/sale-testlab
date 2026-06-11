@@ -230,7 +230,7 @@ function mapCommunicationRuntimeProfile(d: PersonaDraft): RefinedPersona["commun
   };
 }
 
-function refineOne(draft: PersonaDraft, stats: RefineStats): RefinedPersona {
+export function refineOne(draft: PersonaDraft, stats: RefineStats): RefinedPersona {
   const removed: Array<{ tendency_name: string; reason: string }> = [];
   const kept: RefinedTendency[] = [];
 
@@ -306,6 +306,123 @@ function refineOne(draft: PersonaDraft, stats: RefineStats): RefinedPersona {
   return refined;
 }
 
+export interface PersonaRefinementAggregationState {
+  stats: RefineStats;
+  refined: RefinedPersona[];
+  highUsefulness: number;
+  mediumUsefulness: number;
+  lowUsefulness: number;
+  strongEvidence: number;
+  salesReady: number;
+  operationalHeavy: number;
+  runtimeRiskProfiles: number;
+  operationalOnlyProfilesDetected: number;
+  tendencyCounts: Record<string, number>;
+  riskCounts: Record<string, number>;
+}
+
+export function createPersonaRefinementAggregationState(): PersonaRefinementAggregationState {
+  return {
+    stats: {
+      unsupportedRemoved: 0,
+      timingNoiseRemoved: 0,
+      weakProfilesRemoved: 0,
+      overgeneralizedRemoved: 0
+    },
+    refined: [],
+    highUsefulness: 0,
+    mediumUsefulness: 0,
+    lowUsefulness: 0,
+    strongEvidence: 0,
+    salesReady: 0,
+    operationalHeavy: 0,
+    runtimeRiskProfiles: 0,
+    operationalOnlyProfilesDetected: 0,
+    tendencyCounts: {},
+    riskCounts: {}
+  };
+}
+
+export function addRefinedPersonaToAggregation(
+  state: PersonaRefinementAggregationState,
+  refinedPersona: RefinedPersona
+): void {
+  state.refined.push(refinedPersona);
+
+  if (refinedPersona.runtime_usefulness_score >= 75) state.highUsefulness += 1;
+  else if (refinedPersona.runtime_usefulness_score >= 50) state.mediumUsefulness += 1;
+  else state.lowUsefulness += 1;
+
+  if (refinedPersona.evidence_quality === "strong") state.strongEvidence += 1;
+
+  const salesSignals =
+    refinedPersona.sales_runtime_profile.research_patterns.length +
+    refinedPersona.sales_runtime_profile.price_patterns.length +
+    refinedPersona.sales_runtime_profile.logistics_patterns.length;
+  if (salesSignals > 0 && refinedPersona.runtime_usefulness_score >= 50) {
+    state.salesReady += 1;
+  }
+
+  if (
+    refinedPersona.sales_runtime_profile.payment_patterns.length > 0 &&
+    refinedPersona.sales_runtime_profile.research_patterns.length === 0 &&
+    refinedPersona.sales_runtime_profile.price_patterns.length === 0
+  ) {
+    state.operationalHeavy += 1;
+  }
+
+  for (const t of refinedPersona.refined_tendencies) {
+    incr(state.tendencyCounts, t.tendency_name, 1);
+  }
+  for (const rf of refinedPersona.runtime_risk_flags) {
+    incr(state.riskCounts, rf, 1);
+  }
+
+  if (refinedPersona.runtime_risk_flags.length > 0) state.runtimeRiskProfiles += 1;
+  if (refinedPersona.runtime_risk_flags.includes("operational_only_profile")) {
+    state.operationalOnlyProfilesDetected += 1;
+  }
+}
+
+export function finalizePersonaRefinementAggregation(
+  state: PersonaRefinementAggregationState
+): {
+  refined: RefinedPersona[];
+  summary: RefinedPersonaSummary;
+  audit: RefinedPersonaAudit;
+} {
+  state.refined.sort((a, b) => a.entity_id.localeCompare(b.entity_id));
+
+  const topRuntimeTendencies = Object.entries(state.tendencyCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 20)
+    .map(([tendency_name, count]) => ({ tendency_name, count }));
+
+  const summary: RefinedPersonaSummary = {
+    total_refined_personas: state.refined.length,
+    high_runtime_usefulness_count: state.highUsefulness,
+    medium_runtime_usefulness_count: state.mediumUsefulness,
+    low_runtime_usefulness_count: state.lowUsefulness,
+    strong_evidence_profiles: state.strongEvidence,
+    sales_ready_profiles: state.salesReady,
+    operational_heavy_profiles: state.operationalHeavy,
+    weak_profiles_removed: state.stats.weakProfilesRemoved,
+    top_runtime_tendencies: topRuntimeTendencies
+  };
+
+  const audit: RefinedPersonaAudit = {
+    unsupported_tendencies_removed: state.stats.unsupportedRemoved,
+    timing_noise_tendencies_removed: state.stats.timingNoiseRemoved,
+    weak_profiles_removed: state.stats.weakProfilesRemoved,
+    runtime_risk_profiles: state.runtimeRiskProfiles,
+    overgeneralized_claims_removed: state.stats.overgeneralizedRemoved,
+    operational_only_profiles_detected: state.operationalOnlyProfilesDetected,
+    risk_flags_summary: state.riskCounts
+  };
+
+  return { refined: state.refined, summary, audit };
+}
+
 export function refinePersonaDrafts(
   drafts: PersonaDraft[]
 ): {
@@ -313,77 +430,9 @@ export function refinePersonaDrafts(
   summary: RefinedPersonaSummary;
   audit: RefinedPersonaAudit;
 } {
-  const stats: RefineStats = {
-    unsupportedRemoved: 0,
-    timingNoiseRemoved: 0,
-    weakProfilesRemoved: 0,
-    overgeneralizedRemoved: 0
-  };
-
-  const refined = drafts.map((d) => refineOne(d, stats)).sort((a, b) => a.entity_id.localeCompare(b.entity_id));
-
-  let highUsefulness = 0;
-  let mediumUsefulness = 0;
-  let lowUsefulness = 0;
-  let strongEvidence = 0;
-  let salesReady = 0;
-  let operationalHeavy = 0;
-  const tendencyCounts: Record<string, number> = {};
-  const riskCounts: Record<string, number> = {};
-
-  for (const p of refined) {
-    if (p.runtime_usefulness_score >= 75) highUsefulness += 1;
-    else if (p.runtime_usefulness_score >= 50) mediumUsefulness += 1;
-    else lowUsefulness += 1;
-
-    if (p.evidence_quality === "strong") strongEvidence += 1;
-
-    const salesSignals =
-      p.sales_runtime_profile.research_patterns.length +
-      p.sales_runtime_profile.price_patterns.length +
-      p.sales_runtime_profile.logistics_patterns.length;
-    if (salesSignals > 0 && p.runtime_usefulness_score >= 50) salesReady += 1;
-
-    if (
-      p.sales_runtime_profile.payment_patterns.length > 0 &&
-      p.sales_runtime_profile.research_patterns.length === 0 &&
-      p.sales_runtime_profile.price_patterns.length === 0
-    ) {
-      operationalHeavy += 1;
-    }
-
-    for (const t of p.refined_tendencies) incr(tendencyCounts, t.tendency_name, 1);
-    for (const rf of p.runtime_risk_flags) incr(riskCounts, rf, 1);
+  const state = createPersonaRefinementAggregationState();
+  for (const draft of drafts) {
+    addRefinedPersonaToAggregation(state, refineOne(draft, state.stats));
   }
-
-  const topRuntimeTendencies = Object.entries(tendencyCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 20)
-    .map(([tendency_name, count]) => ({ tendency_name, count }));
-
-  const summary: RefinedPersonaSummary = {
-    total_refined_personas: refined.length,
-    high_runtime_usefulness_count: highUsefulness,
-    medium_runtime_usefulness_count: mediumUsefulness,
-    low_runtime_usefulness_count: lowUsefulness,
-    strong_evidence_profiles: strongEvidence,
-    sales_ready_profiles: salesReady,
-    operational_heavy_profiles: operationalHeavy,
-    weak_profiles_removed: stats.weakProfilesRemoved,
-    top_runtime_tendencies: topRuntimeTendencies
-  };
-
-  const audit: RefinedPersonaAudit = {
-    unsupported_tendencies_removed: stats.unsupportedRemoved,
-    timing_noise_tendencies_removed: stats.timingNoiseRemoved,
-    weak_profiles_removed: stats.weakProfilesRemoved,
-    runtime_risk_profiles: refined.filter((r) => r.runtime_risk_flags.length > 0).length,
-    overgeneralized_claims_removed: stats.overgeneralizedRemoved,
-    operational_only_profiles_detected: refined.filter((r) =>
-      r.runtime_risk_flags.includes("operational_only_profile")
-    ).length,
-    risk_flags_summary: riskCounts
-  };
-
-  return { refined, summary, audit };
+  return finalizePersonaRefinementAggregation(state);
 }

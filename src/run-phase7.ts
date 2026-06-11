@@ -1,9 +1,12 @@
-﻿import * as fs from "fs";
+import * as fs from "fs";
 import * as path from "path";
+import * as readline from "readline";
 import {
+  addRuntimePersonaToAggregation,
+  createRuntimePersonaAggregationState,
+  finalizeRuntimePersonaAggregation,
   RefinedPersona,
-  buildRuntimePersonas,
-  RuntimePersona
+  toRuntimePersona
 } from "./pipeline/runtimePersonaBuilder";
 
 interface CliArgs {
@@ -27,19 +30,8 @@ function parseArgs(argv: string[]): CliArgs {
   return { month };
 }
 
-function readJsonl<T>(filePath: string): T[] {
-  if (!fs.existsSync(filePath)) throw new Error(`Input file not found: ${filePath}`);
-  const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/).map((v) => v.trim()).filter(Boolean);
-  return lines.map((line) => JSON.parse(line) as T);
-}
-
 function writeJson(filePath: string, value: unknown): void {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-}
-
-function writeJsonl(filePath: string, rows: unknown[]): void {
-  const body = rows.map((r) => JSON.stringify(r)).join("\n");
-  fs.writeFileSync(filePath, body ? `${body}\n` : "", "utf8");
 }
 
 function ensureDir(dirPath: string): void {
@@ -50,25 +42,55 @@ function fileSize(filePath: string): number {
   return fs.statSync(filePath).size;
 }
 
-function maskEntity(entityId: string): string {
-  if (!entityId) return "unk***";
-  if (entityId.length < 8) return `${entityId.slice(0, 2)}***`;
-  return `${entityId.slice(0, 3)}***${entityId.slice(-3)}`;
+async function buildRuntimePersonasLineByLine(
+  inputPath: string,
+  outputPath: string
+): Promise<{
+  inputRefinedPersonas: number;
+  invalidJsonLineCount: number;
+  summary: ReturnType<typeof finalizeRuntimePersonaAggregation>["summary"];
+  audit: ReturnType<typeof finalizeRuntimePersonaAggregation>["audit"];
+}> {
+  const state = createRuntimePersonaAggregationState();
+  let inputRefinedPersonas = 0;
+  let invalidJsonLineCount = 0;
+
+  const reader = readline.createInterface({
+    input: fs.createReadStream(inputPath, { encoding: "utf8" }),
+    crlfDelay: Infinity
+  });
+  const writer = fs.createWriteStream(outputPath, { encoding: "utf8" });
+
+  for await (const rawLine of reader) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    let refinedPersona: RefinedPersona;
+    try {
+      refinedPersona = JSON.parse(line) as RefinedPersona;
+    } catch {
+      invalidJsonLineCount += 1;
+      continue;
+    }
+
+    const runtimePersona = toRuntimePersona(refinedPersona, state.stats);
+    addRuntimePersonaToAggregation(state, runtimePersona);
+    writer.write(`${JSON.stringify(runtimePersona)}\n`);
+    inputRefinedPersonas += 1;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    writer.end((error?: Error | null) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+
+  const { summary, audit } = finalizeRuntimePersonaAggregation(state);
+  return { inputRefinedPersonas, invalidJsonLineCount, summary, audit };
 }
 
-function preview(p: RuntimePersona): Record<string, unknown> {
-  return {
-    runtime_persona_id: p.runtime_persona_id,
-    source_entity_id: maskEntity(p.source_entity_id),
-    runtime_readiness: p.runtime_readiness,
-    runtime_usefulness_score: p.runtime_usefulness_score,
-    primary_contexts: p.primary_contexts,
-    top_patterns: p.interaction_patterns.slice(0, 3).map((x) => x.pattern_name),
-    risk_flags: p.risk_flags
-  };
-}
-
-function main(): void {
+async function main(): Promise<void> {
   const { month } = parseArgs(process.argv.slice(2));
 
   const inputDir = path.join("sale-testlab-data", "06c_refined_personas", month);
@@ -79,11 +101,14 @@ function main(): void {
   const outSummary = path.join(outputDir, "runtime_persona_summary.json");
   const outAudit = path.join(outputDir, "runtime_persona_audit.json");
 
-  const refined = readJsonl<RefinedPersona>(inputRefined);
-  const { runtimePersonas, summary, audit } = buildRuntimePersonas(refined);
+  if (!fs.existsSync(inputRefined)) {
+    throw new Error(`Input file not found: ${inputRefined}`);
+  }
 
   ensureDir(outputDir);
-  writeJsonl(outPersonas, runtimePersonas);
+  const { inputRefinedPersonas, invalidJsonLineCount, summary, audit } =
+    await buildRuntimePersonasLineByLine(inputRefined, outPersonas);
+
   writeJson(outSummary, summary);
   writeJson(outAudit, audit);
 
@@ -92,20 +117,21 @@ function main(): void {
   }
 
   console.log(`Phase7 month=${month}`);
-  console.log(`input_refined_personas=${refined.length}`);
-  console.log(`runtime_personas=${runtimePersonas.length}`);
+  console.log(`input_refined_personas=${inputRefinedPersonas}`);
+  console.log(`runtime_personas=${summary.total_runtime_personas}`);
+  console.log(`invalid_json=${invalidJsonLineCount}`);
   console.log("files:");
   console.log(`- ${outPersonas} (${fileSize(outPersonas)} bytes)`);
   console.log(`- ${outSummary} (${fileSize(outSummary)} bytes)`);
   console.log(`- ${outAudit} (${fileSize(outAudit)} bytes)`);
-  console.log("preview_first_3_masked:");
-  for (const p of runtimePersonas.slice(0, 3)) {
-    console.log(JSON.stringify(preview(p)));
-  }
   console.log("summary_counts:");
   console.log(JSON.stringify(summary));
   console.log("audit_counts:");
   console.log(JSON.stringify(audit));
 }
 
-main();
+main().catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[ERROR] Phase7 failed: ${message}`);
+  process.exitCode = 1;
+});

@@ -171,14 +171,10 @@ function buildSession(sessionId: string, messages: ClassifiedMessage[]): Session
   };
 }
 
-export function buildSessions(rows: ClassifiedMessage[], month: string): BuildSessionsResult {
-  const byConversation = new Map<string, ClassifiedMessage[]>();
-  for (const row of rows) {
-    const list = byConversation.get(row.conversation_id) ?? [];
-    list.push(row);
-    byConversation.set(row.conversation_id, list);
-  }
-
+export function buildSessionsFromConversationMap(
+  byConversation: Map<string, ClassifiedMessage[]>,
+  month: string
+): BuildSessionsResult {
   const sessions: SessionRecord[] = [];
   const refineMetrics: SessionRefineMetrics = {
     absorbed_ack_count: 0,
@@ -250,6 +246,17 @@ export function buildSessions(rows: ClassifiedMessage[], month: string): BuildSe
 
   sessions.sort((a, b) => toMs(a.start_time) - toMs(b.start_time));
   return { sessions, refine_metrics: refineMetrics };
+}
+
+export function buildSessions(rows: ClassifiedMessage[], month: string): BuildSessionsResult {
+  const byConversation = new Map<string, ClassifiedMessage[]>();
+  for (const row of rows) {
+    const list = byConversation.get(row.conversation_id) ?? [];
+    list.push(row);
+    byConversation.set(row.conversation_id, list);
+  }
+
+  return buildSessionsFromConversationMap(byConversation, month);
 }
 
 export function buildSessionSummary(sessions: SessionRecord[]): SessionSummary {

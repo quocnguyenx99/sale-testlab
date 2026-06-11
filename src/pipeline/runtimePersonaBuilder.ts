@@ -237,7 +237,7 @@ function buildUsage(readiness: RuntimePersona["runtime_readiness"]): RuntimePers
   };
 }
 
-function toRuntimePersona(p: RefinedPersona, stats: BuildStats): RuntimePersona {
+export function toRuntimePersona(p: RefinedPersona, stats: BuildStats): RuntimePersona {
   const readiness = determineReadiness(p, stats);
   const interactionPatterns = buildInteractionPatterns(p, stats);
 
@@ -262,6 +262,104 @@ function toRuntimePersona(p: RefinedPersona, stats: BuildStats): RuntimePersona 
   };
 }
 
+export interface RuntimePersonaAggregationState {
+  stats: BuildStats;
+  runtimePersonas: RuntimePersona[];
+  approved: number;
+  limited: number;
+  archive: number;
+  highUse: number;
+  salesReady: number;
+  simReady: number;
+  runtimeRiskProfiles: number;
+  patternCounts: Record<string, number>;
+  riskSummary: Record<string, number>;
+}
+
+export function createRuntimePersonaAggregationState(): RuntimePersonaAggregationState {
+  return {
+    stats: {
+      weakExcluded: 0,
+      opOnlyExcluded: 0,
+      timingExcluded: 0,
+      unsupportedRemoved: 0,
+      overweightDetected: 0
+    },
+    runtimePersonas: [],
+    approved: 0,
+    limited: 0,
+    archive: 0,
+    highUse: 0,
+    salesReady: 0,
+    simReady: 0,
+    runtimeRiskProfiles: 0,
+    patternCounts: {},
+    riskSummary: {}
+  };
+}
+
+export function addRuntimePersonaToAggregation(
+  state: RuntimePersonaAggregationState,
+  runtimePersona: RuntimePersona
+): void {
+  state.runtimePersonas.push(runtimePersona);
+
+  if (runtimePersona.runtime_readiness === "approved") state.approved += 1;
+  else if (runtimePersona.runtime_readiness === "limited") state.limited += 1;
+  else state.archive += 1;
+
+  if (runtimePersona.runtime_usefulness_score >= 75) state.highUse += 1;
+  if (runtimePersona.allowed_runtime_usage.sales_training) state.salesReady += 1;
+  if (runtimePersona.allowed_runtime_usage.customer_simulation) state.simReady += 1;
+  if (runtimePersona.risk_flags.length > 0) state.runtimeRiskProfiles += 1;
+
+  for (const p of runtimePersona.interaction_patterns) {
+    incr(state.patternCounts, p.pattern_name, 1);
+  }
+  for (const rf of runtimePersona.risk_flags) {
+    incr(state.riskSummary, rf, 1);
+  }
+}
+
+export function finalizeRuntimePersonaAggregation(
+  state: RuntimePersonaAggregationState
+): {
+  runtimePersonas: RuntimePersona[];
+  summary: RuntimePersonaSummary;
+  audit: RuntimePersonaAudit;
+} {
+  state.runtimePersonas.sort((a, b) => a.runtime_persona_id.localeCompare(b.runtime_persona_id));
+
+  const topPatterns = Object.entries(state.patternCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 20)
+    .map(([pattern_name, count]) => ({ pattern_name, count }));
+
+  const summary: RuntimePersonaSummary = {
+    total_runtime_personas: state.runtimePersonas.length,
+    approved_runtime_personas: state.approved,
+    limited_runtime_personas: state.limited,
+    archive_only_personas: state.archive,
+    high_usefulness_personas: state.highUse,
+    sales_training_ready: state.salesReady,
+    customer_simulation_ready: state.simReady,
+    top_runtime_patterns: topPatterns,
+    excluded_profiles: state.archive
+  };
+
+  const audit: RuntimePersonaAudit = {
+    weak_profiles_excluded: state.stats.weakExcluded,
+    operational_only_profiles_excluded: state.stats.opOnlyExcluded,
+    timing_noise_profiles_excluded: state.stats.timingExcluded,
+    unsupported_runtime_claims_removed: state.stats.unsupportedRemoved,
+    runtime_risk_profiles: state.runtimeRiskProfiles,
+    overweighted_patterns_detected: state.stats.overweightDetected,
+    risk_flags_summary: state.riskSummary
+  };
+
+  return { runtimePersonas: state.runtimePersonas, summary, audit };
+}
+
 export function buildRuntimePersonas(
   refined: RefinedPersona[]
 ): {
@@ -269,66 +367,9 @@ export function buildRuntimePersonas(
   summary: RuntimePersonaSummary;
   audit: RuntimePersonaAudit;
 } {
-  const stats: BuildStats = {
-    weakExcluded: 0,
-    opOnlyExcluded: 0,
-    timingExcluded: 0,
-    unsupportedRemoved: 0,
-    overweightDetected: 0
-  };
-
-  const runtimePersonas = refined
-    .map((p) => toRuntimePersona(p, stats))
-    .sort((a, b) => a.runtime_persona_id.localeCompare(b.runtime_persona_id));
-
-  let approved = 0;
-  let limited = 0;
-  let archive = 0;
-  let highUse = 0;
-  let salesReady = 0;
-  let simReady = 0;
-  const patternCounts: Record<string, number> = {};
-  const riskSummary: Record<string, number> = {};
-
-  for (const rp of runtimePersonas) {
-    if (rp.runtime_readiness === "approved") approved += 1;
-    else if (rp.runtime_readiness === "limited") limited += 1;
-    else archive += 1;
-
-    if (rp.runtime_usefulness_score >= 75) highUse += 1;
-    if (rp.allowed_runtime_usage.sales_training) salesReady += 1;
-    if (rp.allowed_runtime_usage.customer_simulation) simReady += 1;
-
-    for (const p of rp.interaction_patterns) incr(patternCounts, p.pattern_name, 1);
-    for (const rf of rp.risk_flags) incr(riskSummary, rf, 1);
+  const state = createRuntimePersonaAggregationState();
+  for (const persona of refined) {
+    addRuntimePersonaToAggregation(state, toRuntimePersona(persona, state.stats));
   }
-
-  const topPatterns = Object.entries(patternCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 20)
-    .map(([pattern_name, count]) => ({ pattern_name, count }));
-
-  const summary: RuntimePersonaSummary = {
-    total_runtime_personas: runtimePersonas.length,
-    approved_runtime_personas: approved,
-    limited_runtime_personas: limited,
-    archive_only_personas: archive,
-    high_usefulness_personas: highUse,
-    sales_training_ready: salesReady,
-    customer_simulation_ready: simReady,
-    top_runtime_patterns: topPatterns,
-    excluded_profiles: archive
-  };
-
-  const audit: RuntimePersonaAudit = {
-    weak_profiles_excluded: stats.weakExcluded,
-    operational_only_profiles_excluded: stats.opOnlyExcluded,
-    timing_noise_profiles_excluded: stats.timingExcluded,
-    unsupported_runtime_claims_removed: stats.unsupportedRemoved,
-    runtime_risk_profiles: runtimePersonas.filter((p) => p.risk_flags.length > 0).length,
-    overweighted_patterns_detected: stats.overweightDetected,
-    risk_flags_summary: riskSummary
-  };
-
-  return { runtimePersonas, summary, audit };
+  return finalizeRuntimePersonaAggregation(state);
 }
