@@ -102,6 +102,16 @@ interface DiagnosticAggregate {
   violationCountsByExpectedState: Record<string, number>;
   violationCountsByActualState: Record<string, number>;
   mismatchReasonCounts: Record<string, number>;
+  tieDetectedCount: number;
+  tiedTopStatesCounts: Record<string, number>;
+  scoreGapMin: number;
+  scoreGapMax: number;
+  expectedStateNonzeroCount: number;
+  expectedStateZeroCount: number;
+  violationsWithExpectedStateNonzero: number;
+  violationsWithTieDetected: number;
+  violationsWithExpectedStateTied: number;
+  violationsWithActualStateStronger: number;
 }
 
 const BLOCKED_KEYS = new Set([
@@ -180,10 +190,19 @@ const STATE_RULES: Record<
 
 interface StateDetectionResult {
   detectedState: RuntimeState | null;
-  matchedKeywords: string[];
   buyerMove: string | null;
   ruleId: string;
   ruleName: string;
+  candidateStateScores: Record<RuntimeState, number>;
+  topScore: number;
+  tiedTopStates: RuntimeState[];
+  tieDetected: boolean;
+  winningStateRuleId: string;
+  winningStateRuleName: string;
+  classifierDecisionReason:
+    | "no_nonzero_state_score"
+    | "single_top_score"
+    | "tie_preserved_state_rules_order";
 }
 
 interface EvaluationDiagnostics {
@@ -200,6 +219,21 @@ interface EvaluationDiagnostics {
   allowed_state_values: RuntimeState[];
   mismatch_reason: "none" | "no_state_keyword_detected" | "detected_other_state";
   missing_state_fields: string[];
+  candidate_state_scores: Record<RuntimeState, number>;
+  top_score: number;
+  tied_top_states: RuntimeState[];
+  tie_detected: boolean;
+  winning_state_rule_id: string;
+  winning_state_rule_name: string;
+  expected_state_score: number;
+  actual_state_score: number;
+  expected_state_rank: number | null;
+  score_gap_expected_vs_actual: number | null;
+  state_score_margin: number;
+  classifier_decision_reason:
+    | "no_nonzero_state_score"
+    | "single_top_score"
+    | "tie_preserved_state_rules_order";
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -656,39 +690,83 @@ function isVietnameseLike(reply: string): boolean {
   return markers.some((marker) => t.includes(marker));
 }
 
+function getEmptyStateScoreMap(): Record<RuntimeState, number> {
+  return {
+    pricing_phase: 0,
+    logistics_phase: 0,
+    payment_phase: 0,
+    research_phase: 0,
+    uncertain_interest: 0,
+  };
+}
+
+function getStateRank(
+  candidateStateScores: Record<RuntimeState, number>,
+  state: RuntimeState | null,
+): number | null {
+  if (!state) return null;
+  const targetScore = candidateStateScores[state] ?? 0;
+  if (targetScore <= 0) return null;
+  const higherDistinctScores = new Set(
+    (Object.values(candidateStateScores) as number[]).filter((score) => score > targetScore),
+  );
+  return higherDistinctScores.size + 1;
+}
+
 function detectReplyState(reply: string): StateDetectionResult {
   const normalized = normalizeForStateMatch(reply);
+  const candidateStateScores = getEmptyStateScoreMap();
   let bestState: RuntimeState | null = null;
-  let bestKeywords: string[] = [];
   let bestScore = 0;
 
   for (const [state, rule] of Object.entries(STATE_RULES) as Array<
     [RuntimeState, (typeof STATE_RULES)[RuntimeState]]
   >) {
-    const matchedKeywords = rule.keywords.filter((keyword) => normalized.includes(keyword));
-    if (matchedKeywords.length > bestScore) {
+    const matchedScore = rule.keywords.filter((keyword) => normalized.includes(keyword)).length;
+    candidateStateScores[state] = matchedScore;
+    if (matchedScore > bestScore) {
       bestState = state;
-      bestKeywords = matchedKeywords;
-      bestScore = matchedKeywords.length;
+      bestScore = matchedScore;
     }
   }
+
+  const tiedTopStates = bestScore > 0
+    ? (Object.entries(candidateStateScores) as Array<[RuntimeState, number]>)
+        .filter(([, score]) => score === bestScore)
+        .map(([state]) => state)
+    : [];
+  const tieDetected = tiedTopStates.length > 1;
 
   if (!bestState) {
     return {
       detectedState: null,
-      matchedKeywords: [],
       buyerMove: null,
       ruleId: "state_keyword_classifier_v2",
       ruleName: "normalized reply-state keyword classifier",
+      candidateStateScores,
+      topScore: 0,
+      tiedTopStates: [],
+      tieDetected: false,
+      winningStateRuleId: "state_keyword_classifier_v2",
+      winningStateRuleName: "normalized reply-state keyword classifier",
+      classifierDecisionReason: "no_nonzero_state_score",
     };
   }
 
   return {
     detectedState: bestState,
-    matchedKeywords: bestKeywords,
     buyerMove: STATE_RULES[bestState].buyerMove,
     ruleId: STATE_RULES[bestState].ruleId,
     ruleName: STATE_RULES[bestState].ruleName,
+    candidateStateScores,
+    topScore: bestScore,
+    tiedTopStates,
+    tieDetected,
+    winningStateRuleId: STATE_RULES[bestState].ruleId,
+    winningStateRuleName: STATE_RULES[bestState].ruleName,
+    classifierDecisionReason: tieDetected
+      ? "tie_preserved_state_rules_order"
+      : "single_top_score",
   };
 }
 
@@ -707,6 +785,18 @@ export function evaluateReply(
   const assistantHits = detectAssistantStyle(reply);
   const detected = detectReplyState(reply);
   const expectedBuyerMove = STATE_RULES[scenario.runtime_state].buyerMove;
+  const expectedStateScore = detected.candidateStateScores[scenario.runtime_state] ?? 0;
+  const actualStateScore = detected.detectedState
+    ? (detected.candidateStateScores[detected.detectedState] ?? 0)
+    : 0;
+  const expectedStateRank = getStateRank(detected.candidateStateScores, scenario.runtime_state);
+  const scoreGapExpectedVsActual = detected.detectedState
+    ? actualStateScore - expectedStateScore
+    : null;
+  const sortedScores = [...new Set(Object.values(detected.candidateStateScores))]
+    .sort((a, b) => b - a);
+  const secondScore = sortedScores.find((score) => score < detected.topScore) ?? 0;
+  const stateScoreMargin = Math.max(0, detected.topScore - secondScore);
 
   let mismatchReason: EvaluationDiagnostics["mismatch_reason"] = "none";
 
@@ -746,6 +836,18 @@ export function evaluateReply(
       allowed_state_values: Object.keys(STATE_RULES) as RuntimeState[],
       mismatch_reason: mismatchReason,
       missing_state_fields: [],
+      candidate_state_scores: detected.candidateStateScores,
+      top_score: detected.topScore,
+      tied_top_states: detected.tiedTopStates,
+      tie_detected: detected.tieDetected,
+      winning_state_rule_id: detected.winningStateRuleId,
+      winning_state_rule_name: detected.winningStateRuleName,
+      expected_state_score: expectedStateScore,
+      actual_state_score: actualStateScore,
+      expected_state_rank: expectedStateRank,
+      score_gap_expected_vs_actual: scoreGapExpectedVsActual,
+      state_score_margin: stateScoreMargin,
+      classifier_decision_reason: detected.classifierDecisionReason,
     },
   };
 }
@@ -827,6 +929,16 @@ async function runEvaluationBatch(
   const violationCountsByExpectedState: Record<string, number> = {};
   const violationCountsByActualState: Record<string, number> = {};
   const mismatchReasonCounts: Record<string, number> = {};
+  const tiedTopStatesCounts: Record<string, number> = {};
+  let tieDetectedCount = 0;
+  let scoreGapMin = Number.POSITIVE_INFINITY;
+  let scoreGapMax = Number.NEGATIVE_INFINITY;
+  let expectedStateNonzeroCount = 0;
+  let expectedStateZeroCount = 0;
+  let violationsWithExpectedStateNonzero = 0;
+  let violationsWithTieDetected = 0;
+  let violationsWithExpectedStateTied = 0;
+  let violationsWithActualStateStronger = 0;
   let contentLengthMin = Number.POSITIVE_INFINITY;
   let contentLengthMax = 0;
   let reasoningLengthMin = Number.POSITIVE_INFINITY;
@@ -922,6 +1034,21 @@ async function runEvaluationBatch(
         if (evaluation.assistantStyleDetected) assistantStyleDetectedCount += 1;
         if (evaluation.passed) evaluatorPassedCount += 1;
         else evaluatorFailedCount += 1;
+        if (evaluation.diagnostics.tie_detected) tieDetectedCount += 1;
+        if (evaluation.diagnostics.tied_top_states.length > 0) {
+          const tiedKey = evaluation.diagnostics.tied_top_states.join("|");
+          tiedTopStatesCounts[tiedKey] = (tiedTopStatesCounts[tiedKey] ?? 0) + 1;
+        }
+        scoreGapMin = Math.min(
+          scoreGapMin,
+          evaluation.diagnostics.score_gap_expected_vs_actual ?? 0,
+        );
+        scoreGapMax = Math.max(
+          scoreGapMax,
+          evaluation.diagnostics.score_gap_expected_vs_actual ?? 0,
+        );
+        if (evaluation.diagnostics.expected_state_score > 0) expectedStateNonzeroCount += 1;
+        else expectedStateZeroCount += 1;
         for (const key of evaluation.violationKeys) {
           evaluatorViolationCounts[key] = (evaluatorViolationCounts[key] ?? 0) + 1;
         }
@@ -936,6 +1063,25 @@ async function runEvaluationBatch(
             evaluation.violationKeys.length;
           mismatchReasonCounts[evaluation.diagnostics.mismatch_reason] =
             (mismatchReasonCounts[evaluation.diagnostics.mismatch_reason] ?? 0) + 1;
+          if (evaluation.diagnostics.expected_state_score > 0) {
+            violationsWithExpectedStateNonzero += 1;
+          }
+          if (evaluation.diagnostics.tie_detected) {
+            violationsWithTieDetected += 1;
+          }
+          if (
+            evaluation.diagnostics.tied_top_states.includes(
+              evaluation.diagnostics.expected_state_value,
+            )
+          ) {
+            violationsWithExpectedStateTied += 1;
+          }
+          if (
+            evaluation.diagnostics.actual_state_score >
+            evaluation.diagnostics.expected_state_score
+          ) {
+            violationsWithActualStateStronger += 1;
+          }
         }
 
         rows.push({
@@ -972,6 +1118,18 @@ async function runEvaluationBatch(
           state_normalization_applied: evaluation.diagnostics.state_normalization_applied,
           mismatch_reason: evaluation.diagnostics.mismatch_reason,
           missing_state_fields: evaluation.diagnostics.missing_state_fields,
+          candidate_state_scores: evaluation.diagnostics.candidate_state_scores,
+          top_score: evaluation.diagnostics.top_score,
+          tied_top_states: evaluation.diagnostics.tied_top_states,
+          tie_detected: evaluation.diagnostics.tie_detected,
+          winning_state_rule_id: evaluation.diagnostics.winning_state_rule_id,
+          winning_state_rule_name: evaluation.diagnostics.winning_state_rule_name,
+          expected_state_score: evaluation.diagnostics.expected_state_score,
+          actual_state_score: evaluation.diagnostics.actual_state_score,
+          expected_state_rank: evaluation.diagnostics.expected_state_rank,
+          score_gap_expected_vs_actual: evaluation.diagnostics.score_gap_expected_vs_actual,
+          state_score_margin: evaluation.diagnostics.state_score_margin,
+          classifier_decision_reason: evaluation.diagnostics.classifier_decision_reason,
         });
       }),
     );
@@ -1008,6 +1166,16 @@ async function runEvaluationBatch(
       violationCountsByExpectedState,
       violationCountsByActualState,
       mismatchReasonCounts,
+      tieDetectedCount,
+      tiedTopStatesCounts,
+      scoreGapMin: Number.isFinite(scoreGapMin) ? scoreGapMin : 0,
+      scoreGapMax: Number.isFinite(scoreGapMax) ? scoreGapMax : 0,
+      expectedStateNonzeroCount,
+      expectedStateZeroCount,
+      violationsWithExpectedStateNonzero,
+      violationsWithTieDetected,
+      violationsWithExpectedStateTied,
+      violationsWithActualStateStronger,
     },
   };
 }
@@ -1040,14 +1208,26 @@ async function main(): Promise<void> {
       source_type: record.source_type,
       scenario_id: scenario.id,
       runtime_state: scenario.runtime_state,
-      tags: scenario.tags,
-      ai_called: false,
-      reply_source_placeholder: null,
-      latency_ms_placeholder: 0,
-      constraint_check_status: "not_executed",
-      privacy_leak_detected: false,
-    })),
-  );
+    tags: scenario.tags,
+    ai_called: false,
+    reply_source_placeholder: null,
+    latency_ms_placeholder: 0,
+    constraint_check_status: "not_executed",
+    privacy_leak_detected: false,
+    candidate_state_scores: null,
+    top_score: null,
+    tied_top_states: [],
+    tie_detected: false,
+    winning_state_rule_id: null,
+    winning_state_rule_name: null,
+    expected_state_score: null,
+    actual_state_score: null,
+    expected_state_rank: null,
+    score_gap_expected_vs_actual: null,
+    state_score_margin: null,
+    classifier_decision_reason: "not_executed",
+  })),
+);
 
   let aiCalled = false;
   let actualCallCount = 0;
@@ -1075,6 +1255,20 @@ async function main(): Promise<void> {
     errorTypeCounts: {},
     finishReasonSet: [],
     stopReasonSet: [],
+    violationCountsByScenario: {},
+    violationCountsByExpectedState: {},
+    violationCountsByActualState: {},
+    mismatchReasonCounts: {},
+    tieDetectedCount: 0,
+    tiedTopStatesCounts: {},
+    scoreGapMin: 0,
+    scoreGapMax: 0,
+    expectedStateNonzeroCount: 0,
+    expectedStateZeroCount: 0,
+    violationsWithExpectedStateNonzero: 0,
+    violationsWithTieDetected: 0,
+    violationsWithExpectedStateTied: 0,
+    violationsWithActualStateStronger: 0,
   };
   let status = "dry_run_completed";
 
@@ -1126,6 +1320,18 @@ async function main(): Promise<void> {
     evaluator_passed_count: evaluatorPassedCount,
     evaluator_failed_count: evaluatorFailedCount,
     evaluator_violation_counts: evaluatorViolationCounts,
+    tie_detected_count: diagnostics.tieDetectedCount,
+    tied_top_states_counts: diagnostics.tiedTopStatesCounts,
+    score_gap_range: {
+      min: diagnostics.scoreGapMin,
+      max: diagnostics.scoreGapMax,
+    },
+    expected_state_nonzero_count: diagnostics.expectedStateNonzeroCount,
+    expected_state_zero_count: diagnostics.expectedStateZeroCount,
+    violations_with_expected_state_nonzero: diagnostics.violationsWithExpectedStateNonzero,
+    violations_with_tie_detected: diagnostics.violationsWithTieDetected,
+    violations_with_expected_state_tied: diagnostics.violationsWithExpectedStateTied,
+    violations_with_actual_state_stronger: diagnostics.violationsWithActualStateStronger,
     prompt_or_reply_text_written: false,
   });
   writeJson(auditPath, {
@@ -1166,6 +1372,18 @@ async function main(): Promise<void> {
     violation_counts_by_expected_state: diagnostics.violationCountsByExpectedState,
     violation_counts_by_actual_state: diagnostics.violationCountsByActualState,
     mismatch_reason_counts: diagnostics.mismatchReasonCounts,
+    tie_detected_count: diagnostics.tieDetectedCount,
+    tied_top_states_counts: diagnostics.tiedTopStatesCounts,
+    score_gap_range: {
+      min: diagnostics.scoreGapMin,
+      max: diagnostics.scoreGapMax,
+    },
+    expected_state_nonzero_count: diagnostics.expectedStateNonzeroCount,
+    expected_state_zero_count: diagnostics.expectedStateZeroCount,
+    violations_with_expected_state_nonzero: diagnostics.violationsWithExpectedStateNonzero,
+    violations_with_tie_detected: diagnostics.violationsWithTieDetected,
+    violations_with_expected_state_tied: diagnostics.violationsWithExpectedStateTied,
+    violations_with_actual_state_stronger: diagnostics.violationsWithActualStateStronger,
     backup_path: backupPath,
     status,
     ai_called: aiCalled,
