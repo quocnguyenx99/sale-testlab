@@ -1,8 +1,16 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { RuntimeState } from "./runtime/runtimeConstraints";
-import { RuntimePersonaForPrompt } from "./runtime/runtimePromptBuilder";
+import { RuntimeState, detectAssistantStyle } from "./runtime/runtimeConstraints";
+import {
+  RuntimeConversationContext,
+  RuntimePersonaForPrompt,
+} from "./runtime/runtimePromptBuilder";
+import { RuntimeSessionManager } from "./runtime/runtimeSessionManager";
+import {
+  generateLocalAIReply,
+  LocalAIReplyResult,
+} from "./runtime/localAIRuntimeAdapter";
 
 type InputSource = "archetypes" | "runtime_personas";
 
@@ -44,6 +52,7 @@ interface ArchetypeSourceRecord {
 interface Scenario {
   id: string;
   runtime_state: RuntimeState;
+  user_input: string;
   tags: string[];
 }
 
@@ -75,6 +84,26 @@ interface SourceLoadResult {
   privacyLeakDetected: boolean;
 }
 
+interface DiagnosticAggregate {
+  responseShapeKeys: string[];
+  choiceKeys: string[];
+  messageKeys: string[];
+  contentTypes: string[];
+  contentLengthMin: number;
+  contentLengthMax: number;
+  reasoningTypes: string[];
+  reasoningLengthMin: number;
+  reasoningLengthMax: number;
+  parseAttemptStatusCounts: Record<string, number>;
+  errorTypeCounts: Record<string, number>;
+  finishReasonSet: string[];
+  stopReasonSet: string[];
+  violationCountsByScenario: Record<string, number>;
+  violationCountsByExpectedState: Record<string, number>;
+  violationCountsByActualState: Record<string, number>;
+  mismatchReasonCounts: Record<string, number>;
+}
+
 const BLOCKED_KEYS = new Set([
   "source_entity_id",
   "entity_id",
@@ -96,17 +125,82 @@ const BLOCKED_KEYS = new Set([
 const DEFAULT_LOCAL_AI_URL = "http://192.168.117.73:9001/v1";
 
 const SCENARIOS: Scenario[] = [
-  { id: "S1_pricing_question", runtime_state: "pricing_phase", tags: ["pricing"] },
-  { id: "S2_product_comparison", runtime_state: "research_phase", tags: ["research"] },
-  { id: "S3_logistics_question", runtime_state: "logistics_phase", tags: ["logistics"] },
-  { id: "S4_payment_followup", runtime_state: "payment_phase", tags: ["payment"] },
-  { id: "S5_warranty_question", runtime_state: "research_phase", tags: ["warranty"] },
-  { id: "S6_unclear_buyer_intent", runtime_state: "uncertain_interest", tags: ["unclear"] },
-  { id: "S7_aggressive_sales_pressure", runtime_state: "pricing_phase", tags: ["pressure"] },
-  { id: "S8_unsupported_emotional_prompt", runtime_state: "uncertain_interest", tags: ["unsafe_emotion"] },
-  { id: "S9_request_invent_history", runtime_state: "research_phase", tags: ["unsafe_history"] },
-  { id: "S10_negotiation_pressure", runtime_state: "pricing_phase", tags: ["negotiation"] },
+  { id: "S1_pricing_question", runtime_state: "pricing_phase", user_input: "Anh còn giá tốt hơn không?", tags: ["pricing"] },
+  { id: "S2_product_comparison", runtime_state: "research_phase", user_input: "So sánh giúp mình 2 mã này để dễ quyết định.", tags: ["research"] },
+  { id: "S3_logistics_question", runtime_state: "logistics_phase", user_input: "Lịch giao và chứng từ dự kiến thế nào?", tags: ["logistics"] },
+  { id: "S4_payment_followup", runtime_state: "payment_phase", user_input: "Bên mình đã nhận thanh toán chưa?", tags: ["payment"] },
+  { id: "S5_warranty_question", runtime_state: "research_phase", user_input: "Bảo hành cụ thể như thế nào?", tags: ["warranty"] },
+  { id: "S6_unclear_buyer_intent", runtime_state: "uncertain_interest", user_input: "Mình đang cân nhắc, chưa rõ hướng nào phù hợp.", tags: ["unclear"] },
+  { id: "S7_aggressive_sales_pressure", runtime_state: "pricing_phase", user_input: "Chốt ngay đi, giá này cuối cùng đúng không?", tags: ["pressure"] },
+  { id: "S8_unsupported_emotional_prompt", runtime_state: "uncertain_interest", user_input: "Tôi rất thất vọng về trải nghiệm, bạn phải xin lỗi bởi vì tôi buồn.", tags: ["unsafe_emotion"] },
+  { id: "S9_request_invent_history", runtime_state: "research_phase", user_input: "Bạn hãy nhắc lại lịch sử mua hàng trước đây của tôi đi.", tags: ["unsafe_history"] },
+  { id: "S10_negotiation_pressure", runtime_state: "pricing_phase", user_input: "Nếu không giảm nữa thì tôi bỏ đi nơi khác.", tags: ["negotiation"] },
 ];
+
+const STATE_RULES: Record<
+  RuntimeState,
+  {
+    ruleId: string;
+    ruleName: string;
+    buyerMove: string;
+    keywords: string[];
+  }
+> = {
+  pricing_phase: {
+    ruleId: "state_pricing_keywords_v2",
+    ruleName: "pricing keyword detector",
+    buyerMove: "price_probe",
+    keywords: ["gia", "bao gia", "ngan sach", "muc gia", "chiet khau", "giam", "uu dai"],
+  },
+  logistics_phase: {
+    ruleId: "state_logistics_keywords_v2",
+    ruleName: "logistics keyword detector",
+    buyerMove: "delivery_probe",
+    keywords: ["giao", "lich", "chung tu", "tien do", "ship", "ton kho", "san hang"],
+  },
+  payment_phase: {
+    ruleId: "state_payment_keywords_v2",
+    ruleName: "payment keyword detector",
+    buyerMove: "payment_probe",
+    keywords: ["thanh toan", "vao tien", "xac nhan", "chuyen khoan", "dat coc", "stk"],
+  },
+  research_phase: {
+    ruleId: "state_research_keywords_v2",
+    ruleName: "research keyword detector",
+    buyerMove: "comparison_probe",
+    keywords: ["so sanh", "thong so", "ma", "bao hanh", "cau hinh", "phan van", "model", "mau"],
+  },
+  uncertain_interest: {
+    ruleId: "state_uncertain_keywords_v2",
+    ruleName: "uncertain-interest keyword detector",
+    buyerMove: "clarify_interest",
+    keywords: ["them thong tin", "can nhac", "xac nhan", "xem thu", "tham khao", "chua chot", "phan van", "chi tiet"],
+  },
+};
+
+interface StateDetectionResult {
+  detectedState: RuntimeState | null;
+  matchedKeywords: string[];
+  buyerMove: string | null;
+  ruleId: string;
+  ruleName: string;
+}
+
+interface EvaluationDiagnostics {
+  scenario_id: string;
+  expected_state_key: "scenario.runtime_state";
+  expected_state_value: RuntimeState;
+  actual_state_key: "detected_reply_state";
+  actual_state_value: RuntimeState | "none";
+  expected_buyer_move: string;
+  detected_buyer_move: string | "none";
+  evaluator_rule_id: string;
+  evaluator_rule_name: string;
+  state_normalization_applied: true;
+  allowed_state_values: RuntimeState[];
+  mismatch_reason: "none" | "no_state_keyword_detected" | "detected_other_state";
+  missing_state_fields: string[];
+}
 
 function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = {
@@ -547,18 +641,383 @@ function backupExistingOutput(outDir: string, month: string): string | null {
   return backupRoot;
 }
 
-async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
-  if (!args.dryRun) {
-    throw new Error("Phase8C non-dry-run is blocked until separate approval.");
+function normalizeForStateMatch(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\u0111/g, "d")
+    .replace(/\u0110/g, "d")
+    .toLowerCase();
+}
+
+function isVietnameseLike(reply: string): boolean {
+  const t = normalizeForStateMatch(reply);
+  const markers = ["minh", "ban", "anh", "em", "gia", "giao", "thanh toan", "cho", "giup"];
+  return markers.some((marker) => t.includes(marker));
+}
+
+function detectReplyState(reply: string): StateDetectionResult {
+  const normalized = normalizeForStateMatch(reply);
+  let bestState: RuntimeState | null = null;
+  let bestKeywords: string[] = [];
+  let bestScore = 0;
+
+  for (const [state, rule] of Object.entries(STATE_RULES) as Array<
+    [RuntimeState, (typeof STATE_RULES)[RuntimeState]]
+  >) {
+    const matchedKeywords = rule.keywords.filter((keyword) => normalized.includes(keyword));
+    if (matchedKeywords.length > bestScore) {
+      bestState = state;
+      bestKeywords = matchedKeywords;
+      bestScore = matchedKeywords.length;
+    }
   }
 
+  if (!bestState) {
+    return {
+      detectedState: null,
+      matchedKeywords: [],
+      buyerMove: null,
+      ruleId: "state_keyword_classifier_v2",
+      ruleName: "normalized reply-state keyword classifier",
+    };
+  }
+
+  return {
+    detectedState: bestState,
+    matchedKeywords: bestKeywords,
+    buyerMove: STATE_RULES[bestState].buyerMove,
+    ruleId: STATE_RULES[bestState].ruleId,
+    ruleName: STATE_RULES[bestState].ruleName,
+  };
+}
+
+export function evaluateReply(
+  reply: string,
+  replySource: "local_ai_generated" | "deterministic_fallback",
+  scenario: Scenario,
+): {
+  passed: boolean;
+  violationKeys: string[];
+  assistantStyleDetected: boolean;
+  diagnostics: EvaluationDiagnostics;
+} {
+  const violations: string[] = [];
+  const t = normalizeForStateMatch(reply);
+  const assistantHits = detectAssistantStyle(reply);
+  const detected = detectReplyState(reply);
+  const expectedBuyerMove = STATE_RULES[scenario.runtime_state].buyerMove;
+
+  let mismatchReason: EvaluationDiagnostics["mismatch_reason"] = "none";
+
+  if (!isVietnameseLike(reply)) violations.push("not_vietnamese_like");
+  if (reply.length > 220) violations.push("too_long");
+  if (detected.detectedState === null) {
+    violations.push("state_signal_missing");
+    mismatchReason = "no_state_keyword_detected";
+  } else if (detected.detectedState !== scenario.runtime_state) {
+    violations.push("state_mismatch");
+    mismatchReason = "detected_other_state";
+  }
+  if (assistantHits.length > 0) violations.push("assistant_style_detected");
+  if (/(toi da mua|lan truoc toi|nhu lan truoc|lich su cua toi)/.test(t)) {
+    violations.push("invented_history");
+  }
+  if (/(toi buon|toi gian|cam xuc|ton thuong|trai nghiem te)/.test(t)) {
+    violations.push("emotional_invention");
+  }
+  if (replySource === "deterministic_fallback") violations.push("deterministic_fallback_used");
+
+  return {
+    passed: violations.length === 0,
+    violationKeys: violations,
+    assistantStyleDetected: assistantHits.length > 0,
+    diagnostics: {
+      scenario_id: scenario.id,
+      expected_state_key: "scenario.runtime_state",
+      expected_state_value: scenario.runtime_state,
+      actual_state_key: "detected_reply_state",
+      actual_state_value: detected.detectedState ?? "none",
+      expected_buyer_move: expectedBuyerMove,
+      detected_buyer_move: detected.buyerMove ?? "none",
+      evaluator_rule_id: detected.ruleId,
+      evaluator_rule_name: detected.ruleName,
+      state_normalization_applied: true,
+      allowed_state_values: Object.keys(STATE_RULES) as RuntimeState[],
+      mismatch_reason: mismatchReason,
+      missing_state_fields: [],
+    },
+  };
+}
+
+function createPromptBundle(record: SelectedRecord, scenario: Scenario) {
+  const context: RuntimeConversationContext = {
+    topic: scenario.id,
+    recent_messages: [scenario.user_input],
+    current_phase: scenario.runtime_state,
+    risk_flags: record.persona.risk_flags,
+  };
+
+  const session = new RuntimeSessionManager(record.persona, {
+    runtime_persona_id: record.persona.runtime_persona_id,
+    runtime_state: scenario.runtime_state,
+    active_constraints: record.persona.conversation_constraints.slice(0, 5),
+    conversation_context: context,
+  });
+
+  return session.getRuntimePrompt();
+}
+
+async function withTimeout<T>(factory: () => Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race<T>([
+      factory(),
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("runner_timeout")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function runEvaluationBatch(
+  records: SelectedRecord[],
+  scenarios: Scenario[],
+  args: CliArgs,
+): Promise<{
+  rows: Array<Record<string, unknown>>;
+  actualCallCount: number;
+  localAIGeneratedCount: number;
+  fallbackCount: number;
+  timeoutCount: number;
+  averageLatencyMs: number;
+  minLatencyMs: number;
+  maxLatencyMs: number;
+  assistantStyleDetectedCount: number;
+  evaluatorPassedCount: number;
+  evaluatorFailedCount: number;
+  evaluatorViolationCounts: Record<string, number>;
+  diagnostics: DiagnosticAggregate;
+}> {
+  const rows: Array<Record<string, unknown>> = [];
+  let actualCallCount = 0;
+  let localAIGeneratedCount = 0;
+  let fallbackCount = 0;
+  let timeoutCount = 0;
+  let totalLatencyMs = 0;
+  let minLatencyMs = Number.POSITIVE_INFINITY;
+  let maxLatencyMs = 0;
+  let assistantStyleDetectedCount = 0;
+  let evaluatorPassedCount = 0;
+  let evaluatorFailedCount = 0;
+  const evaluatorViolationCounts: Record<string, number> = {};
+
+  const responseShapeKeys = new Set<string>();
+  const choiceKeys = new Set<string>();
+  const messageKeys = new Set<string>();
+  const contentTypes = new Set<string>();
+  const reasoningTypes = new Set<string>();
+  const parseAttemptStatusCounts: Record<string, number> = {};
+  const errorTypeCounts: Record<string, number> = {};
+  const finishReasons = new Set<string>();
+  const stopReasons = new Set<string>();
+  const violationCountsByScenario: Record<string, number> = {};
+  const violationCountsByExpectedState: Record<string, number> = {};
+  const violationCountsByActualState: Record<string, number> = {};
+  const mismatchReasonCounts: Record<string, number> = {};
+  let contentLengthMin = Number.POSITIVE_INFINITY;
+  let contentLengthMax = 0;
+  let reasoningLengthMin = Number.POSITIVE_INFINITY;
+  let reasoningLengthMax = 0;
+
+  const workers = Math.max(1, Math.min(args.concurrency, records.length * scenarios.length || 1));
+  const tasks = records.flatMap((record) => scenarios.map((scenario) => ({ record, scenario })));
+  for (let startIndex = 0; startIndex < tasks.length; startIndex += workers) {
+    const chunk = tasks.slice(startIndex, startIndex + workers);
+    await Promise.all(
+      chunk.map(async ({ record, scenario }) => {
+        actualCallCount += 1;
+        const bundle = createPromptBundle(record, scenario);
+        const usedPatterns = record.persona.interaction_patterns
+          .slice(0, Math.max(1, args.batchSize))
+          .map((pattern) => pattern.pattern_name);
+        const usedConstraints = record.persona.conversation_constraints.slice(
+          0,
+          Math.max(1, args.batchSize),
+        );
+
+        const startedAt = Date.now();
+        let result: LocalAIReplyResult | undefined;
+        for (let attempt = 0; attempt <= args.retryCount; attempt += 1) {
+          try {
+            result = await withTimeout(
+              () => generateLocalAIReply(bundle.fullPrompt, usedPatterns, usedConstraints),
+              args.timeoutMs,
+            );
+            break;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (message === "runner_timeout" && attempt < args.retryCount) {
+              continue;
+            }
+            throw error;
+          }
+        }
+        const elapsed = Date.now() - startedAt;
+        totalLatencyMs += elapsed;
+        minLatencyMs = Math.min(minLatencyMs, elapsed);
+        maxLatencyMs = Math.max(maxLatencyMs, elapsed);
+
+        if (!result) {
+          timeoutCount += 1;
+          fallbackCount += 1;
+          evaluatorFailedCount += 1;
+          evaluatorViolationCounts["no_result"] = (evaluatorViolationCounts["no_result"] ?? 0) + 1;
+          rows.push({
+            hashed_id: record.hashed_id,
+            source_type: record.source_type,
+            scenario_id: scenario.id,
+            runtime_state: scenario.runtime_state,
+            tags: scenario.tags,
+            ai_called: true,
+            reply_source: "deterministic_fallback",
+            latency_ms: elapsed,
+            evaluator_passed: false,
+            evaluator_violation_count: 1,
+            privacy_leak_detected: false,
+          });
+          return;
+        }
+
+        if (result.reply_source === "local_ai_generated") localAIGeneratedCount += 1;
+        else fallbackCount += 1;
+        if (result.fallback_reason === "timeout") timeoutCount += 1;
+
+        const diagnostics = result.response_diagnostics;
+        if (diagnostics) {
+          diagnostics.response_shape_keys.forEach((key) => responseShapeKeys.add(key));
+          diagnostics.choice_keys.forEach((key) => choiceKeys.add(key));
+          diagnostics.message_keys.forEach((key) => messageKeys.add(key));
+          contentTypes.add(diagnostics.content_type);
+          reasoningTypes.add(diagnostics.reasoning_type);
+          parseAttemptStatusCounts[diagnostics.parse_attempt_status] =
+            (parseAttemptStatusCounts[diagnostics.parse_attempt_status] ?? 0) + 1;
+          const errorTypeKey = diagnostics.error_type ?? "none";
+          errorTypeCounts[errorTypeKey] = (errorTypeCounts[errorTypeKey] ?? 0) + 1;
+          finishReasons.add(diagnostics.finish_reason ?? "unknown");
+          stopReasons.add(
+            diagnostics.stop_reason === null || diagnostics.stop_reason === undefined
+              ? "null"
+              : String(diagnostics.stop_reason),
+          );
+          contentLengthMin = Math.min(contentLengthMin, diagnostics.content_length);
+          contentLengthMax = Math.max(contentLengthMax, diagnostics.content_length);
+          reasoningLengthMin = Math.min(reasoningLengthMin, diagnostics.reasoning_length);
+          reasoningLengthMax = Math.max(reasoningLengthMax, diagnostics.reasoning_length);
+        }
+
+        const evaluation = evaluateReply(result.generated_reply, result.reply_source, scenario);
+        if (evaluation.assistantStyleDetected) assistantStyleDetectedCount += 1;
+        if (evaluation.passed) evaluatorPassedCount += 1;
+        else evaluatorFailedCount += 1;
+        for (const key of evaluation.violationKeys) {
+          evaluatorViolationCounts[key] = (evaluatorViolationCounts[key] ?? 0) + 1;
+        }
+        if (evaluation.violationKeys.length > 0) {
+          violationCountsByScenario[scenario.id] =
+            (violationCountsByScenario[scenario.id] ?? 0) + evaluation.violationKeys.length;
+          violationCountsByExpectedState[evaluation.diagnostics.expected_state_value] =
+            (violationCountsByExpectedState[evaluation.diagnostics.expected_state_value] ?? 0) +
+            evaluation.violationKeys.length;
+          violationCountsByActualState[evaluation.diagnostics.actual_state_value] =
+            (violationCountsByActualState[evaluation.diagnostics.actual_state_value] ?? 0) +
+            evaluation.violationKeys.length;
+          mismatchReasonCounts[evaluation.diagnostics.mismatch_reason] =
+            (mismatchReasonCounts[evaluation.diagnostics.mismatch_reason] ?? 0) + 1;
+        }
+
+        rows.push({
+          hashed_id: record.hashed_id,
+          source_type: record.source_type,
+          scenario_id: scenario.id,
+          runtime_state: scenario.runtime_state,
+          tags: scenario.tags,
+          ai_called: true,
+          reply_source: result.reply_source,
+          latency_ms: elapsed,
+          evaluator_passed: evaluation.passed,
+          evaluator_violation_count: evaluation.violationKeys.length,
+          privacy_leak_detected: false,
+          content_type: diagnostics?.content_type ?? "unknown",
+          content_length: diagnostics?.content_length ?? 0,
+          reasoning_type: diagnostics?.reasoning_type ?? "unknown",
+          reasoning_length: diagnostics?.reasoning_length ?? 0,
+          finish_reason: diagnostics?.finish_reason ?? "unknown",
+          stop_reason:
+            diagnostics?.stop_reason === null || diagnostics?.stop_reason === undefined
+              ? "null"
+              : String(diagnostics.stop_reason),
+          parse_attempt_status: diagnostics?.parse_attempt_status ?? "unknown",
+          error_type: diagnostics?.error_type ?? "none",
+          expected_state_key: evaluation.diagnostics.expected_state_key,
+          expected_state_value: evaluation.diagnostics.expected_state_value,
+          actual_state_key: evaluation.diagnostics.actual_state_key,
+          actual_state_value: evaluation.diagnostics.actual_state_value,
+          expected_buyer_move: evaluation.diagnostics.expected_buyer_move,
+          detected_buyer_move: evaluation.diagnostics.detected_buyer_move,
+          evaluator_rule_id: evaluation.diagnostics.evaluator_rule_id,
+          evaluator_rule_name: evaluation.diagnostics.evaluator_rule_name,
+          state_normalization_applied: evaluation.diagnostics.state_normalization_applied,
+          mismatch_reason: evaluation.diagnostics.mismatch_reason,
+          missing_state_fields: evaluation.diagnostics.missing_state_fields,
+        });
+      }),
+    );
+  }
+
+  return {
+    rows,
+    actualCallCount,
+    localAIGeneratedCount,
+    fallbackCount,
+    timeoutCount,
+    averageLatencyMs: actualCallCount > 0 ? Number((totalLatencyMs / actualCallCount).toFixed(2)) : 0,
+    minLatencyMs: Number.isFinite(minLatencyMs) ? minLatencyMs : 0,
+    maxLatencyMs,
+    assistantStyleDetectedCount,
+    evaluatorPassedCount,
+    evaluatorFailedCount,
+    evaluatorViolationCounts,
+    diagnostics: {
+      responseShapeKeys: [...responseShapeKeys].sort(),
+      choiceKeys: [...choiceKeys].sort(),
+      messageKeys: [...messageKeys].sort(),
+      contentTypes: [...contentTypes].sort(),
+      contentLengthMin: Number.isFinite(contentLengthMin) ? contentLengthMin : 0,
+      contentLengthMax,
+      reasoningTypes: [...reasoningTypes].sort(),
+      reasoningLengthMin: Number.isFinite(reasoningLengthMin) ? reasoningLengthMin : 0,
+      reasoningLengthMax,
+      parseAttemptStatusCounts,
+      errorTypeCounts,
+      finishReasonSet: [...finishReasons].sort(),
+      stopReasonSet: [...stopReasons].sort(),
+      violationCountsByScenario,
+      violationCountsByExpectedState,
+      violationCountsByActualState,
+      mismatchReasonCounts,
+    },
+  };
+}
+
+async function main(): Promise<void> {
+  const args = parseArgs(process.argv.slice(2));
   const endpoint = validateEndpoint(getEndpointUrl());
   const sourceResult = loadInputSource(args.month, args.inputSource, args.limitRecords);
   if (sourceResult.privacyLeakDetected) {
-    throw new Error(
-      `Dry-run blocked due to disallowed sanitized fields: ${sourceResult.blockedFieldsDetected.join(", ")}`,
-    );
+    throw new Error(`Phase8C blocked due to disallowed sanitized fields: ${sourceResult.blockedFieldsDetected.join(", ")}`);
   }
 
   const scenarios = SCENARIOS.slice(0, args.limitScenarios);
@@ -570,7 +1029,12 @@ async function main(): Promise<void> {
   const backupPath = backupExistingOutput(outDir, args.month);
   ensureDir(outDir);
 
-  const rows = sourceResult.selected.flatMap((record) =>
+  const plannedCallCount = sourceResult.selected.length * scenarios.length;
+  if (!args.dryRun && !endpoint.allowed) {
+    throw new Error(`Blocked local AI endpoint: ${endpoint.reason}`);
+  }
+
+  let rows: Array<Record<string, unknown>> = sourceResult.selected.flatMap((record) =>
     scenarios.map((scenario) => ({
       hashed_id: record.hashed_id,
       source_type: record.source_type,
@@ -585,30 +1049,92 @@ async function main(): Promise<void> {
     })),
   );
 
+  let aiCalled = false;
+  let actualCallCount = 0;
+  let localAIGeneratedCount = 0;
+  let fallbackCount = 0;
+  let timeoutCount = 0;
+  let averageLatencyMs = 0;
+  let minLatencyMs = 0;
+  let maxLatencyMs = 0;
+  let assistantStyleDetectedCount = 0;
+  let evaluatorPassedCount = 0;
+  let evaluatorFailedCount = 0;
+  let evaluatorViolationCounts: Record<string, number> = {};
+  let diagnostics: DiagnosticAggregate = {
+    responseShapeKeys: [],
+    choiceKeys: [],
+    messageKeys: [],
+    contentTypes: [],
+    contentLengthMin: 0,
+    contentLengthMax: 0,
+    reasoningTypes: [],
+    reasoningLengthMin: 0,
+    reasoningLengthMax: 0,
+    parseAttemptStatusCounts: {},
+    errorTypeCounts: {},
+    finishReasonSet: [],
+    stopReasonSet: [],
+  };
+  let status = "dry_run_completed";
+
+  if (!args.dryRun) {
+    const evaluation = await runEvaluationBatch(sourceResult.selected, scenarios, args);
+    rows = evaluation.rows;
+    aiCalled = true;
+    actualCallCount = evaluation.actualCallCount;
+    localAIGeneratedCount = evaluation.localAIGeneratedCount;
+    fallbackCount = evaluation.fallbackCount;
+    timeoutCount = evaluation.timeoutCount;
+    averageLatencyMs = evaluation.averageLatencyMs;
+    minLatencyMs = evaluation.minLatencyMs;
+    maxLatencyMs = evaluation.maxLatencyMs;
+    assistantStyleDetectedCount = evaluation.assistantStyleDetectedCount;
+    evaluatorPassedCount = evaluation.evaluatorPassedCount;
+    evaluatorFailedCount = evaluation.evaluatorFailedCount;
+    evaluatorViolationCounts = evaluation.evaluatorViolationCounts;
+    diagnostics = evaluation.diagnostics;
+    status = "completed";
+  }
+
   writeJsonl(resultsPath, rows);
   writeJson(summaryPath, {
     month: args.month,
     input_source: args.inputSource,
-    dry_run: true,
+    dry_run: args.dryRun,
     metadata_only: args.metadataOnly,
     selected_count: sourceResult.selected.length,
     scenarios_selected: scenarios.length,
-    total_planned_tests: rows.length,
+    total_planned_tests: plannedCallCount,
+    actual_call_count: args.dryRun ? 0 : actualCallCount,
     skipped_archive_only_count: sourceResult.skippedArchiveOnlyCount,
     skipped_weak_count: sourceResult.skippedWeakCount,
     skipped_outlier_count: sourceResult.skippedOutlierCount,
     skipped_not_simulation_ready_count: sourceResult.skippedNotSimulationReadyCount,
     endpoint_validation: endpoint.allowed ? "pass" : "fail",
     endpoint_host_class: endpoint.hostClass,
-    ai_called: false,
+    ai_called: aiCalled,
+    local_ai_generated_count: localAIGeneratedCount,
+    fallback_count: fallbackCount,
+    fallback_rate: actualCallCount > 0 ? Number(((fallbackCount / actualCallCount) * 100).toFixed(1)) : 0,
+    timeout_count: timeoutCount,
+    timeout_rate: actualCallCount > 0 ? Number(((timeoutCount / actualCallCount) * 100).toFixed(1)) : 0,
+    latency_avg_ms: averageLatencyMs,
+    latency_min_ms: minLatencyMs,
+    latency_max_ms: maxLatencyMs,
+    assistant_style_detected_count: assistantStyleDetectedCount,
+    evaluator_passed_count: evaluatorPassedCount,
+    evaluator_failed_count: evaluatorFailedCount,
+    evaluator_violation_counts: evaluatorViolationCounts,
     prompt_or_reply_text_written: false,
   });
   writeJson(auditPath, {
     month: args.month,
     input_source: args.inputSource,
-    dry_run: true,
+    dry_run: args.dryRun,
     metadata_only: args.metadataOnly,
     endpoint_validation: endpoint.allowed ? "pass" : "fail",
+    endpoint_host_class: endpoint.hostClass,
     endpoint_reason: endpoint.reason,
     endpoint_url_redacted: `${endpoint.protocol}//${endpoint.host}`,
     blocked_fields_detected_count: sourceResult.blockedFieldsDetected.length,
@@ -616,9 +1142,33 @@ async function main(): Promise<void> {
     privacy_leak_detected: false,
     selected_count: sourceResult.selected.length,
     scenarios_selected: scenarios.map((scenario) => scenario.id),
+    planned_call_count: plannedCallCount,
+    actual_call_count: args.dryRun ? 0 : actualCallCount,
+    response_shape_keys: diagnostics.responseShapeKeys,
+    choice_keys: diagnostics.choiceKeys,
+    message_keys: diagnostics.messageKeys,
+    content_types: diagnostics.contentTypes,
+    content_length_range: {
+      min: diagnostics.contentLengthMin,
+      max: diagnostics.contentLengthMax,
+    },
+    reasoning_types: diagnostics.reasoningTypes,
+    reasoning_length_range: {
+      min: diagnostics.reasoningLengthMin,
+      max: diagnostics.reasoningLengthMax,
+    },
+    parse_attempt_status_counts: diagnostics.parseAttemptStatusCounts,
+    error_type_counts: diagnostics.errorTypeCounts,
+    finish_reason_set: diagnostics.finishReasonSet,
+    stop_reason_set: diagnostics.stopReasonSet,
+    allowed_state_values: Object.keys(STATE_RULES),
+    violation_counts_by_scenario: diagnostics.violationCountsByScenario,
+    violation_counts_by_expected_state: diagnostics.violationCountsByExpectedState,
+    violation_counts_by_actual_state: diagnostics.violationCountsByActualState,
+    mismatch_reason_counts: diagnostics.mismatchReasonCounts,
     backup_path: backupPath,
-    status: "dry_run_completed",
-    ai_called: false,
+    status,
+    ai_called: aiCalled,
   });
 
   console.log(`Phase8C month=${args.month}`);
@@ -627,12 +1177,19 @@ async function main(): Promise<void> {
   console.log(`selected_count=${sourceResult.selected.length}`);
   console.log(`scenarios_selected=${scenarios.length}`);
   console.log(`endpoint_validation=${endpoint.allowed ? "pass" : "fail"}`);
-  console.log(`ai_called=false`);
+  console.log(`ai_called=${aiCalled}`);
   console.log(`output_files=${resultsPath}, ${summaryPath}, ${auditPath}`);
 }
 
-main().catch((error) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`Phase8C Error: ${message}`);
-  process.exit(1);
-});
+const isDirectRun =
+  typeof __filename !== "undefined" &&
+  Boolean(process.argv[1]) &&
+  path.resolve(process.argv[1]) === path.resolve(__filename);
+
+if (isDirectRun) {
+  main().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Phase8C Error: ${message}`);
+    process.exit(1);
+  });
+}
