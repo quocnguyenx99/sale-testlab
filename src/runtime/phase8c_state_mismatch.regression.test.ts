@@ -31,62 +31,118 @@ const pricingWin = evaluateReply(
   makeScenario("pricing_phase", "pricing_win") as never,
 );
 assert.equal(pricingWin.passed, true);
+assert.deepEqual(pricingWin.violationKeys, []);
+assert.deepEqual(pricingWin.warningKeys, []);
 assert.equal(pricingWin.diagnostics.actual_state_value, "pricing_phase");
 assert.equal(pricingWin.diagnostics.tie_detected, false);
-assert.equal(pricingWin.diagnostics.top_score >= 2, true);
 assert.equal(pricingWin.diagnostics.classifier_decision_reason, "single_top_score");
 
 const logisticsWin = evaluateReply(
-  "anh can giao lich chung tu",
+  "anh can biet lich giao va ton kho",
   "local_ai_generated",
   makeScenario("logistics_phase", "logistics_win") as never,
 );
 assert.equal(logisticsWin.passed, true);
+assert.deepEqual(logisticsWin.violationKeys, []);
+assert.deepEqual(logisticsWin.warningKeys, []);
 assert.equal(logisticsWin.diagnostics.actual_state_value, "logistics_phase");
-assert.equal(logisticsWin.diagnostics.tie_detected, false);
 assert.equal(logisticsWin.diagnostics.expected_state_score >= 2, true);
 
-const tiePricingLogistics = evaluateReply(
-  "anh can gia giao",
+const tieExpectedWinnerWithWarning = evaluateReply(
+  "anh can gia lich giao",
   "local_ai_generated",
-  makeScenario("pricing_phase", "tie_pricing_logistics") as never,
+  makeScenario("pricing_phase", "tie_expected_winner") as never,
 );
-assert.equal(tiePricingLogistics.passed, true);
-assert.equal(tiePricingLogistics.diagnostics.actual_state_value, "pricing_phase");
-assert.equal(tiePricingLogistics.diagnostics.tie_detected, true);
-assert.deepEqual(tiePricingLogistics.diagnostics.tied_top_states, [
-  "pricing_phase",
-  "logistics_phase",
-]);
+assert.equal(tieExpectedWinnerWithWarning.passed, true);
+assert.deepEqual(tieExpectedWinnerWithWarning.violationKeys, []);
+assert.ok(tieExpectedWinnerWithWarning.warningKeys.includes("state_tie_order_bias"));
+assert.equal(tieExpectedWinnerWithWarning.diagnostics.actual_state_value, "pricing_phase");
+assert.equal(tieExpectedWinnerWithWarning.diagnostics.expected_state_is_tied_top, true);
+assert.equal(tieExpectedWinnerWithWarning.diagnostics.buyer_move_matches_expected, true);
 assert.equal(
-  tiePricingLogistics.diagnostics.classifier_decision_reason,
+  tieExpectedWinnerWithWarning.diagnostics.classifier_decision_reason,
   "tie_preserved_state_rules_order",
 );
 
-const expectedNonzeroLoses = evaluateReply(
-  "gia so sanh cau hinh",
+const s1LikeWeakUncertainFail = evaluateReply(
+  "anh dang can nhac them",
   "local_ai_generated",
-  makeScenario("pricing_phase", "expected_nonzero_loses") as never,
+  makeScenario("pricing_phase", "s1_like_weak_uncertain_fail") as never,
 );
-assert.equal(expectedNonzeroLoses.passed, false);
-assert.ok(expectedNonzeroLoses.violationKeys.includes("state_mismatch"));
-assert.equal(expectedNonzeroLoses.diagnostics.expected_state_score, 1);
-assert.equal(expectedNonzeroLoses.diagnostics.actual_state_value, "research_phase");
-assert.equal(expectedNonzeroLoses.diagnostics.actual_state_score, 2);
-assert.equal(expectedNonzeroLoses.diagnostics.expected_state_rank, 2);
-assert.equal(expectedNonzeroLoses.diagnostics.score_gap_expected_vs_actual, 1);
+assert.equal(s1LikeWeakUncertainFail.passed, false);
+assert.ok(s1LikeWeakUncertainFail.violationKeys.includes("state_mismatch"));
+assert.equal(s1LikeWeakUncertainFail.violationKeys.includes("buyer_move_mismatch"), true);
+assert.equal(s1LikeWeakUncertainFail.warningKeys.includes("state_tie_order_bias"), false);
+assert.equal(s1LikeWeakUncertainFail.diagnostics.expected_state_score, 0);
+assert.equal(s1LikeWeakUncertainFail.diagnostics.actual_state_value, "uncertain_interest");
+assert.equal(s1LikeWeakUncertainFail.diagnostics.actual_state_score, 1);
 
-const expectedZeroLoses = evaluateReply(
-  "gia bao gia",
+const s1LikeResearchDriftFail = evaluateReply(
+  "anh can so sanh ma nay",
   "local_ai_generated",
-  makeScenario("payment_phase", "expected_zero_loses") as never,
+  makeScenario("pricing_phase", "s1_like_research_drift_fail") as never,
 );
-assert.equal(expectedZeroLoses.passed, false);
-assert.ok(expectedZeroLoses.violationKeys.includes("state_mismatch"));
-assert.equal(expectedZeroLoses.diagnostics.expected_state_score, 0);
-assert.equal(expectedZeroLoses.diagnostics.actual_state_value, "pricing_phase");
-assert.equal(expectedZeroLoses.diagnostics.actual_state_score, 2);
-assert.equal(expectedZeroLoses.diagnostics.expected_state_rank, null);
+assert.equal(s1LikeResearchDriftFail.passed, false);
+assert.ok(s1LikeResearchDriftFail.violationKeys.includes("state_mismatch"));
+assert.ok(s1LikeResearchDriftFail.violationKeys.includes("buyer_move_mismatch"));
+assert.equal(s1LikeResearchDriftFail.diagnostics.actual_state_value, "research_phase");
+assert.equal(s1LikeResearchDriftFail.diagnostics.detected_buyer_move, "comparison_probe");
+
+const s1LikeExplicitPricingPass = evaluateReply(
+  "anh can bao gia va gia net",
+  "local_ai_generated",
+  makeScenario("pricing_phase", "s1_like_explicit_pricing_pass") as never,
+);
+assert.equal(s1LikeExplicitPricingPass.passed, true);
+assert.deepEqual(s1LikeExplicitPricingPass.violationKeys, []);
+assert.deepEqual(s1LikeExplicitPricingPass.warningKeys, []);
+assert.equal(s1LikeExplicitPricingPass.diagnostics.actual_state_value, "pricing_phase");
+assert.equal(s1LikeExplicitPricingPass.diagnostics.detected_buyer_move, "price_probe");
+
+const s3LikeTieBuyerMoveMismatch = evaluateReply(
+  "anh can gia lich giao",
+  "local_ai_generated",
+  makeScenario("logistics_phase", "s3_like_tie_buyer_move_mismatch") as never,
+);
+assert.equal(s3LikeTieBuyerMoveMismatch.passed, false);
+assert.equal(s3LikeTieBuyerMoveMismatch.violationKeys.includes("state_mismatch"), false);
+assert.ok(s3LikeTieBuyerMoveMismatch.violationKeys.includes("buyer_move_mismatch"));
+assert.ok(s3LikeTieBuyerMoveMismatch.warningKeys.includes("state_tie_order_bias"));
+assert.equal(s3LikeTieBuyerMoveMismatch.diagnostics.expected_state_is_tied_top, true);
+assert.equal(s3LikeTieBuyerMoveMismatch.diagnostics.buyer_move_matches_expected, false);
+assert.equal(s3LikeTieBuyerMoveMismatch.diagnostics.actual_state_value, "pricing_phase");
+assert.equal(s3LikeTieBuyerMoveMismatch.diagnostics.expected_state_score, 1);
+assert.equal(s3LikeTieBuyerMoveMismatch.diagnostics.actual_state_score, 1);
+
+const s3LikeExplicitLogisticsPass = evaluateReply(
+  "anh can biet con hang va ngay giao",
+  "local_ai_generated",
+  makeScenario("logistics_phase", "s3_like_explicit_logistics_pass") as never,
+);
+assert.equal(s3LikeExplicitLogisticsPass.passed, true);
+assert.deepEqual(s3LikeExplicitLogisticsPass.violationKeys, []);
+assert.deepEqual(s3LikeExplicitLogisticsPass.warningKeys, []);
+assert.equal(s3LikeExplicitLogisticsPass.diagnostics.actual_state_value, "logistics_phase");
+assert.equal(s3LikeExplicitLogisticsPass.diagnostics.detected_buyer_move, "delivery_probe");
+
+const s2LikeShortVietnameseResearchPass = evaluateReply(
+  "ok gui minh so sanh ma nay nhe",
+  "local_ai_generated",
+  makeScenario("research_phase", "s2_like_short_vietnamese_research_pass") as never,
+);
+assert.equal(s2LikeShortVietnameseResearchPass.passed, true);
+assert.equal(
+  s2LikeShortVietnameseResearchPass.violationKeys.includes("not_vietnamese_like"),
+  false,
+);
+assert.equal(
+  s2LikeShortVietnameseResearchPass.diagnostics.actual_state_value,
+  "research_phase",
+);
+assert.equal(
+  s2LikeShortVietnameseResearchPass.diagnostics.detected_buyer_move,
+  "comparison_probe",
+);
 
 const noSignal = evaluateReply(
   "ok em",
@@ -96,9 +152,17 @@ const noSignal = evaluateReply(
 assert.equal(noSignal.passed, false);
 assert.ok(noSignal.violationKeys.includes("state_signal_missing"));
 assert.equal(noSignal.violationKeys.includes("state_mismatch"), false);
+assert.equal(noSignal.warningKeys.includes("state_tie_order_bias"), false);
 assert.equal(noSignal.diagnostics.actual_state_value, "none");
 assert.equal(noSignal.diagnostics.top_score, 0);
-assert.equal(noSignal.diagnostics.tie_detected, false);
 assert.equal(noSignal.diagnostics.classifier_decision_reason, "no_nonzero_state_score");
+
+const okAloneStillFailsLanguageGuard = evaluateReply(
+  "ok",
+  "local_ai_generated",
+  makeScenario("research_phase", "ok_alone_still_fails_language_guard") as never,
+);
+assert.equal(okAloneStillFailsLanguageGuard.passed, false);
+assert.ok(okAloneStillFailsLanguageGuard.violationKeys.includes("not_vietnamese_like"));
 
 console.log("phase8c_state_mismatch.regression.test: PASS");

@@ -112,6 +112,12 @@ interface DiagnosticAggregate {
   violationsWithTieDetected: number;
   violationsWithExpectedStateTied: number;
   violationsWithActualStateStronger: number;
+  stateTieOrderBiasCount: number;
+  buyerMoveMismatchCount: number;
+  violationsWithStateTieOrderBias: number;
+  violationsWithBuyerMoveMismatch: number;
+  passWithStateTieWarningCount: number;
+  failedDueToBuyerMoveMismatchCount: number;
 }
 
 const BLOCKED_KEYS = new Set([
@@ -160,19 +166,54 @@ const STATE_RULES: Record<
     ruleId: "state_pricing_keywords_v2",
     ruleName: "pricing keyword detector",
     buyerMove: "price_probe",
-    keywords: ["gia", "bao gia", "ngan sach", "muc gia", "chiet khau", "giam", "uu dai"],
+    keywords: [
+      "gia",
+      "gia bao nhieu",
+      "bao nhieu tien",
+      "tam gia",
+      "gia net",
+      "gia cuoi",
+      "gia tot",
+      "bao gia",
+      "ngan sach",
+      "muc gia",
+      "chiet khau",
+      "giam",
+      "uu dai",
+    ],
   },
   logistics_phase: {
-    ruleId: "state_logistics_keywords_v2",
-    ruleName: "logistics keyword detector",
+    ruleId: "state_logistics_keywords_v3",
+    ruleName: "logistics phrase detector",
     buyerMove: "delivery_probe",
-    keywords: ["giao", "lich", "chung tu", "tien do", "ship", "ton kho", "san hang"],
+    keywords: [
+      "con hang",
+      "het hang",
+      "co san hang",
+      "hang co san",
+      "san hang",
+      "ton kho",
+      "kho hang",
+      "ngay giao",
+      "thoi gian giao",
+      "bao gio giao",
+      "lich giao",
+      "van don",
+      "phieu giao",
+    ],
   },
   payment_phase: {
-    ruleId: "state_payment_keywords_v2",
+    ruleId: "state_payment_keywords_v3",
     ruleName: "payment keyword detector",
     buyerMove: "payment_probe",
-    keywords: ["thanh toan", "vao tien", "xac nhan", "chuyen khoan", "dat coc", "stk"],
+    keywords: [
+      "thanh toan",
+      "vao tien",
+      "xac nhan thanh toan",
+      "chuyen khoan",
+      "dat coc",
+      "stk",
+    ],
   },
   research_phase: {
     ruleId: "state_research_keywords_v2",
@@ -181,10 +222,88 @@ const STATE_RULES: Record<
     keywords: ["so sanh", "thong so", "ma", "bao hanh", "cau hinh", "phan van", "model", "mau"],
   },
   uncertain_interest: {
-    ruleId: "state_uncertain_keywords_v2",
+    ruleId: "state_uncertain_keywords_v3",
     ruleName: "uncertain-interest keyword detector",
     buyerMove: "clarify_interest",
-    keywords: ["them thong tin", "can nhac", "xac nhan", "xem thu", "tham khao", "chua chot", "phan van", "chi tiet"],
+    keywords: [
+      "them thong tin",
+      "can nhac",
+      "xem thu",
+      "tham khao",
+      "chua chot",
+      "phan van",
+      "chua ro",
+    ],
+  },
+};
+
+const BUYER_MOVE_RULES: Record<
+  string,
+  {
+    ruleId: string;
+    ruleName: string;
+    keywords: string[];
+  }
+> = {
+  price_probe: {
+    ruleId: "buyer_move_price_probe_v1",
+    ruleName: "buyer move price probe detector",
+    keywords: [
+      "gia",
+      "gia bao nhieu",
+      "bao nhieu tien",
+      "tam gia",
+      "gia net",
+      "gia cuoi",
+      "gia tot",
+      "bao gia",
+      "muc gia",
+      "ngan sach",
+      "chiet khau",
+      "giam",
+      "uu dai",
+    ],
+  },
+  delivery_probe: {
+    ruleId: "buyer_move_delivery_probe_v1",
+    ruleName: "buyer move delivery probe detector",
+    keywords: [
+      "con hang",
+      "het hang",
+      "co san hang",
+      "hang co san",
+      "san hang",
+      "ton kho",
+      "kho hang",
+      "ngay giao",
+      "thoi gian giao",
+      "bao gio giao",
+      "lich giao",
+      "van don",
+      "phieu giao",
+    ],
+  },
+  payment_probe: {
+    ruleId: "buyer_move_payment_probe_v1",
+    ruleName: "buyer move payment probe detector",
+    keywords: [
+      "thanh toan",
+      "vao tien",
+      "xac nhan thanh toan",
+      "chuyen khoan",
+      "dat coc",
+      "stk",
+    ],
+  },
+  comparison_probe: {
+    ruleId: "buyer_move_comparison_probe_v1",
+    ruleName: "buyer move comparison probe detector",
+    keywords: ["so sanh", "thong so", "cau hinh", "model", "ma", "mau", "bao hanh"],
+  },
+  clarify_interest: {
+    ruleId: "buyer_move_clarify_interest_v1",
+    ruleName: "buyer move clarify-interest detector",
+    keywords: ["them thong tin", "can nhac", "xem thu", "tham khao", "chua chot", "phan van", "chua ro"],
   },
 };
 
@@ -203,6 +322,10 @@ interface StateDetectionResult {
     | "no_nonzero_state_score"
     | "single_top_score"
     | "tie_preserved_state_rules_order";
+}
+
+interface BuyerMoveDetectionResult {
+  buyerMove: string | null;
 }
 
 interface EvaluationDiagnostics {
@@ -234,6 +357,8 @@ interface EvaluationDiagnostics {
     | "no_nonzero_state_score"
     | "single_top_score"
     | "tie_preserved_state_rules_order";
+  expected_state_is_tied_top: boolean;
+  buyer_move_matches_expected: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -686,8 +811,28 @@ function normalizeForStateMatch(value: string): string {
 
 function isVietnameseLike(reply: string): boolean {
   const t = normalizeForStateMatch(reply);
-  const markers = ["minh", "ban", "anh", "em", "gia", "giao", "thanh toan", "cho", "giup"];
-  return markers.some((marker) => t.includes(marker));
+  const strongMarkers = [
+    "minh",
+    "ban",
+    "anh",
+    "em",
+    "gia",
+    "giao",
+    "thanh toan",
+    "cho",
+    "giup",
+    "so sanh",
+    "gui",
+    "ma nay",
+    "mau nay",
+  ];
+  if (strongMarkers.some((marker) => t.includes(marker))) {
+    return true;
+  }
+
+  const hasOk = t.includes("ok");
+  const supportingMarkers = ["minh", "nhe", "giup", "ma nay", "mau nay", "so sanh", "gui"];
+  return hasOk && supportingMarkers.some((marker) => t.includes(marker));
 }
 
 function getEmptyStateScoreMap(): Record<RuntimeState, number> {
@@ -713,6 +858,24 @@ function getStateRank(
   return higherDistinctScores.size + 1;
 }
 
+function detectBuyerMove(reply: string): BuyerMoveDetectionResult {
+  const normalized = normalizeForStateMatch(reply);
+  let bestMove: string | null = null;
+  let bestScore = 0;
+
+  for (const [move, rule] of Object.entries(BUYER_MOVE_RULES)) {
+    const matchedScore = rule.keywords.filter((keyword) => normalized.includes(keyword)).length;
+    if (matchedScore > bestScore) {
+      bestMove = move;
+      bestScore = matchedScore;
+    }
+  }
+
+  return {
+    buyerMove: bestScore > 0 ? bestMove : null,
+  };
+}
+
 function detectReplyState(reply: string): StateDetectionResult {
   const normalized = normalizeForStateMatch(reply);
   const candidateStateScores = getEmptyStateScoreMap();
@@ -736,11 +899,12 @@ function detectReplyState(reply: string): StateDetectionResult {
         .map(([state]) => state)
     : [];
   const tieDetected = tiedTopStates.length > 1;
+  const buyerMoveDetection = detectBuyerMove(reply);
 
   if (!bestState) {
     return {
       detectedState: null,
-      buyerMove: null,
+      buyerMove: buyerMoveDetection.buyerMove,
       ruleId: "state_keyword_classifier_v2",
       ruleName: "normalized reply-state keyword classifier",
       candidateStateScores,
@@ -755,7 +919,7 @@ function detectReplyState(reply: string): StateDetectionResult {
 
   return {
     detectedState: bestState,
-    buyerMove: STATE_RULES[bestState].buyerMove,
+    buyerMove: buyerMoveDetection.buyerMove,
     ruleId: STATE_RULES[bestState].ruleId,
     ruleName: STATE_RULES[bestState].ruleName,
     candidateStateScores,
@@ -777,10 +941,12 @@ export function evaluateReply(
 ): {
   passed: boolean;
   violationKeys: string[];
+  warningKeys: string[];
   assistantStyleDetected: boolean;
   diagnostics: EvaluationDiagnostics;
 } {
   const violations: string[] = [];
+  const warnings: string[] = [];
   const t = normalizeForStateMatch(reply);
   const assistantHits = detectAssistantStyle(reply);
   const detected = detectReplyState(reply);
@@ -797,6 +963,10 @@ export function evaluateReply(
     .sort((a, b) => b - a);
   const secondScore = sortedScores.find((score) => score < detected.topScore) ?? 0;
   const stateScoreMargin = Math.max(0, detected.topScore - secondScore);
+  const expectedStateIsTiedTop =
+    detected.tieDetected && detected.tiedTopStates.includes(scenario.runtime_state);
+  const buyerMoveMatchesExpected =
+    detected.buyerMove !== null && detected.buyerMove === expectedBuyerMove;
 
   let mismatchReason: EvaluationDiagnostics["mismatch_reason"] = "none";
 
@@ -805,9 +975,14 @@ export function evaluateReply(
   if (detected.detectedState === null) {
     violations.push("state_signal_missing");
     mismatchReason = "no_state_keyword_detected";
+  } else if (expectedStateIsTiedTop) {
+    warnings.push("state_tie_order_bias");
   } else if (detected.detectedState !== scenario.runtime_state) {
     violations.push("state_mismatch");
     mismatchReason = "detected_other_state";
+  }
+  if (detected.buyerMove !== null && detected.buyerMove !== expectedBuyerMove) {
+    violations.push("buyer_move_mismatch");
   }
   if (assistantHits.length > 0) violations.push("assistant_style_detected");
   if (/(toi da mua|lan truoc toi|nhu lan truoc|lich su cua toi)/.test(t)) {
@@ -821,6 +996,7 @@ export function evaluateReply(
   return {
     passed: violations.length === 0,
     violationKeys: violations,
+    warningKeys: warnings,
     assistantStyleDetected: assistantHits.length > 0,
     diagnostics: {
       scenario_id: scenario.id,
@@ -848,8 +1024,30 @@ export function evaluateReply(
       score_gap_expected_vs_actual: scoreGapExpectedVsActual,
       state_score_margin: stateScoreMargin,
       classifier_decision_reason: detected.classifierDecisionReason,
+      expected_state_is_tied_top: expectedStateIsTiedTop,
+      buyer_move_matches_expected: buyerMoveMatchesExpected,
     },
   };
+}
+
+function buildScenarioSignalInstruction(scenario: Scenario): string {
+  switch (scenario.runtime_state) {
+    case "pricing_phase":
+      return [
+        "Include one short buyer-side pricing signal that explicitly references price, quote, budget, discount, or final price.",
+        "Do not drift into comparison-only wording unless pricing is also mentioned.",
+      ].join(" ");
+    case "logistics_phase":
+      return "Include one short buyer-side logistics signal about stock, delivery timing, or handoff document.";
+    case "research_phase":
+      return "Include one short buyer-side comparison or configuration signal.";
+    case "payment_phase":
+      return "Include one short buyer-side payment confirmation signal.";
+    case "uncertain_interest":
+      return "Include one short buyer-side uncertainty signal without sounding like support.";
+    default:
+      return "";
+  }
 }
 
 function createPromptBundle(record: SelectedRecord, scenario: Scenario) {
@@ -867,7 +1065,16 @@ function createPromptBundle(record: SelectedRecord, scenario: Scenario) {
     conversation_context: context,
   });
 
-  return session.getRuntimePrompt();
+  const bundle = session.getRuntimePrompt();
+  const scenarioSignalInstruction = buildScenarioSignalInstruction(scenario);
+  if (!scenarioSignalInstruction) {
+    return bundle;
+  }
+
+  return {
+    ...bundle,
+    fullPrompt: `${bundle.fullPrompt}\n\n[PHASE8C SCENARIO SIGNAL]\n${scenarioSignalInstruction}`,
+  };
 }
 
 async function withTimeout<T>(factory: () => Promise<T>, timeoutMs: number): Promise<T> {
@@ -939,6 +1146,12 @@ async function runEvaluationBatch(
   let violationsWithTieDetected = 0;
   let violationsWithExpectedStateTied = 0;
   let violationsWithActualStateStronger = 0;
+  let stateTieOrderBiasCount = 0;
+  let buyerMoveMismatchCount = 0;
+  let violationsWithStateTieOrderBias = 0;
+  let violationsWithBuyerMoveMismatch = 0;
+  let passWithStateTieWarningCount = 0;
+  let failedDueToBuyerMoveMismatchCount = 0;
   let contentLengthMin = Number.POSITIVE_INFINITY;
   let contentLengthMax = 0;
   let reasoningLengthMin = Number.POSITIVE_INFINITY;
@@ -1034,6 +1247,12 @@ async function runEvaluationBatch(
         if (evaluation.assistantStyleDetected) assistantStyleDetectedCount += 1;
         if (evaluation.passed) evaluatorPassedCount += 1;
         else evaluatorFailedCount += 1;
+        if (evaluation.warningKeys.includes("state_tie_order_bias")) {
+          stateTieOrderBiasCount += 1;
+        }
+        if (evaluation.violationKeys.includes("buyer_move_mismatch")) {
+          buyerMoveMismatchCount += 1;
+        }
         if (evaluation.diagnostics.tie_detected) tieDetectedCount += 1;
         if (evaluation.diagnostics.tied_top_states.length > 0) {
           const tiedKey = evaluation.diagnostics.tied_top_states.join("|");
@@ -1082,6 +1301,15 @@ async function runEvaluationBatch(
           ) {
             violationsWithActualStateStronger += 1;
           }
+          if (evaluation.warningKeys.includes("state_tie_order_bias")) {
+            violationsWithStateTieOrderBias += 1;
+          }
+          if (evaluation.violationKeys.includes("buyer_move_mismatch")) {
+            violationsWithBuyerMoveMismatch += 1;
+            failedDueToBuyerMoveMismatchCount += 1;
+          }
+        } else if (evaluation.warningKeys.includes("state_tie_order_bias")) {
+          passWithStateTieWarningCount += 1;
         }
 
         rows.push({
@@ -1095,6 +1323,7 @@ async function runEvaluationBatch(
           latency_ms: elapsed,
           evaluator_passed: evaluation.passed,
           evaluator_violation_count: evaluation.violationKeys.length,
+          evaluator_warning_count: evaluation.warningKeys.length,
           privacy_leak_detected: false,
           content_type: diagnostics?.content_type ?? "unknown",
           content_length: diagnostics?.content_length ?? 0,
@@ -1130,6 +1359,10 @@ async function runEvaluationBatch(
           score_gap_expected_vs_actual: evaluation.diagnostics.score_gap_expected_vs_actual,
           state_score_margin: evaluation.diagnostics.state_score_margin,
           classifier_decision_reason: evaluation.diagnostics.classifier_decision_reason,
+          expected_state_is_tied_top: evaluation.diagnostics.expected_state_is_tied_top,
+          buyer_move_matches_expected: evaluation.diagnostics.buyer_move_matches_expected,
+          warning_keys: evaluation.warningKeys,
+          violation_keys: evaluation.violationKeys,
         });
       }),
     );
@@ -1176,6 +1409,12 @@ async function runEvaluationBatch(
       violationsWithTieDetected,
       violationsWithExpectedStateTied,
       violationsWithActualStateStronger,
+      stateTieOrderBiasCount,
+      buyerMoveMismatchCount,
+      violationsWithStateTieOrderBias,
+      violationsWithBuyerMoveMismatch,
+      passWithStateTieWarningCount,
+      failedDueToBuyerMoveMismatchCount,
     },
   };
 }
@@ -1269,6 +1508,12 @@ async function main(): Promise<void> {
     violationsWithTieDetected: 0,
     violationsWithExpectedStateTied: 0,
     violationsWithActualStateStronger: 0,
+    stateTieOrderBiasCount: 0,
+    buyerMoveMismatchCount: 0,
+    violationsWithStateTieOrderBias: 0,
+    violationsWithBuyerMoveMismatch: 0,
+    passWithStateTieWarningCount: 0,
+    failedDueToBuyerMoveMismatchCount: 0,
   };
   let status = "dry_run_completed";
 
@@ -1332,6 +1577,12 @@ async function main(): Promise<void> {
     violations_with_tie_detected: diagnostics.violationsWithTieDetected,
     violations_with_expected_state_tied: diagnostics.violationsWithExpectedStateTied,
     violations_with_actual_state_stronger: diagnostics.violationsWithActualStateStronger,
+    state_tie_order_bias_count: diagnostics.stateTieOrderBiasCount,
+    buyer_move_mismatch_count: diagnostics.buyerMoveMismatchCount,
+    violations_with_state_tie_order_bias: diagnostics.violationsWithStateTieOrderBias,
+    violations_with_buyer_move_mismatch: diagnostics.violationsWithBuyerMoveMismatch,
+    pass_with_state_tie_warning_count: diagnostics.passWithStateTieWarningCount,
+    failed_due_to_buyer_move_mismatch_count: diagnostics.failedDueToBuyerMoveMismatchCount,
     prompt_or_reply_text_written: false,
   });
   writeJson(auditPath, {
@@ -1384,6 +1635,12 @@ async function main(): Promise<void> {
     violations_with_tie_detected: diagnostics.violationsWithTieDetected,
     violations_with_expected_state_tied: diagnostics.violationsWithExpectedStateTied,
     violations_with_actual_state_stronger: diagnostics.violationsWithActualStateStronger,
+    state_tie_order_bias_count: diagnostics.stateTieOrderBiasCount,
+    buyer_move_mismatch_count: diagnostics.buyerMoveMismatchCount,
+    violations_with_state_tie_order_bias: diagnostics.violationsWithStateTieOrderBias,
+    violations_with_buyer_move_mismatch: diagnostics.violationsWithBuyerMoveMismatch,
+    pass_with_state_tie_warning_count: diagnostics.passWithStateTieWarningCount,
+    failed_due_to_buyer_move_mismatch_count: diagnostics.failedDueToBuyerMoveMismatchCount,
     backup_path: backupPath,
     status,
     ai_called: aiCalled,
