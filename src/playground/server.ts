@@ -1199,6 +1199,7 @@ async function handleCustomerStartEnriched(bodyRaw: string, enriched: EnrichedPe
   const openingText = opening.text;
   const state = opening.state;
   const scenarioContext = opening.scenario_context;
+  const openingSourceType = opening.opening_source_type;
   const memorySlots = createEmptyMemory();
   let conversationProgress = createEmptyConversationProgress();
   const identityProfile = buildIdentityProfileFromPersona(
@@ -1244,6 +1245,13 @@ async function handleCustomerStartEnriched(bodyRaw: string, enriched: EnrichedPe
     assistant_style_detected: false, forbidden_phrase_matches: [],
     vietnamese_accent_warning: hasVietnameseAccentWarning(openingText), latency_ms: 0,
     safety_flags: turn.safety_flags, constraint_triggers: turn.constraint_triggers,
+    opening_source_type: openingSourceType,
+    product_grounding_used: opening.product_grounding_used,
+    candidate_count: opening.candidate_count,
+    selected_catalog_category: opening.selected_catalog_category,
+    selected_catalog_model_present: opening.selected_catalog_model_present,
+    selected_catalog_price_available: opening.selected_catalog_price_available,
+    selected_catalog_stock_status_present: opening.selected_catalog_stock_status_present,
     scenario_context: scenarioContext,
     memory_slots: memorySlots,
     selected_product_model: memorySlots.selected_product_model,

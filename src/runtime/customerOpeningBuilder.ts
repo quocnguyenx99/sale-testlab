@@ -1,4 +1,4 @@
-import { RuntimeState } from "./runtimeConstraints";
+﻿import { RuntimeState } from "./runtimeConstraints";
 import {
   FALLBACK_SCENARIO,
   PRODUCT_SCENARIOS,
@@ -6,6 +6,8 @@ import {
 } from "./productScenarioCatalog";
 import { inferVoiceGroup, VoiceGroup } from "./responseBank";
 import { buildIdentityProfileFromPersona } from "./conversationIdentity";
+import { searchProducts } from "./productKnowledge/productKnowledge";
+import { ProductKnowledgeItem } from "./productKnowledge/normalize_products";
 
 type OpeningPersona = {
   persona_id?: string;
@@ -17,6 +19,11 @@ type OpeningPersona = {
   purchase_context?: string;
   runtime_contexts?: string[];
 };
+
+export type OpeningSourceType =
+  | "catalog_grounded"
+  | "persona_template"
+  | "fallback_template";
 
 function normalize(input: string): string {
   return (input || "")
@@ -91,6 +98,66 @@ function hasPlaceholder(text: string): boolean {
   return false;
 }
 
+function dedupeProducts(items: ProductKnowledgeItem[]): ProductKnowledgeItem[] {
+  const seen = new Set<string>();
+  const unique: ProductKnowledgeItem[] = [];
+  for (const item of items) {
+    if (!item.id || seen.has(item.id)) continue;
+    seen.add(item.id);
+    unique.push(item);
+  }
+  return unique;
+}
+
+function buildCatalogQueries(persona: OpeningPersona, scenario: ProductScenario): string[] {
+  const queries: string[] = [];
+  const seen = new Set<string>();
+  const push = (value: string | undefined | null): void => {
+    const clean = (value || "").trim();
+    if (!clean) return;
+    const key = normalize(clean);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    queries.push(clean);
+  };
+
+  for (const category of persona.product_interest_categories || []) {
+    push(category);
+  }
+
+  return queries;
+}
+
+function getCatalogCandidates(persona: OpeningPersona, scenario: ProductScenario): ProductKnowledgeItem[] {
+  const candidates: ProductKnowledgeItem[] = [];
+  for (const query of buildCatalogQueries(persona, scenario)) {
+    const found = searchProducts(query, { limit: 3 });
+    candidates.push(...found);
+    const unique = dedupeProducts(candidates);
+    if (unique.length >= 3) {
+      return unique.slice(0, 3);
+    }
+  }
+  return dedupeProducts(candidates).slice(0, 3);
+}
+
+function chooseCatalogCandidate(
+  candidates: ProductKnowledgeItem[],
+  persona: OpeningPersona,
+  scenario: ProductScenario
+): ProductKnowledgeItem {
+  const seed = stableHash(`${persona.persona_id || "unknown_persona"}:${scenario.scenario_id}:catalog`);
+  return candidates[seed % candidates.length];
+}
+
+function buildGroundedScenario(base: ProductScenario, candidate: ProductKnowledgeItem): ProductScenario {
+  return {
+    ...base,
+    category: candidate.category1 || candidate.category2 || base.category,
+    scenario_product: candidate.display_name || base.scenario_product
+  };
+}
+
 const VOICE_OPENINGS_DEFAULT: Record<VoiceGroup, string[]> = {
   corporate_buyer: [
     "{self_cap} cần tìm {product} cho công ty. {sale_cap} tư vấn và gửi báo giá kèm thủ tục xuất hóa đơn VAT giúp {self} nhé.",
@@ -122,12 +189,12 @@ const VOICE_OPENINGS_DEFAULT: Record<VoiceGroup, string[]> = {
   ]
 };
 
-function renderOpening(text: string, identity: any, product: string): string {
+function renderOpening(text: string, identity: ReturnType<typeof buildIdentityProfileFromPersona>, product: string): string {
   const s = identity.customer_self_pronoun;
   const sCap = s.charAt(0).toUpperCase() + s.slice(1);
   const t = identity.customer_target_pronoun;
   const tCap = t.charAt(0).toUpperCase() + t.slice(1);
-  
+
   return text
     .replaceAll("{self}", s)
     .replaceAll("{sale}", t)
@@ -140,27 +207,51 @@ export function buildCustomerOpeningEnriched(persona: OpeningPersona): {
   text: string;
   state: RuntimeState;
   scenario_context: ProductScenario;
+  opening_source_type: OpeningSourceType;
+  product_grounding_used: boolean;
+  candidate_count: number;
+  selected_catalog_category: string | null;
+  selected_catalog_model_present: boolean;
+  selected_catalog_price_available: boolean;
+  selected_catalog_stock_status_present: boolean;
 } {
   const scenario = findScenario(persona);
   const seed = stableHash(`${persona.persona_id || "unknown_persona"}:${scenario.scenario_id}`);
-  let openingText = scenario.opening_templates[seed % scenario.opening_templates.length].normalize("NFC");
-
   const identity = buildIdentityProfileFromPersona(persona, undefined, false);
   const voiceGroup = inferVoiceGroup(persona);
+  const catalogCandidates = getCatalogCandidates(persona, scenario);
+  const selectedCandidate = catalogCandidates.length > 0
+    ? chooseCatalogCandidate(catalogCandidates, persona, scenario)
+    : null;
 
-  const self = identity.customer_self_pronoun;
-  let hasPronounMismatch = false;
-  if (self === "chị" && /\b(Anh|anh)\b/.test(openingText)) {
-    hasPronounMismatch = true;
-  }
-  if (self === "anh" && /\b(Chị|chị)\b/.test(openingText)) {
-    hasPronounMismatch = true;
-  }
+  let finalScenario = scenario;
+  let openingText = "";
+  let openingSourceType: OpeningSourceType = "persona_template";
 
-  if (hasPlaceholder(openingText) || hasPronounMismatch) {
-    const templates = VOICE_OPENINGS_DEFAULT[voiceGroup] || VOICE_OPENINGS_DEFAULT["standard"];
+  if (selectedCandidate) {
+    finalScenario = buildGroundedScenario(scenario, selectedCandidate);
+    const templates = VOICE_OPENINGS_DEFAULT[voiceGroup] || VOICE_OPENINGS_DEFAULT.standard;
     const template = templates[seed % templates.length];
-    openingText = renderOpening(template, identity, scenario.scenario_product);
+    openingText = renderOpening(template, identity, finalScenario.scenario_product);
+    openingSourceType = "catalog_grounded";
+  } else {
+    openingText = scenario.opening_templates[seed % scenario.opening_templates.length].normalize("NFC");
+
+    const self = identity.customer_self_pronoun;
+    let hasPronounMismatch = false;
+    if (self === "chị" && /\b(Anh|anh)\b/.test(openingText)) {
+      hasPronounMismatch = true;
+    }
+    if (self === "anh" && /\b(Chị|chị)\b/.test(openingText)) {
+      hasPronounMismatch = true;
+    }
+
+    if (hasPlaceholder(openingText) || hasPronounMismatch) {
+      const templates = VOICE_OPENINGS_DEFAULT[voiceGroup] || VOICE_OPENINGS_DEFAULT.standard;
+      const template = templates[seed % templates.length];
+      openingText = renderOpening(template, identity, scenario.scenario_product);
+      openingSourceType = "fallback_template";
+    }
   }
 
   let state: RuntimeState = "research_phase";
@@ -172,6 +263,13 @@ export function buildCustomerOpeningEnriched(persona: OpeningPersona): {
   return {
     text: openingText,
     state,
-    scenario_context: scenario
+    scenario_context: finalScenario,
+    opening_source_type: openingSourceType,
+    product_grounding_used: selectedCandidate !== null,
+    candidate_count: catalogCandidates.length,
+    selected_catalog_category: selectedCandidate?.category1 || selectedCandidate?.category2 || null,
+    selected_catalog_model_present: Boolean(selectedCandidate?.display_name),
+    selected_catalog_price_available: Boolean(selectedCandidate && (selectedCandidate.price_si !== null || selectedCandidate.price_le !== null)),
+    selected_catalog_stock_status_present: Boolean(selectedCandidate?.stock_status)
   };
 }
