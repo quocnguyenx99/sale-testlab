@@ -28,21 +28,39 @@ interface TrainingPersona {
 
 const baseDir = path.join(process.cwd(), "sale-testlab-data");
 
-// ────────────────────────────────────────────────
-// 1. Phrase polish map — deterministic replacements
-// ────────────────────────────────────────────────
+function formatDifficultyDistribution(diff: Record<string, number>): string {
+  return `easy=${diff.easy ?? 0} medium=${diff.medium ?? 0} hard=${diff.hard ?? 0}`;
+}
+
+function safeTopPersonaRows(
+  personas: Array<{
+    persona_id: string;
+    difficulty: string;
+    evidence_summary: { source_count: number; confidence: number };
+  }>,
+  limit = 5
+): string[] {
+  return personas.slice(0, limit).map(
+    (p, i) =>
+      `  ${i + 1}. ${p.persona_id} | difficulty=${p.difficulty} | source_count=${p.evidence_summary.source_count} | confidence=${p.evidence_summary.confidence}`
+  );
+}
+
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// 1. Phrase polish map Ã¢â‚¬â€ deterministic replacements
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 const PHRASE_FIXES: [string, string][] = [
   [
-    "xoay quanh mua hàng",
-    "xoay quanh việc tìm hiểu sản phẩm phù hợp"
+    "xoay quanh mua hÃƒÂ ng",
+    "xoay quanh viÃ¡Â»â€¡c tÃƒÂ¬m hiÃ¡Â»Æ’u sÃ¡ÂºÂ£n phÃ¡ÂºÂ©m phÃƒÂ¹ hÃ¡Â»Â£p"
   ],
   [
-    "kỳ vọng phản hồi nhanh về mặt vận hành.",
-    "kỳ vọng sale phản hồi nhanh, rõ ý."
+    "kÃ¡Â»Â³ vÃ¡Â»Âng phÃ¡ÂºÂ£n hÃ¡Â»â€œi nhanh vÃ¡Â»Â mÃ¡ÂºÂ·t vÃ¡ÂºÂ­n hÃƒÂ nh.",
+    "kÃ¡Â»Â³ vÃ¡Â»Âng sale phÃ¡ÂºÂ£n hÃ¡Â»â€œi nhanh, rÃƒÂµ ÃƒÂ½."
   ],
   [
-    "kỳ vọng phản hồi nhanh về mặt vận hành",
-    "kỳ vọng sale phản hồi nhanh, rõ ý"
+    "kÃ¡Â»Â³ vÃ¡Â»Âng phÃ¡ÂºÂ£n hÃ¡Â»â€œi nhanh vÃ¡Â»Â mÃ¡ÂºÂ·t vÃ¡ÂºÂ­n hÃƒÂ nh",
+    "kÃ¡Â»Â³ vÃ¡Â»Âng sale phÃ¡ÂºÂ£n hÃ¡Â»â€œi nhanh, rÃƒÂµ ÃƒÂ½"
   ],
 ];
 
@@ -78,9 +96,9 @@ function polishPersona(p: TrainingPersona): { persona: TrainingPersona; fixCount
   };
 }
 
-// ────────────────────────────────────────────────
-// 2. Merge two personas — keep stronger as base
-// ────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// 2. Merge two personas Ã¢â‚¬â€ keep stronger as base
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 function mergePersonas(base: TrainingPersona, secondary: TrainingPersona): TrainingPersona {
   const mergedId = `${base.persona_id}_merged`;
   const mergedSourceCount = base.evidence_summary.source_count + secondary.evidence_summary.source_count;
@@ -113,15 +131,15 @@ function mergePersonas(base: TrainingPersona, secondary: TrainingPersona): Train
   return merged;
 }
 
-// ────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 // 3. Ensure minimum closing conditions
-// ────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 const FALLBACK_CLOSING = [
-  "Sale xác nhận đúng nhu cầu hoặc model.",
-  "Sale báo giá rõ ràng.",
-  "Sale đưa bước tiếp theo cụ thể.",
-  "Sale xác nhận tồn kho hoặc thời gian giao.",
-  "Sale xử lý được câu hỏi về thanh toán/chứng từ/giao hàng.",
+  "Sale xÃƒÂ¡c nhÃ¡ÂºÂ­n Ã„â€˜ÃƒÂºng nhu cÃ¡ÂºÂ§u hoÃ¡ÂºÂ·c model.",
+  "Sale bÃƒÂ¡o giÃƒÂ¡ rÃƒÂµ rÃƒÂ ng.",
+  "Sale Ã„â€˜Ã†Â°a bÃ†Â°Ã¡Â»â€ºc tiÃ¡ÂºÂ¿p theo cÃ¡Â»Â¥ thÃ¡Â»Æ’.",
+  "Sale xÃƒÂ¡c nhÃ¡ÂºÂ­n tÃ¡Â»â€œn kho hoÃ¡ÂºÂ·c thÃ¡Â»Âi gian giao.",
+  "Sale xÃ¡Â»Â­ lÃƒÂ½ Ã„â€˜Ã†Â°Ã¡Â»Â£c cÃƒÂ¢u hÃ¡Â»Âi vÃ¡Â»Â thanh toÃƒÂ¡n/chÃ¡Â»Â©ng tÃ¡Â»Â«/giao hÃƒÂ ng.",
 ];
 
 function ensureMinClosing(p: TrainingPersona, minCount = 3): TrainingPersona {
@@ -134,11 +152,11 @@ function ensureMinClosing(p: TrainingPersona, minCount = 3): TrainingPersona {
   };
 }
 
-// ────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 // 4. Fix unsafe opening messages (move to likely_questions)
-// ────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 const UNSAFE_OPENERS = [
-  "Mình xin số tài khoản công ty bên bạn nhé.",
+  "MÃƒÂ¬nh xin sÃ¡Â»â€˜ tÃƒÂ i khoÃ¡ÂºÂ£n cÃƒÂ´ng ty bÃƒÂªn bÃ¡ÂºÂ¡n nhÃƒÂ©.",
 ];
 
 function fixOpeningMessages(p: TrainingPersona): TrainingPersona {
@@ -151,18 +169,18 @@ function fixOpeningMessages(p: TrainingPersona): TrainingPersona {
   };
 }
 
-// ────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 // 5. Rename numbered suffixes with behavioral qualifiers
-// ────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 const RENAME_MAP: Record<string, string> = {
-  "Khách hỏi giao hàng kết hợp khảo giá (2)": "Khách hỏi giao hàng kết hợp khảo giá — nhóm ít context hơn",
-  "Khách hỏi giao hàng kết hợp khảo giá (3)": "Khách hỏi giao hàng kết hợp khảo giá — nhóm tần suất cao",
-  "Khách so sánh nhiều model kết hợp khảo giá (2)": "Khách so sánh nhiều model kết hợp khảo giá — nhóm nghiên cứu kỹ",
+  "KhÃƒÂ¡ch hÃ¡Â»Âi giao hÃƒÂ ng kÃ¡ÂºÂ¿t hÃ¡Â»Â£p khÃ¡ÂºÂ£o giÃƒÂ¡ (2)": "KhÃƒÂ¡ch hÃ¡Â»Âi giao hÃƒÂ ng kÃ¡ÂºÂ¿t hÃ¡Â»Â£p khÃ¡ÂºÂ£o giÃƒÂ¡ Ã¢â‚¬â€ nhÃƒÂ³m ÃƒÂ­t context hÃ†Â¡n",
+  "KhÃƒÂ¡ch hÃ¡Â»Âi giao hÃƒÂ ng kÃ¡ÂºÂ¿t hÃ¡Â»Â£p khÃ¡ÂºÂ£o giÃƒÂ¡ (3)": "KhÃƒÂ¡ch hÃ¡Â»Âi giao hÃƒÂ ng kÃ¡ÂºÂ¿t hÃ¡Â»Â£p khÃ¡ÂºÂ£o giÃƒÂ¡ Ã¢â‚¬â€ nhÃƒÂ³m tÃ¡ÂºÂ§n suÃ¡ÂºÂ¥t cao",
+  "KhÃƒÂ¡ch so sÃƒÂ¡nh nhiÃ¡Â»Âu model kÃ¡ÂºÂ¿t hÃ¡Â»Â£p khÃ¡ÂºÂ£o giÃƒÂ¡ (2)": "KhÃƒÂ¡ch so sÃƒÂ¡nh nhiÃ¡Â»Âu model kÃ¡ÂºÂ¿t hÃ¡Â»Â£p khÃ¡ÂºÂ£o giÃƒÂ¡ Ã¢â‚¬â€ nhÃƒÂ³m nghiÃƒÂªn cÃ¡Â»Â©u kÃ¡Â»Â¹",
 };
 
-// ────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 // Main
-// ────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 async function run() {
   const monthArg = process.argv.find((a) => a.startsWith("--month="));
   const monthEnv = process.env.npm_config_month;
@@ -186,22 +204,23 @@ async function run() {
 
   const byName = new Map<string, TrainingPersona>(allPersonas.map(p => [p.name, p]));
 
-  // ── Merge pairs (defined by the audit) ──
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Merge pairs (defined by the audit) Ã¢â€â‚¬Ã¢â€â‚¬
   const mergePairs: [string, string][] = [
-    ["Khách hỏi giao hàng kết hợp khảo giá", "Khách khảo giá kết hợp hỏi giao hàng"],
-    ["Khách so sánh nhiều model kết hợp khảo giá", "Khách khảo giá kết hợp so sánh nhiều model"],
-    ["Khách nhắn tin liên tục kết hợp hỏi thanh toán/UNC", "Khách hỏi thanh toán/UNC kết hợp nhắn tin liên tục"],
+    ["KhÃƒÂ¡ch hÃ¡Â»Âi giao hÃƒÂ ng kÃ¡ÂºÂ¿t hÃ¡Â»Â£p khÃ¡ÂºÂ£o giÃƒÂ¡", "KhÃƒÂ¡ch khÃ¡ÂºÂ£o giÃƒÂ¡ kÃ¡ÂºÂ¿t hÃ¡Â»Â£p hÃ¡Â»Âi giao hÃƒÂ ng"],
+    ["KhÃƒÂ¡ch so sÃƒÂ¡nh nhiÃ¡Â»Âu model kÃ¡ÂºÂ¿t hÃ¡Â»Â£p khÃ¡ÂºÂ£o giÃƒÂ¡", "KhÃƒÂ¡ch khÃ¡ÂºÂ£o giÃƒÂ¡ kÃ¡ÂºÂ¿t hÃ¡Â»Â£p so sÃƒÂ¡nh nhiÃ¡Â»Âu model"],
+    ["KhÃƒÂ¡ch nhÃ¡ÂºÂ¯n tin liÃƒÂªn tÃ¡Â»Â¥c kÃ¡ÂºÂ¿t hÃ¡Â»Â£p hÃ¡Â»Âi thanh toÃƒÂ¡n/UNC", "KhÃƒÂ¡ch hÃ¡Â»Âi thanh toÃƒÂ¡n/UNC kÃ¡ÂºÂ¿t hÃ¡Â»Â£p nhÃ¡ÂºÂ¯n tin liÃƒÂªn tÃ¡Â»Â¥c"],
   ];
 
   const mergedSet = new Set<string>(); // names absorbed into another
-  const mergedMap: Record<string, string[]> = {}; // baseName → [absorbed]
+  const mergedMap: Record<string, string[]> = {}; // baseName Ã¢â€ â€™ [absorbed]
   const mergeCount = { count: 0 };
+  let missingMergePairCount = 0;
 
   for (const [baseName, secName] of mergePairs) {
     const base = byName.get(baseName);
     const sec = byName.get(secName);
     if (!base || !sec) {
-      console.warn(`[WARN] Merge pair not found: "${baseName}" + "${secName}"`);
+      missingMergePairCount++;
       continue;
     }
     const merged = mergePersonas(base, sec);
@@ -211,28 +230,28 @@ async function run() {
     mergeCount.count++;
   }
 
-  // ── Exclusion rules ──
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Exclusion rules Ã¢â€â‚¬Ã¢â€â‚¬
   const excludedNames = new Set<string>();
   const excludeReasons: Record<string, string> = {};
 
   // Always exclude these specific weak/duplicate ones
   const hardExclude = [
-    "Khách khảo giá kết hợp hỏi giao hàng",          // merged into #2
-    "Khách khảo giá kết hợp so sánh nhiều model",     // merged into #9
-    "Khách hỏi thanh toán/UNC kết hợp nhắn tin liên tục", // merged into #10
-    "Khách so sánh nhiều model kết hợp hỏi giao hàng (2)", // src=3, conf=33
-    "Khách khảo giá kết hợp so sánh nhiều model (2)",      // src=2, duplicate
-    "Khách hỏi giao hàng kết hợp so sánh nhiều model (2)", // src=2, duplicate
-    "Khách nhắn tin liên tục kết hợp so sánh nhiều model", // src=1
-    "Khách hỏi giao hàng kết hợp khảo giá (4)",            // src=1
-    "Khách hỏi thanh toán/UNC kết hợp trả lời ngắn gọn",   // conf=20, unsafe opener
+    "KhÃƒÂ¡ch khÃ¡ÂºÂ£o giÃƒÂ¡ kÃ¡ÂºÂ¿t hÃ¡Â»Â£p hÃ¡Â»Âi giao hÃƒÂ ng",          // merged into #2
+    "KhÃƒÂ¡ch khÃ¡ÂºÂ£o giÃƒÂ¡ kÃ¡ÂºÂ¿t hÃ¡Â»Â£p so sÃƒÂ¡nh nhiÃ¡Â»Âu model",     // merged into #9
+    "KhÃƒÂ¡ch hÃ¡Â»Âi thanh toÃƒÂ¡n/UNC kÃ¡ÂºÂ¿t hÃ¡Â»Â£p nhÃ¡ÂºÂ¯n tin liÃƒÂªn tÃ¡Â»Â¥c", // merged into #10
+    "KhÃƒÂ¡ch so sÃƒÂ¡nh nhiÃ¡Â»Âu model kÃ¡ÂºÂ¿t hÃ¡Â»Â£p hÃ¡Â»Âi giao hÃƒÂ ng (2)", // src=3, conf=33
+    "KhÃƒÂ¡ch khÃ¡ÂºÂ£o giÃƒÂ¡ kÃ¡ÂºÂ¿t hÃ¡Â»Â£p so sÃƒÂ¡nh nhiÃ¡Â»Âu model (2)",      // src=2, duplicate
+    "KhÃƒÂ¡ch hÃ¡Â»Âi giao hÃƒÂ ng kÃ¡ÂºÂ¿t hÃ¡Â»Â£p so sÃƒÂ¡nh nhiÃ¡Â»Âu model (2)", // src=2, duplicate
+    "KhÃƒÂ¡ch nhÃ¡ÂºÂ¯n tin liÃƒÂªn tÃ¡Â»Â¥c kÃ¡ÂºÂ¿t hÃ¡Â»Â£p so sÃƒÂ¡nh nhiÃ¡Â»Âu model", // src=1
+    "KhÃƒÂ¡ch hÃ¡Â»Âi giao hÃƒÂ ng kÃ¡ÂºÂ¿t hÃ¡Â»Â£p khÃ¡ÂºÂ£o giÃƒÂ¡ (4)",            // src=1
+    "KhÃƒÂ¡ch hÃ¡Â»Âi thanh toÃƒÂ¡n/UNC kÃ¡ÂºÂ¿t hÃ¡Â»Â£p trÃ¡ÂºÂ£ lÃ¡Â»Âi ngÃ¡ÂºÂ¯n gÃ¡Â»Ân",   // conf=20, unsafe opener
   ];
   for (const n of hardExclude) {
     excludedNames.add(n);
     excludeReasons[n] = "merged or weak/duplicate";
   }
 
-  // Auto-exclude: source ≤ 2 AND confidence < 50 (unless already merged in)
+  // Auto-exclude: source Ã¢â€°Â¤ 2 AND confidence < 50 (unless already merged in)
   for (const p of allPersonas) {
     if (!excludedNames.has(p.name) && !mergedSet.has(p.name)) {
       if (p.evidence_summary.source_count <= 2 && p.evidence_summary.confidence < 50) {
@@ -242,7 +261,7 @@ async function run() {
     }
   }
 
-  // ── Build final list ──
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Build final list Ã¢â€â‚¬Ã¢â€â‚¬
   let totalPolishFixes = 0;
   const renamedCount = { count: 0 };
   const cleanPersonas: TrainingPersona[] = [];
@@ -276,7 +295,7 @@ async function run() {
   // Sort by source count desc
   cleanPersonas.sort((a, b) => b.evidence_summary.source_count - a.evidence_summary.source_count);
 
-  // ── Write outputs ──
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Write outputs Ã¢â€â‚¬Ã¢â€â‚¬
   const personasPath = path.join(outputDir, "training_personas_clean.jsonl");
   const summaryPath = path.join(outputDir, "training_persona_clean_summary.json");
   const auditPath = path.join(outputDir, "training_persona_clean_audit.json");
@@ -326,36 +345,35 @@ async function run() {
   };
   await fs.promises.writeFile(auditPath, JSON.stringify(audit, null, 2) + "\n", "utf8");
 
-  // Console report
+  const personasStat = await fs.promises.stat(personasPath);
+  const summaryStat = await fs.promises.stat(summaryPath);
+  const auditStat = await fs.promises.stat(auditPath);
+
   console.log(`\nPhase 10C Cleanup Completed!`);
-  console.log(`Personas before: ${allPersonas.length} → after: ${cleanPersonas.length}`);
-  console.log(`Merged pairs:    ${mergeCount.count}`);
-  console.log(`Excluded:        ${excludedNames.size}`);
-  console.log(`Renamed:         ${renamedCount.count}`);
-  console.log(`Phrase fixes:    ${totalPolishFixes}`);
-  console.log(`\nDifficulty: Easy=${diffDist.easy} Medium=${diffDist.medium} Hard=${diffDist.hard}`);
-
-  console.log(`\nTop 10 Clean Personas:`);
-  cleanPersonas.slice(0, 10).forEach((p, i) => {
-    console.log(`  ${i + 1}. [${p.difficulty.toUpperCase()}] ${p.name} (src: ${p.evidence_summary.source_count}, conf: ${p.evidence_summary.confidence})`);
-  });
-
-  console.log(`\nSample — First 5 Full Configs:`);
-  cleanPersonas.slice(0, 5).forEach(p => {
-    console.log(`\n--- ${p.name} ---`);
-    console.log(`  Difficulty:       ${p.difficulty}`);
-    console.log(`  Source count:     ${p.evidence_summary.source_count}`);
-    console.log(`  Confidence:       ${p.evidence_summary.confidence}`);
-    console.log(`  Role prompt:      ${p.role_prompt.substring(0, 110)}...`);
-    console.log(`  Behavior rules:   ${p.behavior_rules.slice(0, 3).join(" | ")}`);
-    console.log(`  Opening messages: ${p.opening_messages.slice(0, 2).join(" | ")}`);
-    console.log(`  Training focus:   ${p.sale_training_focus.join(", ")}`);
-    console.log(`  Closing conds:    ${p.closing_conditions.length} items`);
-  });
-
-  console.log(`\n[AUDIT] Emotional label violations: ${audit.emotional_label_violations}`);
-  console.log(`[AUDIT] Raw content leak check: ${audit.raw_content_leak_check ? "PASS" : "FAIL"}`);
-  console.log(`[AUDIT] Remaining risk personas: ${audit.remaining_risks.length}`);
+  console.log(`month=${month}`);
+  console.log(`input_path=${inputPath}`);
+  console.log(`output_dir=${outputDir}`);
+  console.log(`input_training_personas=${allPersonas.length}`);
+  console.log(`output_clean_personas=${cleanPersonas.length}`);
+  console.log(`output_clean_personas_size=${personasStat.size}`);
+  console.log(`summary_path=${summaryPath}`);
+  console.log(`summary_size=${summaryStat.size}`);
+  console.log(`audit_path=${auditPath}`);
+  console.log(`audit_size=${auditStat.size}`);
+  console.log(`merged_pairs=${mergeCount.count}`);
+  console.log(`missing_merge_pair_count=${missingMergePairCount}`);
+  console.log(`excluded_personas=${excludedNames.size}`);
+  console.log(`renamed_personas=${renamedCount.count}`);
+  console.log(`phrase_fixes=${totalPolishFixes}`);
+  console.log(`difficulty_distribution=${formatDifficultyDistribution(diffDist)}`);
+  console.log(`recommended_playground_persona_count=${recommended.length}`);
+  console.log(`top_training_focus_count=${topFocus.length}`);
+  console.log(`weak_personas_removed=${audit.weak_personas_removed}`);
+  console.log(`duplicate_clusters_resolved=${audit.duplicate_clusters_resolved}`);
+  console.log(`emotional_label_violations=${audit.emotional_label_violations}`);
+  console.log(`raw_content_leak_check=${audit.raw_content_leak_check ? "PASS" : "FAIL"}`);
+  console.log(`remaining_risk_persona_count=${audit.remaining_risks.length}`);
+  console.log(`top_persona_rows:`);
+  safeTopPersonaRows(cleanPersonas).forEach((line) => console.log(line));
 }
-
 run().catch(e => { console.error("Phase 10C Error:", e); process.exit(1); });
