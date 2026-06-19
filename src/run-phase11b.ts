@@ -28,6 +28,15 @@ interface CliArgs {
   month: string;
 }
 
+type EndpointResult<T> = {
+  ok: boolean;
+  status: number | null;
+  latency_ms: number | null;
+  body: T | null;
+  error_code: string | null;
+  local_only: boolean;
+};
+
 function parseArgs(argv: string[]): CliArgs {
   let month = process.env.npm_config_month?.trim() ?? "";
   for (let i = 0; i < argv.length; i += 1) {
@@ -60,12 +69,6 @@ function writeJson(filePath: string, value: unknown): void {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-function maskText(v: string): string {
-  if (!v) return "";
-  const t = v.replace(/\s+/g, " ").trim();
-  return t.length <= 48 ? t : `${t.slice(0, 45)}...`;
-}
-
 function safeArray<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
 }
@@ -84,14 +87,49 @@ function normalize(v: string): string {
     .trim();
 }
 
-async function tryEndpoint<T>(url: string, init?: RequestInit): Promise<T | null> {
+async function tryEndpoint<T>(url: string, init?: RequestInit): Promise<EndpointResult<T>> {
+  const startedAt = Date.now();
+  const localOnly = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(url);
   try {
     const resp = await fetch(url, init);
-    if (!resp.ok) return null;
-    return (await resp.json()) as T;
+    const latency_ms = Date.now() - startedAt;
+    if (!resp.ok) {
+      return {
+        ok: false,
+        status: resp.status,
+        latency_ms,
+        body: null,
+        error_code: `http_${resp.status}`,
+        local_only: localOnly
+      };
+    }
+    return {
+      ok: true,
+      status: resp.status,
+      latency_ms,
+      body: (await resp.json()) as T,
+      error_code: null,
+      local_only: localOnly
+    };
   } catch {
-    return null;
+    return {
+      ok: false,
+      status: null,
+      latency_ms: Date.now() - startedAt,
+      body: null,
+      error_code: "network_error",
+      local_only: localOnly
+    };
   }
+}
+
+function responseLengthBucket(value: string): string {
+  const len = value.trim().length;
+  if (len === 0) return "empty";
+  if (len <= 40) return "short";
+  if (len <= 120) return "medium";
+  if (len <= 240) return "long";
+  return "very_long";
 }
 
 function scoreFromIssueCount(base: number, issues: number, weight: number): number {
@@ -180,14 +218,16 @@ async function main(): Promise<void> {
   const duplicatePersonaNames = [...nameCount.entries()].filter(([, c]) => c > 1).length;
   const duplicateDisplayIdentities = [...displayIdentityCount.entries()].filter(([, c]) => c > 1).length;
 
-  const apiPersonas = await tryEndpoint<{
+  const apiPersonasResp = await tryEndpoint<{
     count: number;
     personas: PersonaApiItem[];
     recommended_ids?: string[];
   }>("http://localhost:3009/api/personas");
 
-  const version = await tryEndpoint<Record<string, unknown>>("http://localhost:3009/api/version");
-  const endpointAvailable = !!apiPersonas;
+  const versionResp = await tryEndpoint<Record<string, unknown>>("http://localhost:3009/api/version");
+  const apiPersonas = apiPersonasResp.body;
+  const version = versionResp.body;
+  const endpointAvailable = apiPersonasResp.ok;
   const recommendedShownFirst = !!(
     apiPersonas &&
     apiPersonas.recommended_ids &&
@@ -212,35 +252,83 @@ async function main(): Promise<void> {
   let customerReplyQuality = 0;
   if (apiPersonas && apiPersonas.personas.length > 0) {
     const personaId = apiPersonas.personas[0].persona_id;
-    const start = await tryEndpoint<Record<string, unknown>>("http://localhost:3009/api/customer-start", {
+    const startResp = await tryEndpoint<Record<string, unknown>>("http://localhost:3009/api/customer-start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ personaId })
     });
+    const start = startResp.body;
 
     let sessionId = String(start?.sessionId ?? "");
-    if (start) {
+    if (startResp.ok && start) {
       endpointTests.push({
         test: "customer_start",
-        persona: personaId,
-        customer_reply: maskText(String(start.reply ?? "")),
-        inferred_state: start.runtime_state ?? null,
+        endpoint: "/api/customer-start",
+        persona_id: personaId,
+        pass: true,
+        status: startResp.status,
+        latency_ms: startResp.latency_ms ?? start.latency_ms ?? null,
+        local_only: startResp.local_only,
+        response_present: typeof start.reply === "string" && String(start.reply).trim().length > 0,
+        response_length_bucket: responseLengthBucket(String(start.reply ?? "")),
+        has_required_fields: Boolean(start.sessionId && start.runtime_state && start.reply_source),
+        runtime_state_present: Boolean(start.runtime_state),
         reply_source: start.reply_source ?? null,
-        latency_ms: start.latency_ms ?? null,
         assistant_style_detected: start.assistant_style_detected ?? null,
-        vietnamese_accent_warning: start.vietnamese_accent_warning ?? null
+        vietnamese_accent_warning: start.vietnamese_accent_warning ?? null,
+        error_code: startResp.error_code
+      });
+    } else {
+      endpointTests.push({
+        test: "customer_start",
+        endpoint: "/api/customer-start",
+        persona_id: personaId,
+        pass: false,
+        status: startResp.status,
+        latency_ms: startResp.latency_ms,
+        local_only: startResp.local_only,
+        response_present: false,
+        response_length_bucket: "empty",
+        has_required_fields: false,
+        runtime_state_present: false,
+        reply_source: null,
+        assistant_style_detected: null,
+        vietnamese_accent_warning: null,
+        error_code: startResp.error_code
       });
     }
 
     let good = 0;
     let total = 0;
-    for (const msg of sampleMessages) {
-      const row = await tryEndpoint<Record<string, unknown>>("http://localhost:3009/api/chat", {
+    for (const [index, msg] of sampleMessages.entries()) {
+      const rowResp = await tryEndpoint<Record<string, unknown>>("http://localhost:3009/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId: sessionId || undefined, personaId, message: msg })
       });
-      if (!row) continue;
+      const row = rowResp.body;
+      if (!rowResp.ok || !row) {
+        endpointTests.push({
+          test: "chat",
+          endpoint: "/api/chat",
+          persona_id: personaId,
+          scenario_id: index + 1,
+          pass: false,
+          status: rowResp.status,
+          latency_ms: rowResp.latency_ms,
+          local_only: rowResp.local_only,
+          response_present: false,
+          response_length_bucket: "empty",
+          has_required_fields: false,
+          runtime_state_present: false,
+          reply_source: null,
+          assistant_style_detected: null,
+          vietnamese_accent_warning: null,
+          reply_matches_persona_basic: false,
+          error_code: rowResp.error_code
+        });
+        continue;
+      }
       sessionId = String(row.sessionId ?? sessionId);
       total += 1;
       const assistantDetected = !!row.assistant_style_detected;
@@ -250,15 +338,22 @@ async function main(): Promise<void> {
       if (looksCustomer && !assistantDetected) good += 1;
       endpointTests.push({
         test: "chat",
-        sale_message: maskText(msg),
-        persona: personaId,
-        customer_reply: maskText(reply),
-        inferred_state: row.runtime_state ?? null,
+        endpoint: "/api/chat",
+        persona_id: personaId,
+        scenario_id: index + 1,
+        pass: true,
+        status: rowResp.status,
+        latency_ms: rowResp.latency_ms ?? row.latency_ms ?? null,
+        local_only: rowResp.local_only,
+        response_present: reply.trim().length > 0,
+        response_length_bucket: responseLengthBucket(reply),
+        has_required_fields: Boolean(row.sessionId && row.runtime_state && row.reply_source),
+        runtime_state_present: Boolean(row.runtime_state),
         reply_source: row.reply_source ?? null,
-        latency_ms: row.latency_ms ?? null,
         assistant_style_detected: assistantDetected,
         vietnamese_accent_warning: accentWarn,
-        reply_matches_persona_basic: looksCustomer
+        reply_matches_persona_basic: looksCustomer,
+        error_code: rowResp.error_code
       });
     }
     customerReplyQuality = total > 0 ? Math.round((good / total) * 100) : 0;
@@ -333,6 +428,12 @@ async function main(): Promise<void> {
     endpoint_tests: {
       endpoint_available: endpointAvailable,
       tested_url: "http://localhost:3009",
+      personas_status: apiPersonasResp.status,
+      personas_latency_ms: apiPersonasResp.latency_ms,
+      personas_local_only: apiPersonasResp.local_only,
+      version_status: versionResp.status,
+      version_latency_ms: versionResp.latency_ms,
+      version_local_only: versionResp.local_only,
       records: endpointTests
     },
     scores: {
