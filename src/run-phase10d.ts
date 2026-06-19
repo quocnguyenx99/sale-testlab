@@ -20,6 +20,20 @@ function pick<T>(arr: T[], index: number): T {
   return arr[index % arr.length];
 }
 
+function safeTopPersonaRows(
+  personas: Array<{
+    persona_id: string;
+    difficulty: string;
+    evidence_summary: { source_count: number; confidence: number };
+  }>,
+  limit = 5
+): string[] {
+  return personas.slice(0, limit).map(
+    (p, i) =>
+      `  ${i + 1}. ${p.persona_id} | difficulty=${p.difficulty} | source_count=${p.evidence_summary.source_count} | confidence=${p.evidence_summary.confidence}`
+  );
+}
+
 async function run() {
   const monthArg = process.argv.find(a => a.startsWith("--month="));
   const monthEnv = process.env.npm_config_month;
@@ -87,7 +101,7 @@ async function run() {
     });
   }
 
-  // ── Write outputs ──
+  // â”€â”€ Write outputs â”€â”€
   const personasPath = path.join(outputDir, "training_personas_enriched.jsonl");
   const summaryPath = path.join(outputDir, "training_persona_identity_summary.json");
   const auditPath = path.join(outputDir, "training_persona_identity_audit.json");
@@ -156,36 +170,34 @@ async function run() {
   };
   await fs.promises.writeFile(auditPath, JSON.stringify(audit, null, 2) + "\n", "utf8");
 
-  // Console report
+  const personasStat = await fs.promises.stat(personasPath);
+  const summaryStat = await fs.promises.stat(summaryPath);
+  const auditStat = await fs.promises.stat(auditPath);
+
   console.log(`\nPhase 10D Identity Enrichment Completed!`);
-  console.log(`Total enriched personas: ${enriched.length}`);
-
-  console.log(`\nBuyer Role Distribution:`);
-  Object.entries(buyerRoleDist).sort((a,b)=>b[1]-a[1]).forEach(([r,c])=>console.log(`  ${r}: ${c}`));
-
-  console.log(`\nProduct Category Distribution:`);
-  Object.entries(productDist).sort((a,b)=>b[1]-a[1]).forEach(([p,c])=>console.log(`  ${p}: ${c}`));
-
-  console.log(`\nOrganization Type Distribution:`);
-  Object.entries(orgTypeDist).sort((a,b)=>b[1]-a[1]).forEach(([o,c])=>console.log(`  ${o}: ${c}`));
-
-  console.log(`\nSample 10 Enriched Personas:`);
-  enriched.slice(0,10).forEach((p,i)=>{
-    console.log(`  ${i+1}. [${p.difficulty.toUpperCase()}] ${p.display_name} | ${p.buyer_role} @ ${p.organization_type}`);
-    console.log(`       → "${p.name}"`);
-    console.log(`       → Products: ${p.product_interest_categories.join(", ")}`);
-  });
-
-  console.log(`\nRecommended Playground Personas (${recommended.length}):`);
-  recommended.forEach((id,i)=>{
-    const p = enriched.find(x=>x.persona_id===id)!;
-    console.log(`  ${i+1}. ${p?.display_name} — ${p?.name} (src: ${p?.evidence_summary.source_count})`);
-  });
-
-  console.log(`\n[AUDIT] Synthetic names: ${audit.synthetic_name_count}/${audit.total_personas}`);
-  console.log(`[AUDIT] Identity safety violations: ${violations.length}`);
-  console.log(`[AUDIT] Emotional label violations: ${audit.emotional_label_violations}`);
-  console.log(`[AUDIT] Raw content leak check: ${audit.raw_content_leak_check}`);
+  console.log(`month=${month}`);
+  console.log(`input_path=${inputPath}`);
+  console.log(`output_dir=${outputDir}`);
+  console.log(`input_clean_personas=${personas.length}`);
+  console.log(`output_enriched_personas=${enriched.length}`);
+  console.log(`output_enriched_personas_size=${personasStat.size}`);
+  console.log(`summary_path=${summaryPath}`);
+  console.log(`summary_size=${summaryStat.size}`);
+  console.log(`audit_path=${auditPath}`);
+  console.log(`audit_size=${auditStat.size}`);
+  console.log(`recommended_playground_persona_count=${recommended.length}`);
+  console.log(`identity_example_count=${identityExamples.length}`);
+  console.log(`synthetic_name_count=${audit.synthetic_name_count}`);
+  console.log(`missing_identity_count=${audit.missing_identity_count}`);
+  console.log(`real_name_risk_count=${audit.real_name_risk_count}`);
+  console.log(`identity_safety_violation_count=${violations.length}`);
+  console.log(`emotional_label_violations=${audit.emotional_label_violations}`);
+  console.log(`raw_content_leak_check=${audit.raw_content_leak_check}`);
+  console.log(`buyer_role_distribution_count=${Object.keys(buyerRoleDist).length}`);
+  console.log(`organization_type_distribution_count=${Object.keys(orgTypeDist).length}`);
+  console.log(`product_category_distribution_count=${Object.keys(productDist).length}`);
+  console.log(`salutation_style_distribution_count=${Object.keys(salutationDist).length}`);
+  console.log(`top_persona_rows:`);
+  safeTopPersonaRows(enriched).forEach((line) => console.log(line));
 }
-
 run().catch(e => { console.error("Phase 10D Error:", e); process.exit(1); });
