@@ -13,3 +13,7 @@ sale-testlab-data/
 logs/
 *.jsonl
 src/runtime/productKnowledge/product_knowledge.compact.json
+
+# Local Playwright/MCP smoke-test artifacts
+/.playwright-mcp/
+/playground-*.png
