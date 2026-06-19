@@ -5,6 +5,28 @@ import { buildTrainingPersonas, Archetype } from "./pipeline/trainingPersonaBuil
 
 const baseDir = path.join(process.cwd(), "sale-testlab-data");
 
+function formatDifficultyDistribution(diff: Record<string, number> | undefined): string {
+  if (!diff) return "easy=0 medium=0 hard=0";
+  return `easy=${diff.easy ?? 0} medium=${diff.medium ?? 0} hard=${diff.hard ?? 0}`;
+}
+
+function safeTopPersonaRows(
+  personas: Array<{
+    persona_id: string;
+    difficulty: string;
+    evidence_summary: { source_count: number };
+  }>,
+  limit = 5
+): string[] {
+  return [...personas]
+    .sort((a, b) => b.evidence_summary.source_count - a.evidence_summary.source_count)
+    .slice(0, limit)
+    .map(
+      (p, index) =>
+        `  ${index + 1}. ${p.persona_id} | difficulty=${p.difficulty} | source_count=${p.evidence_summary.source_count}`
+    );
+}
+
 async function run() {
   const monthArg = process.argv.find((a) => a.startsWith("--month="));
   const monthEnv = process.env.npm_config_month;
@@ -54,43 +76,31 @@ async function run() {
   await fs.promises.writeFile(summaryPath, JSON.stringify(result.summary, null, 2) + "\n", "utf8");
   await fs.promises.writeFile(auditPath, JSON.stringify(result.audit, null, 2) + "\n", "utf8");
 
-  // Console report
+  const personasStat = await fs.promises.stat(personasPath);
+  const summaryStat = await fs.promises.stat(summaryPath);
+  const auditStat = await fs.promises.stat(auditPath);
   console.log(`\nPhase 10 Training Persona Builder Completed!`);
-  console.log(`Input Archetypes: ${archetypes.length}`);
-  console.log(`Output Training Personas: ${result.personas.length}`);
+  console.log(`month=${month}`);
+  console.log(`input_path=${inputPath}`);
+  console.log(`output_dir=${outputDir}`);
+  console.log(`input_archetypes=${archetypes.length}`);
+  console.log(`output_training_personas=${result.personas.length}`);
+  console.log(`output_training_personas_size=${personasStat.size}`);
+  console.log(`summary_path=${summaryPath}`);
+  console.log(`summary_size=${summaryStat.size}`);
+  console.log(`audit_path=${auditPath}`);
+  console.log(`audit_size=${auditStat.size}`);
 
   const diff = (result.summary as any).difficulty_distribution;
-  console.log(`\nDifficulty Distribution:`);
-  console.log(`  Easy:   ${diff.easy}`);
-  console.log(`  Medium: ${diff.medium}`);
-  console.log(`  Hard:   ${diff.hard}`);
-
-  console.log(`\nTop 10 Training Personas:`);
-  const sorted = [...result.personas].sort((a, b) => b.evidence_summary.source_count - a.evidence_summary.source_count);
-  sorted.slice(0, 10).forEach((p, i) => {
-    console.log(`  ${i + 1}. [${p.difficulty.toUpperCase()}] ${p.name} (source: ${p.evidence_summary.source_count})`);
-  });
-
   const audit = result.audit as any;
-  console.log(`\nMapping Coverage: ${audit.mapping_coverage_rate}%`);
-  if (audit.unmapped_patterns.length > 0) {
-    console.warn(`[WARN] Unmapped patterns: ${audit.unmapped_patterns.join(", ")}`);
-  }
-
-  console.log(`\nSample First 5 Training Persona Configs:`);
-  result.personas.slice(0, 5).forEach(p => {
-    console.log(`\n--- ${p.name} ---`);
-    console.log(`  ID:             ${p.persona_id}`);
-    console.log(`  Difficulty:     ${p.difficulty}`);
-    console.log(`  Role Prompt:    ${p.role_prompt.substring(0, 100)}...`);
-    console.log(`  Behavior Rules: ${p.behavior_rules[0] ?? "N/A"}`);
-    console.log(`  Opening Msg:    ${p.opening_messages[0] ?? "N/A"}`);
-    console.log(`  Training Focus: ${p.sale_training_focus.join(", ")}`);
-  });
-
-  console.log(`\n[AUDIT] Emotional label violations: ${audit.emotional_label_violations}`);
-  console.log(`[AUDIT] Raw content leak check: ${audit.raw_content_leak_check ? "PASS" : "FAIL"}`);
-  console.log(`[AUDIT] Personas with fallback rules: ${audit.personas_with_fallback_rules}`);
+  console.log(`difficulty_distribution=${formatDifficultyDistribution(diff)}`);
+  console.log(`mapping_coverage_rate=${audit.mapping_coverage_rate}%`);
+  console.log(`unmapped_pattern_count=${Array.isArray(audit.unmapped_patterns) ? audit.unmapped_patterns.length : 0}`);
+  console.log(`personas_with_fallback_rules=${audit.personas_with_fallback_rules}`);
+  console.log(`emotional_label_violations=${audit.emotional_label_violations}`);
+  console.log(`raw_content_leak_check=${audit.raw_content_leak_check ? "PASS" : "FAIL"}`);
+  console.log(`top_persona_rows:`);
+  safeTopPersonaRows(result.personas).forEach((line) => console.log(line));
 }
 
 run().catch((e) => {
