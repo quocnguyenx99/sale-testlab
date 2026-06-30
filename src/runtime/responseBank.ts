@@ -1,4 +1,8 @@
-import { ConversationIdentityProfile } from "./conversationIdentity";
+import {
+  ConversationIdentityProfile,
+  detectBuyerRoleViolation,
+  repairBuyerRoleViolation
+} from "./conversationIdentity";
 import { ConversationProgress, ConversationTopic, TOPIC_ORDER } from "./conversationProgressTracker";
 
 export interface ResponseBankInput {
@@ -71,7 +75,7 @@ const BANK: TopicVariants = {
   price: [
     { variant_id: "price_1", text: "{self} muốn chốt mức giá rõ hơn cho mẫu này, {sale} báo giúp {self} thêm một mức để so sánh nhé." },
     { variant_id: "price_2", text: "{self} cần thêm mức giá cụ thể để so sánh, {sale} cho {self} xin thêm một option nữa nhé." },
-    { variant_id: "price_3", text: "Giá này nếu còn linh hoạt thì {self} sẽ dễ chốt hơn, {sale} hỗ trợ {self} thêm chút nhé." },
+    { variant_id: "price_3", text: "Giá này nếu còn linh hoạt thì {self} sẽ dễ chốt hơn, {sale} báo giúp {self} thêm một mức nhé." },
     { variant_id: "price_4", text: "{self} đang ưu tiên một mức giá dễ cân đối hơn, {sale} gửi giúp {self} khung giá phù hợp nhé." }
   ],
   stock: [
@@ -108,7 +112,7 @@ const BANK: TopicVariants = {
     { variant_id: "next_step_1", text: "Nếu ổn rồi thì {self} chốt bước tiếp theo luôn {sale} nhé." },
     { variant_id: "next_step_2", text: "{self} muốn đi sang bước tiếp theo cho gọn." },
     { variant_id: "next_step_3", text: "{self} đã nắm đủ phần chính, giờ mình chốt tiếp nhé." },
-    { variant_id: "next_step_4", text: "{sale} hỗ trợ {self} bước cuối để chốt nhanh hơn nhé." }
+    { variant_id: "next_step_4", text: "{sale} báo giúp {self} bước tiếp theo để {self} chốt nhanh hơn nhé." }
   ]
 };
 
@@ -297,6 +301,16 @@ function gateResponseBankResult(result: ResponseBankResult, input: ResponseBankI
       exhausted_variants: result.exhausted_variants
     };
   }
+
+  const buyerRoleViolation = detectBuyerRoleViolation(result.reply, input.identity);
+  if (buyerRoleViolation.violated) {
+    return {
+      reply: repairBuyerRoleViolation(result.reply, input.identity),
+      variant_id: `${result.variant_id}_buyer_role_lock`,
+      topic_used: result.topic_used,
+      exhausted_variants: result.exhausted_variants
+    };
+  }
   return result;
 }
 
@@ -316,8 +330,9 @@ function buildResponseBankReplyInternal(input: ResponseBankInput): ResponseBankR
       const s = input.identity.customer_self_pronoun;
       const sCap = s.charAt(0).toUpperCase() + s.slice(1);
       const t = input.identity.customer_target_pronoun;
+      const tCap = t.charAt(0).toUpperCase() + t.slice(1);
       return {
-        reply: `${sCap} cần ${t} gửi giúp ${s} báo giá công ty kèm thông tin tài khoản và thủ tục xuất hóa đơn VAT để trình duyệt nhé.`,
+        reply: `${tCap} gửi ${s} báo giá công ty với thông tin hóa đơn giúp ${s} nhé.`,
         variant_id: `voice_corporate_fallback`,
         topic_used: fallbackTopic,
         exhausted_variants: false
@@ -326,10 +341,10 @@ function buildResponseBankReplyInternal(input: ResponseBankInput): ResponseBankR
   } else if (voiceGroup === "price_sensitive") {
     if (fallbackTopic === "price") {
       const s = input.identity.customer_self_pronoun;
-      const sCap = s.charAt(0).toUpperCase() + s.slice(1);
       const t = input.identity.customer_target_pronoun;
+      const tCap = t.charAt(0).toUpperCase() + t.slice(1);
       return {
-        reply: `Giá này bên ${t} còn mức chiết khấu nào tốt hơn nữa không? Nếu ổn thì gửi ${s} báo giá để xem chốt luôn nhé.`,
+        reply: `${tCap} xem giúp ${s} còn mức giá nào dễ chốt hơn không nhé.`,
         variant_id: `voice_price_sensitive_fallback`,
         topic_used: fallbackTopic,
         exhausted_variants: false
@@ -338,10 +353,10 @@ function buildResponseBankReplyInternal(input: ResponseBankInput): ResponseBankR
   } else if (voiceGroup === "urgent_buyer") {
     if (fallbackTopic === "payment" || fallbackTopic === "next_step" || fallbackTopic === "stock") {
       const s = input.identity.customer_self_pronoun;
-      const sCap = s.charAt(0).toUpperCase() + s.slice(1);
       const t = input.identity.customer_target_pronoun;
+      const tCap = t.charAt(0).toUpperCase() + t.slice(1);
       return {
-        reply: `Nếu mẫu này còn sẵn hàng thì ${t} giữ trước giúp ${s} nhé, gửi ${s} thông tin thanh toán để ${s} chuyển khoản xử lý sớm nha.`,
+        reply: `${tCap} báo giúp ${s} mẫu này còn hàng không, nếu ổn thì gửi ${s} cách thanh toán nhé.`,
         variant_id: `voice_urgent_fallback`,
         topic_used: fallbackTopic,
         exhausted_variants: false
@@ -350,10 +365,10 @@ function buildResponseBankReplyInternal(input: ResponseBankInput): ResponseBankR
   } else if (voiceGroup === "reseller") {
     if (fallbackTopic === "price" || fallbackTopic === "next_step") {
       const s = input.identity.customer_self_pronoun;
-      const sCap = s.charAt(0).toUpperCase() + s.slice(1);
       const t = input.identity.customer_target_pronoun;
+      const tCap = t.charAt(0).toUpperCase() + t.slice(1);
       return {
-        reply: `Bên đại lý của ${s} lấy số lượng thì có chính sách giá sỉ đặc biệt không ${t}? Gửi ${s} báo giá chi tiết nhé.`,
+        reply: `${tCap} báo giúp ${s} mức giá sỉ theo số lượng nhé.`,
         variant_id: `voice_reseller_fallback`,
         topic_used: fallbackTopic,
         exhausted_variants: false
@@ -362,10 +377,10 @@ function buildResponseBankReplyInternal(input: ResponseBankInput): ResponseBankR
   } else if (voiceGroup === "internal_it") {
     if (fallbackTopic === "configuration" || fallbackTopic === "product_model") {
       const s = input.identity.customer_self_pronoun;
-      const sCap = s.charAt(0).toUpperCase() + s.slice(1);
       const t = input.identity.customer_target_pronoun;
+      const tCap = t.charAt(0).toUpperCase() + t.slice(1);
       return {
-        reply: `${sCap} bên kỹ thuật nội bộ cần kiểm tra kỹ cấu hình chi tiết và tính tương thích, ${t} gửi thông số chuẩn giúp ${s} nhé.`,
+        reply: `${tCap} gửi ${s} thông số chuẩn để ${s} kiểm tra tương thích nhé.`,
         variant_id: `voice_it_fallback`,
         topic_used: fallbackTopic,
         exhausted_variants: false

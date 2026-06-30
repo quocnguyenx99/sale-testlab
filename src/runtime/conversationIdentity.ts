@@ -503,6 +503,11 @@ export interface CustomerVoiceGuardResult {
   customer_voice_guard_reason: string | null;
 }
 
+export interface BuyerRoleViolationResult {
+  violated: boolean;
+  reasons: string[];
+}
+
 export interface BuyerVoiceStyleMetrics {
   buyer_voice_score: number;
   sale_tone_risk: "low" | "medium" | "high";
@@ -515,6 +520,93 @@ export interface BuyerVoiceStyleMetrics {
 function countMatches(input: string, regex: RegExp): number {
   const matches = input.match(regex);
   return matches ? matches.length : 0;
+}
+
+const BUYER_ROLE_VIOLATION_PATTERNS: Array<{ key: string; regex: RegExp }> = [
+  { key: "support_phrase_em_ho_tro", regex: /\bem\s+ho\s*tro\b/g },
+  { key: "support_phrase_minh_ho_tro", regex: /\bminh\s+ho\s*tro\b/g },
+  { key: "support_phrase_em_tu_van", regex: /\bem\s+tu\s*van\b/g },
+  { key: "support_phrase_em_se_ho_tro", regex: /\bem\s+se\s+ho\s*tro\b/g },
+  { key: "support_phrase_em_se_kiem_tra", regex: /\bem\s+se\s+kiem\s*tra\b/g },
+  { key: "support_phrase_de_em_kiem_tra", regex: /\bde\s+em\s+kiem\s*tra\b/g },
+  { key: "support_phrase_san_pham_ben_em", regex: /\bsan\s+pham\s+ben\s+em\b/g },
+  { key: "support_phrase_quy_khach", regex: /\bquy\s+khach\b/g },
+  { key: "sale_style_ben_em_assertion", regex: /\bben\s+em\s+(dang\s+co\s+san|co\s+san|bao\s+gia|tu\s+van|ho\s*tro)\b/g },
+  { key: "sale_style_salutation_ending", regex: /\b(gia|bao\s+gia|mau\s+nay|model\s+nay|ben\s+em|ho\s*tro|tu\s*van)\b[^.!?]{0,40}\b(anh|chi)\s+nhe\b/g }
+];
+
+export function detectBuyerRoleViolation(
+  reply: string,
+  identity: ConversationIdentityProfile
+): BuyerRoleViolationResult {
+  const replyNorm = normalize(reply);
+  const reasons = new Set<string>();
+
+  for (const pattern of BUYER_ROLE_VIOLATION_PATTERNS) {
+    if (pattern.regex.test(replyNorm)) {
+      reasons.add(pattern.key);
+    }
+    pattern.regex.lastIndex = 0;
+  }
+
+  const drift = detectIdentityDrift(reply, identity);
+  for (const reason of drift.forbidden_phrase_matches) {
+    if (
+      reason === "role_inversion" ||
+      reason === "self_pronoun_drift" ||
+      normalize(reason).includes("support")
+    ) {
+      reasons.add(`identity:${reason}`);
+    }
+  }
+
+  return {
+    violated: reasons.size > 0,
+    reasons: Array.from(reasons)
+  };
+}
+
+function buildBuyerRoleRepair(replyNorm: string, identity: ConversationIdentityProfile): string {
+  const self = identity.customer_self_pronoun;
+  const selfCap = self.charAt(0).toUpperCase() + self.slice(1);
+  const sale = identity.customer_target_pronoun;
+  const saleCap = sale.charAt(0).toUpperCase() + sale.slice(1);
+
+  if (/\b(hoa don|vat|chung tu)\b/.test(replyNorm)) {
+    return `${saleCap} gửi ${self} thông tin hóa đơn/chứng từ giúp ${self} nhé.`;
+  }
+  if (/\b(thanh toan|chuyen khoan|stk|so tai khoan)\b/.test(replyNorm)) {
+    return `${saleCap} gửi ${self} thông tin thanh toán giúp ${self} nhé.`;
+  }
+  if (/\b(bao hanh)\b/.test(replyNorm)) {
+    return `${saleCap} báo giúp ${self} chính sách bảo hành nhé.`;
+  }
+  if (/\b(giao hang|giao khi nao|bao lau giao|ship|thoi gian giao)\b/.test(replyNorm)) {
+    return `${saleCap} báo giúp ${self} thời gian giao cụ thể nhé.`;
+  }
+  if (/\b(con hang|san hang|co san|kho)\b/.test(replyNorm)) {
+    return `${saleCap} báo giúp ${self} mẫu này còn hàng không nhé.`;
+  }
+  if (/\b(gia|bao gia|gia si|ngan sach|muc gia)\b/.test(replyNorm)) {
+    return `${saleCap} báo giúp ${self} giá cụ thể nhé.`;
+  }
+  if (/\b(model|ma may|cau hinh|ram|ssd|cpu|phien ban)\b/.test(replyNorm)) {
+    return `${saleCap} gửi ${self} model với cấu hình cụ thể nhé.`;
+  }
+  return `${selfCap} muốn hỏi thêm để so sánh. ${saleCap} báo giúp ${self} ngắn gọn nhé.`;
+}
+
+export function repairBuyerRoleViolation(
+  reply: string,
+  identity: ConversationIdentityProfile
+): string {
+  const repairedPronounReply = repairPronounDrift(reply, identity);
+  const replyNorm = normalize(repairedPronounReply);
+  const violation = detectBuyerRoleViolation(repairedPronounReply, identity);
+  if (!violation.violated) {
+    return repairedPronounReply;
+  }
+  return buildBuyerRoleRepair(replyNorm, identity);
 }
 
 function countSupportPhraseMatches(input: string): number {
@@ -639,6 +731,14 @@ export function runCustomerVoiceGuard(
   const t = reply.normalize("NFC").trim();
   const tNorm = normalize(t);
 
+  const buyerRoleViolation = detectBuyerRoleViolation(reply, identity);
+  if (buyerRoleViolation.violated) {
+    return {
+      customer_voice_drift_detected: true,
+      customer_voice_guard_reason: buyerRoleViolation.reasons[0] ?? "buyer_role_violation"
+    };
+  }
+
   // 1. Chặn các cụm từ đặc trưng của hỗ trợ/sale
   const forbiddenPhrases = [
     "toi co the ho tro",
@@ -693,6 +793,10 @@ export function rewriteVoiceDrift(reply: string, identity: ConversationIdentityP
   const self = identity.customer_self_pronoun;
   const selfCap = self.charAt(0).toUpperCase() + self.slice(1);
   const target = identity.customer_target_pronoun;
+  const roleRepair = repairBuyerRoleViolation(reply, identity);
+  if (normalize(roleRepair) !== normalize(reply)) {
+    return roleRepair;
+  }
 
   // Rewrite only severe voice drift into buyer-neutral phrasing.
   const match = reply.match(/^(chị|anh)\s+đang\s+tìm\s+([^]*?)\s+ạ\s*[?.!]*$/i);

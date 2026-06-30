@@ -32,7 +32,9 @@ import {
 import {
   ConversationIdentityProfile,
   buildIdentityProfileFromPersona,
+  detectBuyerRoleViolation,
   detectIdentityDrift,
+  repairBuyerRoleViolation,
   runCustomerVoiceGuard,
   rewriteVoiceDrift,
   repairPronounDrift
@@ -1071,6 +1073,27 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
     finalReplySource = guardsResult.finalReplySource;
     guardTriggered = true;
     guardTriggerReasons.push(...guardsResult.reasons);
+  }
+
+  const buyerRoleViolation = detectBuyerRoleViolation(reply, identityProfile);
+  if (buyerRoleViolation.violated) {
+    const repairedRoleReply = repairBuyerRoleViolation(reply, identityProfile);
+    if (normalizeForMatch(repairedRoleReply) !== normalizeForMatch(reply)) {
+      reply = repairedRoleReply;
+      if (finalReplySource !== "deterministic_fallback") {
+        finalReplySource = "local_ai_rewritten";
+      }
+      guardTriggered = true;
+      guardTriggerReasons.push(...buyerRoleViolation.reasons.map((reason) => `buyer_role_lock:${reason}`));
+    }
+
+    const roleRecheck = detectBuyerRoleViolation(reply, identityProfile);
+    const identityRecheck = detectIdentityDrift(reply, identityProfile);
+    if (roleRecheck.violated || identityRecheck.identity_drift_detected) {
+      applyBankFallback(fallbackTopic);
+      guardTriggered = true;
+      guardTriggerReasons.push("buyer_role_lock_fallback");
+    }
   }
 
   const progressAfterRaw = updateProgressFromCustomerMessage(snapshotProgress(progressBeforeReply), reply);

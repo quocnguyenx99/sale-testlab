@@ -1,5 +1,10 @@
 ﻿import { ConversationMemorySlots } from "./conversationMemory";
-import { ConversationIdentityProfile, repairPronounDrift } from "./conversationIdentity";
+import {
+  ConversationIdentityProfile,
+  detectBuyerRoleViolation,
+  repairBuyerRoleViolation,
+  repairPronounDrift
+} from "./conversationIdentity";
 
 export interface ChatTurn {
   role: "sale" | "customer_ai";
@@ -187,9 +192,9 @@ function buildModelConfigRedirect(identity: ConversationIdentityProfile, include
   const target = identity.customer_target_pronoun;
   const targetCap = target.charAt(0).toUpperCase() + target.slice(1);
   if (includePrice) {
-    return `${targetCap} gửi ${self} model và cấu hình cụ thể với giá trước nhé, rồi ${self} xem tiếp giao hàng sau.`;
+    return `${targetCap} gửi ${self} model với cấu hình cụ thể cùng giá trước nhé, rồi ${self} xem tiếp giao hàng sau.`;
   }
-  return `${targetCap} gửi ${self} model và cấu hình cụ thể trước nhé, rồi ${self} xem tiếp giá và giao hàng sau.`;
+  return `${targetCap} gửi ${self} model với cấu hình cụ thể trước nhé, rồi ${self} xem tiếp giá và giao hàng sau.`;
 }
 
 function replaceDeliveryQuestionWithRedirect(
@@ -260,9 +265,9 @@ function buildBuyerVoiceRepair(input: {
   }
 
   if (hasEcho) {
-    const askPrice = quotedPriceText ? `giá sỉ ${quotedPriceText} đúng không? ` : "";
+    const askPrice = quotedPriceText ? `Giá sỉ ${quotedPriceText} đúng không ${target}? ` : "";
     return {
-      reply: `${askPrice}${targetCap} gửi ${self} model và cấu hình cụ thể trước nhé.`
+      reply: `${askPrice}${targetCap} gửi ${self} model với cấu hình cụ thể trước nhé.`
         .replace(/\s+/g, " ")
         .trim(),
       reasons
@@ -314,25 +319,14 @@ export function applySafetyGuards(
   if (hasSupportPhrases(reply)) {
     consultant_tone_blocked = true;
     let modelCode = memorySlots.selected_product_model_code || "";
-    let priceStr = "";
-
-    const priceMatch = extractQuotedPriceText(reply);
-    if (priceMatch) {
-      priceStr = priceMatch;
-    } else if (memorySlots.product_candidates_summary && memorySlots.product_candidates_summary.length > 0) {
-      const p = memorySlots.product_candidates_summary.find(c => c.model_code === modelCode);
-      if (p && p.price_si) {
-        priceStr = p.price_si.toLocaleString("vi-VN");
-      }
-    }
 
     if (!modelCode) modelCode = "mẫu này";
-    if (!priceStr) priceStr = "giá sỉ";
 
     const self = identity.customer_self_pronoun;
     const target = identity.customer_target_pronoun;
+    const targetCap = target.charAt(0).toUpperCase() + target.slice(1);
 
-    reply = `À mã ${modelCode} còn hàng đúng không ${target}? Giá sỉ ${priceStr} thì ${target} báo thêm giúp ${self} thời gian giao nhé.`;
+    reply = `À ${modelCode} còn hàng đúng không ${target}? ${targetCap} báo giúp ${self} thêm giá với thời gian giao nhé.`;
     finalReplySource = "deterministic_fallback";
     guardTriggered = true;
     reasons.push("consultant_tone_blocked");
@@ -346,7 +340,7 @@ export function applySafetyGuards(
     const sale = identity.customer_target_pronoun;
     const saleCap = sale.charAt(0).toUpperCase() + sale.slice(1);
 
-    reply = `${selfCap} chưa chốt model cụ thể đâu ${sale}. ${saleCap} gửi ${self} vài mẫu phù hợp để ${self} so sánh giá sỉ với cấu hình trước nhé.`;
+    reply = `${selfCap} chưa chốt model cụ thể đâu ${sale}. ${saleCap} gửi ${self} vài mẫu phù hợp để ${self} so sánh giá với cấu hình trước nhé.`;
     finalReplySource = "deterministic_fallback";
     guardTriggered = true;
     reasons.push("ambiguous_model_guard_triggered");
@@ -373,6 +367,19 @@ export function applySafetyGuards(
         reasons.push("stock_leak_blocked");
         break;
       }
+    }
+  }
+
+  const buyerRoleViolation = detectBuyerRoleViolation(reply, identity);
+  if (buyerRoleViolation.violated) {
+    const repaired = repairBuyerRoleViolation(reply, identity);
+    if (normalizeForMatch(repaired) !== normalizeForMatch(reply)) {
+      reply = repaired;
+      if (finalReplySource !== "deterministic_fallback") {
+        finalReplySource = "local_ai_rewritten";
+      }
+      guardTriggered = true;
+      reasons.push(...buyerRoleViolation.reasons.map((reason) => `buyer_role_lock:${reason}`));
     }
   }
 
