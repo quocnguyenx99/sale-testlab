@@ -49,24 +49,24 @@ type ClosingVariant = {
 
 const CLOSING_BANK: Record<CompletionRecommendedAction, ClosingVariant[]> = {
   ask_for_quote: [
-    { variant_id: "close_quote_1", text: "Vậy {sale} gửi giúp {self} báo giá và cấu hình chi tiết nhé." },
-    { variant_id: "close_quote_2", text: "Vậy {sale} cho {self} xin báo giá kèm cấu hình rõ hơn nhé." }
+    { variant_id: "close_quote_1", text: "{sale_cap} gửi {self} báo giá kèm cấu hình nhé, {self} xem lại." },
+    { variant_id: "close_quote_2", text: "{self_cap} cần xem lại báo giá với cấu hình trước, {sale} gửi {self} nhé." }
   ],
   ask_for_payment_info: [
     { variant_id: "close_payment_1", text: "Vậy {sale} gửi giúp {self} thông tin thanh toán nhé." },
     { variant_id: "close_payment_2", text: "Vậy {sale} cho {self} xin thông tin thanh toán để chốt tiếp nhé." }
   ],
   ask_to_hold_product: [
-    { variant_id: "close_hold_1", text: "Vậy {sale} giữ giúp {self} mẫu này, {self} chốt sớm nhé." },
-    { variant_id: "close_hold_2", text: "Vậy {sale} hỗ trợ giữ mẫu này cho {self} nhé." }
+    { variant_id: "close_hold_1", text: "{sale_cap} kiểm tra giúp {self} mẫu này còn hàng không nhé." },
+    { variant_id: "close_hold_2", text: "Nếu mẫu này còn hàng thì {sale} báo {self} nhé, {self} xem tiếp." }
   ],
   ask_for_invoice_quote: [
     { variant_id: "close_invoice_1", text: "Vậy {sale} gửi giúp {self} báo giá và thông tin xuất hóa đơn công ty nhé." },
     { variant_id: "close_invoice_2", text: "Vậy {sale} cho {self} xin báo giá kèm thông tin hóa đơn nhé." }
   ],
   end_session: [
-    { variant_id: "close_end_1", text: "Vậy {sale} chốt giúp {self} bước cuối luôn nhé." },
-    { variant_id: "close_end_2", text: "Vậy {sale} hỗ trợ {self} chốt đơn luôn nhé." }
+    { variant_id: "close_end_1", text: "{self_cap} xem lại một chút rồi phản hồi {sale} sau nhé." },
+    { variant_id: "close_end_2", text: "{self_cap} cân nhắc thêm rồi nhắn {sale} sau nhé." }
   ]
 };
 
@@ -370,15 +370,13 @@ export function shouldForceCompletionReply(input: {
     return false;
   }
 
-  if (input.completion.completion_ready) return true;
-  if (input.nextUnresolvedTopic === "next_step") return true;
+  if (input.completion.completion_ready) return false;
 
   const reopenedTopics = detectReopenedAnsweredTopics(input.candidateReply, input.progress, input.recentSaleMessages);
-  if (reopenedTopics.length > 0) return true;
+  if (reopenedTopics.length > 1) return true;
 
   const repeatedTopics = detectRepeatedTopicAsking(input.candidateReply, input.progress);
-  if (repeatedTopics.length > 0) return true;
-  if (isGenericConfirmationIntent(input.candidateReply)) return true;
+  if (repeatedTopics.length > 1) return true;
   if (isRepeatedGenericFallback(input.candidateReply, input.recentReplies)) return true;
   if (detectRepeatedFreeFormLoop(input.candidateReply, input.recentReplies)) return true;
   if (detectIdentityDrift(input.candidateReply, input.identity).identity_drift_detected) return true;

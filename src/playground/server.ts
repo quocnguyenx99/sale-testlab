@@ -943,13 +943,19 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
     genericLoopDetected = isRepeatedGenericFallback(reply, recentReplies);
   }
 
-  if (repeatedTopics.length > 0 || genericLoopDetected || freeFormLoopDetected || isGenericConfirmationIntent(reply)) {
+  // A single clarification or generic acknowledgement is normal buyer behavior.
+  // Reserve the bank for confirmed repetition, not merely an imperfect turn.
+  const severeTopicLoop = repeatedTopics.length > 1;
+  if (severeTopicLoop || genericLoopDetected || freeFormLoopDetected) {
     applyBankFallback(fallbackTopic);
     guardTriggered = true;
     if (repeatedTopics.length > 0) guardTriggerReasons.push(`repeated_topic:${repeatedTopics.join(",")}`);
     if (genericLoopDetected) guardTriggerReasons.push("generic_loop");
     if (freeFormLoopDetected) guardTriggerReasons.push("free_form_loop");
-    if (isGenericConfirmationIntent(reply)) guardTriggerReasons.push("generic_confirmation");
+  } else if (repeatedTopics.length > 0 || isGenericConfirmationIntent(reply)) {
+    guardTriggered = true;
+    if (repeatedTopics.length > 0) guardTriggerReasons.push(`soft_repeated_topic:${repeatedTopics.join(",")}`);
+    if (isGenericConfirmationIntent(reply)) guardTriggerReasons.push("generic_confirmation_preserved");
   }
 
   const recentSaleMessages = [message, ...turns.filter(t => t.role === "sale").slice(-1).map(t => t.text)];
@@ -957,10 +963,13 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
   if (!directQuestion) {
     reopenedAnsweredTopics = detectReopenedAnsweredTopics(reply, conversationProgress, recentSaleMessages);
   }
-  if (reopenedAnsweredTopics.length > 0) {
+  if (reopenedAnsweredTopics.length > 1) {
     applyBankFallback(fallbackTopic);
     guardTriggered = true;
     guardTriggerReasons.push(`reopened_topic:${reopenedAnsweredTopics.join(",")}`);
+  } else if (reopenedAnsweredTopics.length === 1) {
+    guardTriggered = true;
+    guardTriggerReasons.push(`reopened_topic_preserved:${reopenedAnsweredTopics.join(",")}`);
   }
 
   let stockStatus: "in_stock" | "out_of_stock" | "unknown" = "unknown";
@@ -990,7 +999,13 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
   let completionVariantId: string | null = null;
   let completionTopicUsed: ConversationTopic | null = null;
   let completionOverrideReason: string | null = null;
-  if (completion.completion_ready) {
+  // Completion is a recommendation. Keep a safe, specific buyer reply instead
+  // of replacing it with a scripted close.
+  const completionNeedsRecovery =
+    !reply.trim() ||
+    isRepeatedGenericFallback(reply, recentReplies) ||
+    detectRepeatedFreeFormLoop(reply, recentReplies);
+  if (completion.completion_ready && completionNeedsRecovery) {
     const closing = buildCompletionReply({
       completion,
       identity: identityProfile,
@@ -1006,7 +1021,9 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
     fallbackVariantId = null;
     fallbackTopicUsed = null;
     guardTriggered = true;
-    guardTriggerReasons.push("completion_ready");
+    guardTriggerReasons.push("completion_ready_recovery");
+  } else if (completion.completion_ready) {
+    guardTriggerReasons.push("completion_ready_preserved");
   }
 
   let identityDrift = detectIdentityDrift(reply, identityProfile);

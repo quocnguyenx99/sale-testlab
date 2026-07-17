@@ -155,6 +155,19 @@ function shouldBlockAmbiguousModelReply(reply: string, productContextStatus: Con
   return hasGatedTerms(reply);
 }
 
+function hasHardGatedAction(text: string): boolean {
+  const t = normalizeForMatch(text);
+  return [
+    "giu mau nay",
+    "chot mau nay",
+    "stk",
+    "so tai khoan",
+    "thanh toan",
+    "chuyen khoan",
+    "chot luon"
+  ].some((pattern) => t.includes(pattern));
+}
+
 export interface SafetyGuardsResult {
   reply: string;
   finalReplySource: RuntimeReplySource;
@@ -334,6 +347,7 @@ export function applySafetyGuards(
 
   if (!consultant_tone_blocked && !isSpecific && shouldBlockAmbiguousModelReply(reply, memorySlots.product_context_status)) {
     ambiguous_model_guard_triggered = true;
+    const requiresHardGatedRecovery = hasHardGatedAction(reply);
 
     const self = identity.customer_self_pronoun;
     const selfCap = self.charAt(0).toUpperCase() + self.slice(1);
@@ -341,7 +355,11 @@ export function applySafetyGuards(
     const saleCap = sale.charAt(0).toUpperCase() + sale.slice(1);
 
     reply = `${selfCap} chưa chốt model cụ thể đâu ${sale}. ${saleCap} gửi ${self} vài mẫu phù hợp để ${self} so sánh giá với cấu hình trước nhé.`;
-    finalReplySource = "deterministic_fallback";
+    // Payment/hold actions require deterministic recovery. Price/stock
+    // ambiguity is repairable buyer wording and retains the generated path.
+    finalReplySource = requiresHardGatedRecovery
+      ? "deterministic_fallback"
+      : "local_ai_rewritten";
     guardTriggered = true;
     reasons.push("ambiguous_model_guard_triggered");
   }

@@ -67,10 +67,10 @@ const BANK: TopicVariants = {
     { variant_id: "product_model_4", text: "Mẫu này phải đúng model {self} đang xem thì mới chốt được, {sale} kiểm tra lại giúp {self} nhé." }
   ],
   configuration: [
-    { variant_id: "configuration_1", text: "{self} muốn chốt lại cấu hình chính trước khi quyết định." },
-    { variant_id: "configuration_2", text: "{self} cần xác nhận CPU, RAM, SSD cho đúng nhu cầu." },
-    { variant_id: "configuration_3", text: "{self} muốn đối chiếu lại cấu hình để tránh nhầm." },
-    { variant_id: "configuration_4", text: "Cấu hình này nếu đúng nhu cầu của {self} thì mình đi tiếp được." }
+    { variant_id: "configuration_1", text: "{sale_cap} gửi {self} cấu hình chính của mẫu này nhé, {self} so sánh thêm." },
+    { variant_id: "configuration_2", text: "{self_cap} muốn xem rõ CPU, RAM với SSD trước nhé." },
+    { variant_id: "configuration_3", text: "{sale_cap} gửi {self} lại cấu hình đầy đủ nhé, {self} kiểm tra thêm." },
+    { variant_id: "configuration_4", text: "{self_cap} cần đối chiếu cấu hình thêm rồi mới quyết được." }
   ],
   price: [
     { variant_id: "price_1", text: "{self} muốn chốt mức giá rõ hơn cho mẫu này, {sale} báo giúp {self} thêm một mức để so sánh nhé." },
@@ -79,10 +79,10 @@ const BANK: TopicVariants = {
     { variant_id: "price_4", text: "{self} đang ưu tiên một mức giá dễ cân đối hơn, {sale} gửi giúp {self} khung giá phù hợp nhé." }
   ],
   stock: [
-    { variant_id: "stock_1", text: "{self} muốn kiểm tra lại mẫu này còn sẵn hàng không {sale}?" },
-    { variant_id: "stock_2", text: "Mẫu này hiện còn hàng chứ {sale}? {self} cần xác nhận trước khi đi tiếp." },
-    { variant_id: "stock_3", text: "{self} đang ưu tiên mẫu còn sẵn hàng để khỏi mất thời gian." },
-    { variant_id: "stock_4", text: "Bên mình còn hàng cho mẫu này không {sale}, {self} cần chốt nhanh." }
+    { variant_id: "stock_1", text: "Mẫu này còn hàng không {sale}?" },
+    { variant_id: "stock_2", text: "{sale_cap} kiểm tra giúp {self} mẫu này còn sẵn không nhé." },
+    { variant_id: "stock_3", text: "{self_cap} ưu tiên mẫu còn hàng, {sale} báo {self} nhé." },
+    { variant_id: "stock_4", text: "Mẫu này còn hàng thì {sale} nhắn {self} nhé." }
   ],
   delivery: [
     { variant_id: "delivery_1", text: "{self} muốn biết mốc giao cụ thể để chủ động kế hoạch." },
@@ -109,10 +109,10 @@ const BANK: TopicVariants = {
     { variant_id: "invoice_or_document_4", text: "{sale} cho {self} xin thông tin chứng từ đi kèm nhé." }
   ],
   next_step: [
-    { variant_id: "next_step_1", text: "Nếu ổn rồi thì {self} chốt bước tiếp theo luôn {sale} nhé." },
-    { variant_id: "next_step_2", text: "{self} muốn đi sang bước tiếp theo cho gọn." },
-    { variant_id: "next_step_3", text: "{self} đã nắm đủ phần chính, giờ mình chốt tiếp nhé." },
-    { variant_id: "next_step_4", text: "{sale} báo giúp {self} bước tiếp theo để {self} chốt nhanh hơn nhé." }
+    { variant_id: "next_step_1", text: "{self_cap} xem lại chút rồi nhắn {sale} sau nhé." },
+    { variant_id: "next_step_2", text: "{self_cap} cần cân nhắc thêm, {sale} gửi {self} thông tin chính nhé." },
+    { variant_id: "next_step_3", text: "{self_cap} xem thêm một phương án rồi quyết nhé." },
+    { variant_id: "next_step_4", text: "{sale_cap} gửi {self} phần thông tin còn thiếu nhé, {self} xem tiếp." }
   ]
 };
 
