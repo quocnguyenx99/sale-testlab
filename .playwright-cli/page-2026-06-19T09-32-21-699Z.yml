@@ -1,0 +1,96 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - heading "🎭 Chọn Persona" [level=3] [ref=e5]
+      - listbox [ref=e6]:
+        - option "⭐ [HARD] Anh Minh — IT nội bộ" [ref=e7]
+        - option "⭐ [HARD] Anh Huy — Kỹ thuật viên" [ref=e8]
+        - option "⭐ [HARD] Anh Nam — Người mua cá nhân" [ref=e9]
+        - option "⭐ [MEDIUM] Anh Quân — Đại lý / reseller" [ref=e10]
+        - option "⭐ [HARD] Anh Phúc — IT nội bộ" [ref=e11]
+        - option "⭐ [HARD] Chị Linh — Kế toán / hành chính" [ref=e12]
+        - option "⭐ [HARD] Chị Ngọc — Khách dự án" [ref=e13]
+        - option "⭐ [HARD] Chị Lan — Nhân viên mua hàng" [ref=e14]
+        - option "⭐ [MEDIUM] Chị Hương — Chủ doanh nghiệp nhỏ" [ref=e15]
+        - option "[MEDIUM] Anh Khang — Kỹ thuật viên" [selected] [ref=e16]
+        - option "[HARD] Anh Dũng — Người mua cá nhân" [ref=e17]
+        - option "[HARD] Anh Long — Đại lý / reseller" [ref=e18]
+        - option "[HARD] Chị Lan — IT nội bộ" [ref=e19]
+        - option "[MEDIUM] Chị Hương — Kỹ thuật viên" [ref=e20]
+        - option "[MEDIUM] Chị Thảo — Người mua cá nhân" [ref=e21]
+        - option "[HARD] Chị Mai — Đại lý / reseller" [ref=e22]
+        - option "[HARD] Chị Vy — IT nội bộ" [ref=e23]
+        - option "[HARD] Chị Trang — Đại lý / reseller" [ref=e24]
+        - option "[MEDIUM] Anh Minh — IT nội bộ" [ref=e25]
+        - option "[HARD] Anh Huy — Kỹ thuật viên" [ref=e26]
+        - option "[MEDIUM] Anh Nam — Người mua cá nhân" [ref=e27]
+        - option "[MEDIUM] Anh Quân — Đại lý / reseller" [ref=e28]
+        - option "[HARD] Anh Phúc — Khách dự án" [ref=e29]
+        - option "[MEDIUM] Anh Khang — Kỹ thuật viên" [ref=e30]
+        - option "[MEDIUM] Anh Dũng — Người mua cá nhân" [ref=e31]
+        - option "[HARD] Anh Long — Đại lý / reseller" [ref=e32]
+        - option "[MEDIUM] Chị Thảo — Người mua cá nhân" [ref=e33]
+        - option "[MEDIUM] Chị Mai — Người mua cá nhân" [ref=e34]
+        - option "[MEDIUM] Chị Vy — Kế toán / hành chính" [ref=e35]
+        - option "[HARD] Chị Linh — Khách dự án" [ref=e36]
+        - option "[HARD] Chị Ngọc — Người mua cá nhân" [ref=e37]
+        - option "[HARD] Chị Trang — Đại lý / reseller" [ref=e38]
+        - option "[HARD] Anh Minh — Khách dự án" [ref=e39]
+        - option "[MEDIUM] Anh Huy — Kỹ thuật viên" [ref=e40]
+        - option "[MEDIUM] Anh Nam — Kế toán / hành chính" [ref=e41]
+        - option "[MEDIUM] Anh Quân — Khách dự án" [ref=e42]
+        - option "[HARD] Anh Phúc — IT nội bộ" [ref=e43]
+        - option "[MEDIUM] Anh Khang — Kế toán / hành chính" [ref=e44]
+    - generic [ref=e45]:
+      - heading "📋 Thông tin Persona" [level=3] [ref=e46]
+      - generic [ref=e47]:
+        - generic [ref=e198]:
+          - generic [ref=e199]: Tên hiển thị
+          - generic [ref=e200]: Anh Khang
+          - generic [ref=e201]: Vai trò
+          - generic [ref=e202]: Kỹ thuật viên
+          - generic [ref=e203]: Tổ chức
+          - generic [ref=e204]: Cửa hàng kinh doanh máy tính
+          - generic [ref=e205]: Độ khó
+          - generic [ref=e207]: MEDIUM
+          - generic [ref=e208]: Bối cảnh mua
+          - generic [ref=e209]: Đang so sánh nhiều model để chọn cấu hình phù hợp với nhu cầu.
+          - generic [ref=e210]: Sản phẩm
+          - generic [ref=e212]:
+            - generic [ref=e213]: Máy tính xách tay
+            - generic [ref=e214]: Máy tính để bàn
+            - generic [ref=e215]: Workstation
+            - generic [ref=e216]: Màn hình
+        - group [ref=e217]:
+          - generic "Quy tắc hành vi (2)" [ref=e218] [cursor=pointer]
+        - group [ref=e219]:
+          - generic "Câu mở đầu (5)" [ref=e220] [cursor=pointer]
+        - group [ref=e221]:
+          - generic "Câu hỏi hay gặp" [ref=e222] [cursor=pointer]
+        - group [ref=e223]:
+          - generic "Phản đối hay gặp" [ref=e224] [cursor=pointer]
+        - group [ref=e225]:
+          - generic "Điều kiện chốt" [ref=e226] [cursor=pointer]
+        - group [ref=e227]:
+          - generic "Training focus" [ref=e228] [cursor=pointer]
+        - group [ref=e229]:
+          - generic "⚠️ Risk flags" [ref=e230] [cursor=pointer]
+  - generic [ref=e81]:
+    - generic [ref=e82]:
+      - generic [ref=e83]:
+        - combobox [ref=e84]:
+          - option "auto_state" [selected]
+          - option "research_phase"
+          - option "pricing_phase"
+          - option "logistics_phase"
+          - option "payment_phase"
+          - option "operational_followup"
+          - option "passive_followup"
+          - option "uncertain_interest"
+        - button "▶ Khách AI bắt đầu" [active] [ref=e85] [cursor=pointer]
+        - button "↺ Reset" [ref=e86] [cursor=pointer]
+      - generic [ref=e87]: "Auto state: logistics_phase"
+    - generic [ref=e232]: "Khách AI: Anh đang cần tìm MÁY TÍNH XÁCH TAY LENOVO THINKPAD T14, bên em có mẫu nào phù hợp sẵn hàng không em?"
+    - generic [ref=e90]:
+      - textbox "Nhập tin nhắn Sale..." [ref=e91]
+      - button "Gửi" [ref=e92] [cursor=pointer]
