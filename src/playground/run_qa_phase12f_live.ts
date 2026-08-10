@@ -1,4 +1,7 @@
-import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { ChildProcessByStdio, spawn } from "node:child_process";
+import { Readable } from "node:stream";
+
+type ManagedServerProcess = ChildProcessByStdio<null, Readable, Readable>;
 
 type ApiResp = {
   sessionId: string;
@@ -193,7 +196,7 @@ async function killStalePlaygroundOnPort(port: number): Promise<void> {
   });
 }
 
-function startServer(port: number): ChildProcessWithoutNullStreams {
+function startServer(port: number): ManagedServerProcess {
   const envCmd = `set PLAYGROUND_PORT=${port}&& set npm_config_month=${MONTH}&& npm run playground`;
   return spawn("cmd.exe", ["/c", envCmd], {
     cwd: process.cwd(),
@@ -201,7 +204,7 @@ function startServer(port: number): ChildProcessWithoutNullStreams {
   });
 }
 
-async function waitServer(baseUrl: string, child: ChildProcessWithoutNullStreams, timeoutMs = 60_000): Promise<void> {
+async function waitServer(baseUrl: string, child: ManagedServerProcess, timeoutMs = 60_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (child.exitCode !== null || child.signalCode !== null) {
@@ -230,7 +233,7 @@ function pickPersona(
   return personas.find((p) => /^anh\b/.test(normalizeText(p.display_name))) || personas[0];
 }
 
-async function startManagedServer(preferredPort: number | null): Promise<{ port: number; child: ChildProcessWithoutNullStreams }> {
+async function startManagedServer(preferredPort: number | null): Promise<{ port: number; child: ManagedServerProcess }> {
   const ports = preferredPort ? [preferredPort] : DEFAULT_PORTS;
   for (const port of ports) {
     await killStalePlaygroundOnPort(port);
@@ -405,7 +408,7 @@ async function main(): Promise<void> {
   if (baseRaw) console.log(`OPENAI_BASE_URL masked: ${maskHost(baseRaw)}`);
   console.log(`OPENAI_MODEL detected: ${model ? "yes" : "no"}`);
 
-  let server: ChildProcessWithoutNullStreams | null = null;
+  let server: ManagedServerProcess | null = null;
   let port = options.port;
 
   try {

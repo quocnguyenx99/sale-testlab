@@ -51,7 +51,7 @@ function run(): void {
   assert.equal(progress.invoice_or_document.answered, true);
   assert.equal(progress.payment.answered, true);
 
-  // 5) Completion priority: completion_ready + reopen candidate => force completion reply.
+  // 5) Completion-ready state preserves a safe buyer hesitation instead of forcing a script.
   progress = mkProgress();
   progress.configuration.answered = true;
   progress.price.answered = true;
@@ -68,7 +68,7 @@ function run(): void {
   });
   assert.equal(completion.completion_ready, true);
   const force = shouldForceCompletionReply({
-    candidateReply: "Gia sao em?",
+    candidateReply: "Anh xem lại một chút rồi phản hồi em sau nhé.",
     completion,
     progress,
     identity: buildIdentityProfileFromPersona({
@@ -78,7 +78,7 @@ function run(): void {
     recentReplies: [],
     nextUnresolvedTopic: "next_step"
   });
-  assert.equal(force, true);
+  assert.equal(force, false);
   const closing = buildCompletionReply({
     completion,
     identity: buildIdentityProfileFromPersona({
@@ -100,4 +100,3 @@ function run(): void {
 }
 
 run();
-

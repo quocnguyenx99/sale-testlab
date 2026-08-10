@@ -11,6 +11,7 @@ export interface RuntimeStateRouterInput {
       logistics_behavior?: string[];
     };
   };
+  selectedPersonaRuntimeContexts?: string[];
   debugOverrideState?: string;
   product_context_status?: string; // Phase 12H.1-C
 }
@@ -102,6 +103,16 @@ function normalizeForMatch(text: string): string {
 }
 
 function getPersonaFallbackState(input: RuntimeStateRouterInput): RuntimeState {
+  const contexts = new Set(
+    (input.selectedPersonaRuntimeContexts ?? []).map((context) =>
+      normalizeForMatch(context).replace(/\s+/g, "_"),
+    ),
+  );
+  if (contexts.has("sales_context")) return "pricing_phase";
+  if (contexts.has("logistics_context") || contexts.has("timing_context")) return "logistics_phase";
+  if (contexts.has("payment_context")) return "payment_phase";
+  if (contexts.has("operational_context")) return "operational_followup";
+
   const b = input.selectedPersona?.runtime_behavior_profile;
   if ((b?.pricing_behavior?.length ?? 0) > 0) return "pricing_phase";
   if ((b?.logistics_behavior?.length ?? 0) > 0) return "logistics_phase";

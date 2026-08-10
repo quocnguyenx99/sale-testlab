@@ -110,6 +110,9 @@ export function extractProductMentions(text: string): ProductKnowledgeItem[] {
     if (GENERIC_WORDS.has(cleanToken) || STOPWORDS.has(cleanToken)) {
       continue;
     }
+    if (!/\d/.test(cleanToken)) {
+      continue;
+    }
 
     for (const item of cachedProducts) {
       if (seenIds.has(item.id)) continue;

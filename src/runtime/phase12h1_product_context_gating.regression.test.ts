@@ -23,7 +23,10 @@ import {
   RuntimeStateRouterInput
 } from "./runtimeStateRouter";
 import { createEmptyConversationProgress } from "./conversationProgressTracker";
-import { buildIdentityProfileFromOpening } from "./conversationIdentity";
+import {
+  buildIdentityProfileFromOpening,
+  ConversationIdentityProfile
+} from "./conversationIdentity";
 
 // Re-implement or reference helper style checkers for validation
 function hasGatedTerms(text: string): boolean {
@@ -56,7 +59,7 @@ function hasSupportPhrases(text: string): boolean {
 function runTests(): void {
   console.log("=== STARTING PHASE 12H.1-C PRODUCT CONTEXT GATING REGRESSION TESTS ===");
 
-  const identity = {
+  const identity: ConversationIdentityProfile = {
     customer_self_pronoun: "anh",
     customer_target_pronoun: "em",
     sale_expected_self_pronoun: "em",

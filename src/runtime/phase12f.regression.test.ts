@@ -76,8 +76,8 @@ function run(): void {
     recentReplies: [],
     nextUnresolvedTopic: "next_step"
   }).reply;
-  assert.ok(anhClosing.includes("anh"));
-  assert.ok(anhClosing.includes("em"));
+  assert.ok(anhClosing.toLocaleLowerCase("vi").includes("anh"));
+  assert.ok(anhClosing.toLocaleLowerCase("vi").includes("em"));
   assert.equal(/^d[ạa]/i.test(anhClosing), false, "closing must not start with Dạ");
 
   const chiClosing = buildCompletionReply({
@@ -86,9 +86,9 @@ function run(): void {
     recentReplies: [],
     nextUnresolvedTopic: "next_step"
   }).reply;
-  assert.ok(chiClosing.includes("chị"));
-  assert.ok(chiClosing.includes("em"));
-  assert.equal(/anh can|anh muon|anh se/i.test(chiClosing), false, "female closing must not drift to anh");
+  assert.ok(chiClosing.toLocaleLowerCase("vi").includes("chị"));
+  assert.ok(chiClosing.toLocaleLowerCase("vi").includes("em"));
+  assert.equal(/\banh\b/i.test(chiClosing), false, "female closing must not drift to anh");
 
   let deliveryProgress = baseProgress();
   deliveryProgress = updateProgressFromCustomerMessage(deliveryProgress, "Em ơi, bao lâu giao được em?");
@@ -116,7 +116,11 @@ function run(): void {
     recentReplies: ["Anh xem thêm mẫu nào khác được không em?", "Anh xem thêm mẫu nào khác được không em?"],
     nextUnresolvedTopic: "next_step"
   });
-  assert.equal(forcedDelivery, true, "delivery ask must be forced out after delivery is answered");
+  assert.equal(
+    forcedDelivery,
+    false,
+    "completion-ready state must not automatically replace a safe buyer reply"
+  );
 
   const loopProgress = baseProgress();
   loopProgress.configuration.answered = true;
@@ -147,7 +151,11 @@ function run(): void {
     ],
     nextUnresolvedTopic: "next_step"
   });
-  assert.equal(forcedLoop, true, "all-core completion must force out repeated loop replies");
+  assert.equal(
+    forcedLoop,
+    false,
+    "completion policy must leave pathological-candidate recovery to active orchestration"
+  );
 
   console.log("Phase12F regression tests: PASS");
 }

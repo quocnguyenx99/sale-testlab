@@ -141,7 +141,7 @@ function pickRecommendedAction(progress: ConversationProgress): CompletionRecomm
 function pickCompletionReason(progress: ConversationProgress): string {
   if (hasAllMajorTopics(progress)) return "all_major_topics_resolved";
   if (!hasRequiredCompletion(progress)) {
-    const missingRequired: ConversationTopic[] = [];
+    const missingRequired: string[] = [];
     if (!(isResolved(progress, "product_model") || isResolved(progress, "configuration"))) missingRequired.push("product_model_or_configuration");
     if (!isResolved(progress, "price")) missingRequired.push("price");
     if (!isResolved(progress, "stock")) missingRequired.push("stock");

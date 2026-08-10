@@ -112,7 +112,7 @@ type ChatTurn = {
 
 type ChatSession = {
   sessionId: string;
-  persona: RuntimePersonaRecord;
+  persona?: RuntimePersonaRecord;
   enrichedPersona?: EnrichedPersona;
   currentState: RuntimeState;
   turns: ChatTurn[];
@@ -212,7 +212,7 @@ function chooseResponseBankReply(input: {
   };
   product_context_status?: string; // Phase 12H.1-C
   is_price_quoted?: boolean; // Nhánh C
-}): { reply: string; variant_id: string; topic_used: string | null } {
+}): { reply: string; variant_id: string; topic_used: ConversationTopic | null } {
   const bank = buildResponseBankReply({
     topic: input.topic,
     nextTopic: input.nextTopic,
@@ -753,15 +753,13 @@ async function handleCustomerStart(bodyRaw: string, personas: RuntimePersonaReco
   };
 }
 
-async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], runtimePersonas: RuntimePersonaRecord[]): Promise<Record<string, unknown>> {
+async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[]): Promise<Record<string, unknown>> {
   const body = JSON.parse(bodyRaw) as { sessionId?: string; personaId?: string; message?: string; runtimeState?: RuntimeState };
   const message = (body.message || "").trim();
   if (!message) throw new Error("Missing message");
   const ep = enriched.find(p => p.persona_id === body.personaId);
   if (!ep) throw new Error("Enriched persona not found");
 
-  // Try to map to runtime persona for state routing; fallback to first runtime persona
-  const rp = runtimePersonas[0];
   const sessionId = (body.sessionId || "").trim() || randomUUID();
   const existing = sessions.get(sessionId);
   const turns = existing?.turns ?? [];
@@ -789,13 +787,13 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
   const routeBefore = routeRuntimeState({
     latestSaleMessage: message,
     recentMessages: recentSale,
-    selectedPersona: rp,
+    selectedPersonaRuntimeContexts: ep.runtime_contexts,
     debugOverrideState: body.runtimeState || "auto_state"
   });
   const routeAfter = routeRuntimeState({
     latestSaleMessage: message,
     recentMessages: recentSale,
-    selectedPersona: rp,
+    selectedPersonaRuntimeContexts: ep.runtime_contexts,
     debugOverrideState: body.runtimeState || "auto_state",
     product_context_status: memorySlots.product_context_status
   });
@@ -1142,7 +1140,6 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[], 
 
   sessions.set(sessionId, {
     sessionId,
-    persona: rp,
     enrichedPersona: ep,
     currentState: nextState,
     turns: newTurns,
@@ -1376,7 +1373,7 @@ async function main(): Promise<void> {
 
       if (req.method === "POST" && url === "/api/chat") {
         const body = await readBody(req);
-        const payload = await handleChatEnriched(body, sortedEnriched, runtimePersonas);
+        const payload = await handleChatEnriched(body, sortedEnriched);
         json(res, 200, payload); return;
       }
       if (req.method === "POST" && url === "/api/customer-start") {

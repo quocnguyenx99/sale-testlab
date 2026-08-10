@@ -85,8 +85,14 @@ function runTests(): void {
   assert.equal(/chị nhé/i.test(b2Result.reply), false);
   assert.equal(/Em hỏi thêm/i.test(b2Result.reply), false);
   assert.equal(/giá sỉ 12 triệu đúng không/i.test(b2Result.reply), true);
-  assert.equal(/model và cấu hình cụ thể trước/i.test(b2Result.reply), true);
+  assert.equal(/model/i.test(b2Result.reply), true);
+  assert.equal(/cấu hình cụ thể/i.test(b2Result.reply), true);
+  assert.equal(/trước/i.test(b2Result.reply), true);
+  assert.equal(/Em hỏi thêm|chị nhé/i.test(b2Result.reply), false);
+  assert.equal(/giao hàng|thời gian giao/i.test(b2Result.reply), false);
   assert.equal(b2Result.reasons.includes("buyer_voice_sale_echo_repaired"), true);
+  assert.equal(b2Result.reasons.includes("buyer_voice_self_pronoun_repaired"), true);
+  assert.equal(b2Result.reasons.includes("delivery_main_topic_blocked"), true);
 
   console.log("Test 4: C4 delivery redirect must not invent price...");
   const c4Raw = "Anh thấy mẫu này bên em còn 2 cái à, vậy thời gian giao hàng khoảng bao lâu ạ?";

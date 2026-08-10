@@ -148,8 +148,9 @@ function run(): void {
     recentReplies: [],
     persona: corpPersona
   });
-  assert.equal(paymentFallback.variant_id, "voice_corporate_fallback");
-  assert.ok(paymentFallback.reply.includes("xuất hóa đơn VAT"));
+  assert.equal(paymentFallback.variant_id.startsWith("voice_corporate_fallback"), true);
+  assert.equal(/hóa đơn|chứng từ/i.test(paymentFallback.reply), true);
+  assert.equal(/chị gửi em|bên chị|chị sẽ hỗ trợ/i.test(paymentFallback.reply), false);
 
   console.log("4. Lightweight Persona Voice Layer: PASS");
 

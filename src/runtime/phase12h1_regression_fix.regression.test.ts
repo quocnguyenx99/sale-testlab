@@ -20,6 +20,7 @@ import {
   updateProgressFromSaleMessage
 } from "./conversationProgressTracker";
 import { buildEnrichedRuntimePrompt } from "./runtimePromptBuilder";
+import { ConversationIdentityProfile } from "./conversationIdentity";
 
 function isDirectQuestion(text: string): boolean {
   const t = text.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[đĐ]/g, "d").replace(/\s+/g, " ").trim();
@@ -29,7 +30,7 @@ function isDirectQuestion(text: string): boolean {
 function runTests(): void {
   console.log("=== STARTING PHASE 12H.1-R REGRESSION TESTS ===");
 
-  const identityFemale = {
+  const identityFemale: ConversationIdentityProfile = {
     customer_self_pronoun: "chị",
     customer_target_pronoun: "em",
     sale_expected_self_pronoun: "em",
@@ -38,7 +39,7 @@ function runTests(): void {
     conversation_role: "customer_to_sales"
   };
 
-  const identityMale = {
+  const identityMale: ConversationIdentityProfile = {
     customer_self_pronoun: "anh",
     customer_target_pronoun: "em",
     sale_expected_self_pronoun: "em",

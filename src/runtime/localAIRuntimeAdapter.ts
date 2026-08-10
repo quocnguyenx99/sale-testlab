@@ -226,6 +226,7 @@ function extractContentWithDiagnostics(
         reasoning_content?: unknown;
       };
       text?: string;
+      finish_reason?: unknown;
     }>;
   };
 
@@ -809,7 +810,7 @@ export async function generateLocalAIReply(
         starts_with_markdown_fence: false,
         parse_attempt_status: "empty_or_missing",
         missing_required_fields: [isTimeout ? "timeout" : "response_payload"],
-        error_type,
+        error_type: errorType,
         response_source: "openai_chat_completions",
         model_name: cfg.model,
         latency_ms: elapsed,

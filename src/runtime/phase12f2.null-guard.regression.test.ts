@@ -47,8 +47,21 @@ function run(): void {
     recent_turns: [],
   });
   assert.equal(completion.completion_ready, true);
+  assert.doesNotThrow(() =>
+    shouldForceCompletionReply({
+      candidateReply: "Gia sao em?",
+      completion,
+      progress: doneProgress,
+      identity: buildIdentityProfileFromPersona({
+        salutation_style: "anh-em",
+        display_name: "Anh Nam",
+      }),
+      recentReplies: [],
+      nextUnresolvedTopic: nullNext,
+    }),
+  );
   const forced = shouldForceCompletionReply({
-    candidateReply: "Gia sao em?",
+    candidateReply: "Anh xem lại một chút rồi phản hồi em sau nhé.",
     completion,
     progress: doneProgress,
     identity: buildIdentityProfileFromPersona({
@@ -58,7 +71,7 @@ function run(): void {
     recentReplies: [],
     nextUnresolvedTopic: nullNext,
   });
-  assert.equal(forced, true);
+  assert.equal(forced, false, "null-safe completion must preserve safe buyer hesitation");
 
   // 3) missing topic key in conversationProgress should fallback to default topic state.
   const broken =

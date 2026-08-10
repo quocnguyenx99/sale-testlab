@@ -12,6 +12,11 @@ import {
   LocalAIReplyResult,
 } from "./runtime/localAIRuntimeAdapter";
 
+type DetectableRuntimeState = Exclude<
+  RuntimeState,
+  "operational_followup" | "passive_followup"
+>;
+
 type InputSource = "archetypes" | "runtime_personas";
 
 interface CliArgs {
@@ -51,7 +56,7 @@ interface ArchetypeSourceRecord {
 
 interface Scenario {
   id: string;
-  runtime_state: RuntimeState;
+  runtime_state: DetectableRuntimeState;
   user_input: string;
   tags: string[];
 }
@@ -154,7 +159,7 @@ const SCENARIOS: Scenario[] = [
 ];
 
 const STATE_RULES: Record<
-  RuntimeState,
+  DetectableRuntimeState,
   {
     ruleId: string;
     ruleName: string;
@@ -842,6 +847,8 @@ function getEmptyStateScoreMap(): Record<RuntimeState, number> {
     payment_phase: 0,
     research_phase: 0,
     uncertain_interest: 0,
+    operational_followup: 0,
+    passive_followup: 0,
   };
 }
 
@@ -879,11 +886,11 @@ function detectBuyerMove(reply: string): BuyerMoveDetectionResult {
 function detectReplyState(reply: string): StateDetectionResult {
   const normalized = normalizeForStateMatch(reply);
   const candidateStateScores = getEmptyStateScoreMap();
-  let bestState: RuntimeState | null = null;
+  let bestState: DetectableRuntimeState | null = null;
   let bestScore = 0;
 
   for (const [state, rule] of Object.entries(STATE_RULES) as Array<
-    [RuntimeState, (typeof STATE_RULES)[RuntimeState]]
+    [DetectableRuntimeState, (typeof STATE_RULES)[DetectableRuntimeState]]
   >) {
     const matchedScore = rule.keywords.filter((keyword) => normalized.includes(keyword)).length;
     candidateStateScores[state] = matchedScore;
