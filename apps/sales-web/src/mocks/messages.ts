@@ -6,7 +6,7 @@ export function initialMessages(mode: TrainingMode): ChatMessage[] {
     id: 'opening-message',
     sender: 'CUSTOMER',
     content: 'Chào bạn, bên tôi đang cần trang bị khoảng 50 laptop cho đội phát triển. Tôi muốn tìm hiểu một phương án đủ mạnh nhưng vẫn hợp lý về chi phí.',
-    timestamp: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
   }]
 }
 

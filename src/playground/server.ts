@@ -62,6 +62,7 @@ import {
   applySafetyGuards,
   RuntimeReplySource
 } from "../runtime/safetyGuards";
+import { createV3Api } from "./v3/publicApi";
 
 type RuntimePersonaRecord = RuntimePersonaForPrompt & {
   source_entity_id: string;
@@ -1335,9 +1336,19 @@ async function main(): Promise<void> {
     ...enrichedPersonas.filter(p => !recommendedIds.includes(p.persona_id))
   ];
 
+  const handleV3Request = createV3Api({
+    personas: sortedEnriched,
+    startCustomer: (personaId) => handleCustomerStartEnriched(JSON.stringify({ personaId }), sortedEnriched),
+    chat: ({ sessionId, personaId, message }) => handleChatEnriched(
+      JSON.stringify({ sessionId, personaId, message }),
+      sortedEnriched
+    )
+  });
+
   const server = http.createServer(async (req, res) => {
     try {
       const url = req.url || "/";
+      if (await handleV3Request(req, res)) return;
       if (req.method === "GET" && url === "/") { text(res, 200, buildPage()); return; }
 
       if (req.method === "GET" && url === "/api/personas") {
