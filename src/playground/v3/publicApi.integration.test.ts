@@ -1,6 +1,9 @@
 import { strict as assert } from "assert";
 import * as http from "http";
 import { createV3Api } from "./publicApi";
+import { InMemorySessionRepository } from "./inMemorySessionRepository";
+import { CompatibilitySimulationOrchestrator } from "./simulationOrchestrator";
+import { SimulationService } from "./simulationService";
 
 const persona = {
   persona_id: "persona-real-001",
@@ -48,14 +51,20 @@ function collectKeys(value: unknown, keys: string[] = []): string[] {
 
 async function main(): Promise<void> {
   let chatCalls = 0;
-  const handle = createV3Api({
-    personas: [persona],
+  let runtimeFailure = false;
+  const orchestrator = new CompatibilitySimulationOrchestrator({
     startCustomer: async () => ({
       ...runtimePayload("customer-session", "Lời mở đầu thật từ runtime"),
       scenario_context: { scenario_id: "laptop-real", scenario_product: "Laptop doanh nghiệp", scenario_need: "Mua cho đội ngũ" }
     }),
-    chat: async ({ sessionId }) => { chatCalls += 1; return runtimePayload(sessionId, "FINAL GUARDED CUSTOMER RESPONSE"); }
+    chat: async ({ sessionId }) => {
+      chatCalls += 1;
+      if (runtimeFailure) throw new Error("deterministic runtime failure");
+      return runtimePayload(sessionId, "FINAL GUARDED CUSTOMER RESPONSE");
+    }
   });
+  const service = new SimulationService({ sessions: new InMemorySessionRepository(), orchestrator, personas: [persona] });
+  const handle = createV3Api(service);
   const server = http.createServer(async (req, res) => { if (!await handle(req, res)) { res.writeHead(404); res.end(); } });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -70,7 +79,13 @@ async function main(): Promise<void> {
     const list = await json("/api/v3/personas");
     assert.equal(list.status, 200);
     assert.equal((list.body.personas as unknown[]).length, 1);
+    assert.deepEqual(collectKeys(list.body).filter((key) => /source_entity|stock_qty|prompt|constraint|guard/i.test(key)), []);
+    const detail = await json(`/api/v3/personas/${persona.persona_id}`);
+    assert.equal(detail.status, 200);
+    assert.equal((detail.body.persona as { id: string }).id, persona.persona_id);
     assert.equal((await json("/api/v3/personas/unknown")).status, 404);
+    assert.equal((await json("/api/v3/sessions", { method: "POST", body: JSON.stringify({ personaId: "unknown", mode: "SALE_FIRST" }) })).status, 404);
+    assert.equal((await json("/api/v3/sessions", { method: "POST", body: JSON.stringify({ personaId: persona.persona_id, mode: "INVALID" }) })).status, 400);
 
     const customerFirst = await json("/api/v3/sessions", { method: "POST", body: JSON.stringify({ personaId: persona.persona_id, mode: "CUSTOMER_FIRST" }) });
     assert.equal(customerFirst.status, 201);
@@ -98,6 +113,12 @@ async function main(): Promise<void> {
     const stopped = await json(`/api/v3/sessions/${saleSession.id}/stop`, { method: "POST", body: "{}" });
     assert.equal((stopped.body.result as { turnCount: number }).turnCount, 1);
     assert.equal((stopped.body.session as { status: string }).status, "COMPLETED");
+    const stoppedAgain = await json(`/api/v3/sessions/${saleSession.id}/stop`, { method: "POST", body: "{}" });
+    assert.deepEqual(stoppedAgain.body.result, stopped.body.result);
+    assert.equal((await json(`/api/v3/sessions/${saleSession.id}/messages`, { method: "POST", body: JSON.stringify({ message: "Sau stop" }) })).status, 409);
+    const failureSession = await json("/api/v3/sessions", { method: "POST", body: JSON.stringify({ personaId: persona.persona_id, mode: "SALE_FIRST" }) });
+    runtimeFailure = true;
+    assert.equal((await json(`/api/v3/sessions/${(failureSession.body.session as { id: string }).id}/messages`, { method: "POST", body: JSON.stringify({ message: "Runtime fail" }) })).status, 503);
     assert.equal((await json("/api/v3/sessions/unknown")).status, 404);
     console.log("V3 public API integration tests: PASS");
   } finally {

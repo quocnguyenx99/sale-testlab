@@ -27,7 +27,8 @@
     "test:phase12e": "tsx src/runtime/phase12e.regression.test.ts",
     "test:phase12f": "tsx src/runtime/phase12f.regression.test.ts",
     "test:phase12f2": "tsx src/runtime/phase12f2.regression.test.ts",
-    "test:v3-api": "tsx src/playground/v3/publicApi.integration.test.ts"
+    "test:v3-api": "tsx src/playground/v3/publicApi.integration.test.ts",
+    "test:v3-session": "tsx src/playground/v3/simulationService.test.ts"
   },
   "keywords": [],
   "author": "",

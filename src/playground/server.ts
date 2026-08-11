@@ -63,6 +63,9 @@ import {
   RuntimeReplySource
 } from "../runtime/safetyGuards";
 import { createV3Api } from "./v3/publicApi";
+import { InMemorySessionRepository } from "./v3/inMemorySessionRepository";
+import { CompatibilitySimulationOrchestrator } from "./v3/simulationOrchestrator";
+import { SimulationService } from "./v3/simulationService";
 
 type RuntimePersonaRecord = RuntimePersonaForPrompt & {
   source_entity_id: string;
@@ -1336,14 +1339,20 @@ async function main(): Promise<void> {
     ...enrichedPersonas.filter(p => !recommendedIds.includes(p.persona_id))
   ];
 
-  const handleV3Request = createV3Api({
-    personas: sortedEnriched,
+  const v3SessionRepository = new InMemorySessionRepository();
+  const v3Orchestrator = new CompatibilitySimulationOrchestrator({
     startCustomer: (personaId) => handleCustomerStartEnriched(JSON.stringify({ personaId }), sortedEnriched),
     chat: ({ sessionId, personaId, message }) => handleChatEnriched(
       JSON.stringify({ sessionId, personaId, message }),
       sortedEnriched
     )
   });
+  const v3SimulationService = new SimulationService({
+    sessions: v3SessionRepository,
+    orchestrator: v3Orchestrator,
+    personas: sortedEnriched
+  });
+  const handleV3Request = createV3Api(v3SimulationService);
 
   const server = http.createServer(async (req, res) => {
     try {
