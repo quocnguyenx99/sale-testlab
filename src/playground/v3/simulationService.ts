@@ -17,6 +17,7 @@ export type SimulationErrorCode =
   | "SESSION_NOT_FOUND"
   | "SESSION_COMPLETED"
   | "SESSION_PERSONA_MISMATCH"
+  | "SESSION_FORBIDDEN"
   | "MESSAGE_REQUIRED"
   | "MESSAGE_TOO_LONG"
   | "RUNTIME_UNAVAILABLE";
@@ -89,6 +90,7 @@ export class SimulationService {
   private readonly personasById: Map<string, SimulationPersonaSnapshot>;
   private readonly now: () => Date;
   private readonly createId: () => string;
+  private readonly turnLocks = new Map<string, Promise<void>>();
 
   constructor(private readonly dependencies: SimulationServiceDependencies) {
     this.personasById = new Map(dependencies.personas.map((persona) => [persona.persona_id, personaSnapshot(persona)]));
@@ -106,7 +108,7 @@ export class SimulationService {
     return persona;
   }
 
-  async createSession(personaId: string, mode: unknown): Promise<SimulationSession> {
+  async createSession(personaId: string, mode: unknown, userId = "phase3-compatibility"): Promise<SimulationSession> {
     const persona = this.getPersona(personaId);
     if (mode !== "CUSTOMER_FIRST" && mode !== "SALE_FIRST") {
       throw new SimulationServiceError("INVALID_MODE", "Chế độ luyện tập không hợp lệ.");
@@ -117,6 +119,7 @@ export class SimulationService {
     let scenario = defaultScenario(snapshot);
     let messages: SimulationMessage[] = [];
     let runtimeInsight: SimulationSession["runtimeInsight"] = null;
+    let runtimeSnapshot: SimulationSession["runtimeSnapshot"] = null;
 
     if (mode === "CUSTOMER_FIRST") {
       const opening = await this.callRuntime(() => this.dependencies.orchestrator.startCustomer(personaId));
@@ -125,10 +128,12 @@ export class SimulationService {
       scenario = opening.scenario ? { ...opening.scenario, difficulty: snapshot.difficulty } : scenario;
       messages = [{ id: this.createId(), sender: "CUSTOMER", content: opening.finalCustomerReply, createdAt: this.now().toISOString() }];
       runtimeInsight = opening.runtimeInsight;
+      runtimeSnapshot = opening.runtimeSnapshot;
     }
 
     const session: SimulationSession = {
       id,
+      userId,
       runtimeSessionId,
       personaId,
       personaSnapshot: snapshot,
@@ -139,20 +144,45 @@ export class SimulationService {
       completedAt: null,
       messages,
       runtimeInsight,
+      runtimeSnapshot,
       signals: []
     };
-    await this.dependencies.sessions.save(session);
+    try {
+      await this.dependencies.sessions.save(session);
+    } catch (error) {
+      await this.dependencies.orchestrator.ensureRuntime?.({
+        runtimeSessionId: session.runtimeSessionId,
+        personaId: session.personaId,
+        messages: [],
+        snapshot: null
+      }, true);
+      throw error;
+    }
     return session;
   }
 
-  async getSession(sessionId: string): Promise<SimulationSession> {
+  async getSession(sessionId: string, userId?: string): Promise<SimulationSession> {
     const session = await this.dependencies.sessions.findById(sessionId);
     if (!session) throw new SimulationServiceError("SESSION_NOT_FOUND", "Phiên luyện tập không tồn tại hoặc đã hết hạn.");
+    if (userId && session.userId !== userId) throw new SimulationServiceError("SESSION_FORBIDDEN", "Phiên luyện tập không tồn tại hoặc đã hết hạn.");
+    if (session.status === "RUNNING" && session.runtimeSnapshot) {
+      try {
+        await this.dependencies.orchestrator.ensureRuntime?.({
+          runtimeSessionId: session.runtimeSessionId,
+          personaId: session.personaId,
+          messages: session.messages,
+          snapshot: session.runtimeSnapshot
+        });
+      } catch {
+        throw new SimulationServiceError("RUNTIME_UNAVAILABLE", "Không thể khôi phục phiên Runtime. Vui lòng thử lại.");
+      }
+    }
     return session;
   }
 
-  async sendMessage(sessionId: string, messageInput: unknown, requestedPersonaId?: unknown): Promise<SendMessageResult> {
-    const session = await this.getSession(sessionId);
+  async sendMessage(sessionId: string, messageInput: unknown, requestedPersonaId?: unknown, userId?: string): Promise<SendMessageResult> {
+    return this.withSessionLock(sessionId, async () => {
+    const session = await this.getSession(sessionId, userId);
     if (session.status !== "RUNNING") throw new SimulationServiceError("SESSION_COMPLETED", "Phiên luyện tập đã kết thúc.");
     if (typeof requestedPersonaId === "string" && requestedPersonaId !== session.personaId) {
       throw new SimulationServiceError("SESSION_PERSONA_MISMATCH", "Phiên không thuộc khách hàng đã chọn.");
@@ -177,20 +207,34 @@ export class SimulationService {
       ...session,
       messages: [...session.messages, saleMessage, customerMessage],
       runtimeInsight: runtime.runtimeInsight,
+      runtimeSnapshot: runtime.runtimeSnapshot,
       signals: runtime.signals
     };
     if (runtime.shouldEndSession) this.complete(updated);
-    await this.dependencies.sessions.save(updated);
+    try {
+      await this.dependencies.sessions.save(updated);
+    } catch (error) {
+      await this.dependencies.orchestrator.ensureRuntime?.({
+        runtimeSessionId: session.runtimeSessionId,
+        personaId: session.personaId,
+        messages: session.messages,
+        snapshot: session.runtimeSnapshot
+      }, true);
+      throw error;
+    }
     return { saleMessage, customerMessage, session: updated };
+    });
   }
 
-  async stopSession(sessionId: string): Promise<SimulationSession> {
-    const session = await this.getSession(sessionId);
+  async stopSession(sessionId: string, userId?: string): Promise<SimulationSession> {
+    return this.withSessionLock(sessionId, async () => {
+    const session = await this.getSession(sessionId, userId);
     if (session.status === "COMPLETED" && session.result && session.completedAt) return session;
     const updated: SimulationSession = { ...session };
     this.complete(updated);
     await this.dependencies.sessions.save(updated);
     return updated;
+    });
   }
 
   private complete(session: SimulationSession): void {
@@ -205,6 +249,20 @@ export class SimulationService {
       return await operation();
     } catch {
       throw new SimulationServiceError("RUNTIME_UNAVAILABLE", "Khách hàng AI chưa thể phản hồi. Vui lòng thử lại.");
+    }
+  }
+
+  private async withSessionLock<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.turnLocks.get(sessionId) ?? Promise.resolve();
+    let release = (): void => {};
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    this.turnLocks.set(sessionId, current);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.turnLocks.get(sessionId) === current) this.turnLocks.delete(sessionId);
     }
   }
 }

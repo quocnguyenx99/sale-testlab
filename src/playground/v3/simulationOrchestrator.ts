@@ -1,7 +1,9 @@
 import {
+  SimulationMessage,
   SimulationRuntimeInsight,
   SimulationScenarioSnapshot
 } from "./simulationSession";
+import { RuntimeRecoverySnapshot } from "./runtimeRecovery";
 
 type RuntimePayload = Record<string, unknown>;
 
@@ -12,16 +14,28 @@ export interface OrchestrationResult {
   scenario: SimulationScenarioSnapshot | null;
   signals: string[];
   shouldEndSession: boolean;
+  runtimeSnapshot: RuntimeRecoverySnapshot | null;
+}
+
+export interface RuntimeHydrationInput {
+  runtimeSessionId: string;
+  personaId: string;
+  messages: SimulationMessage[];
+  snapshot: RuntimeRecoverySnapshot | null;
 }
 
 export interface SimulationOrchestrator {
   startCustomer(personaId: string): Promise<OrchestrationResult>;
   handleSaleMessage(input: { runtimeSessionId: string; personaId: string; message: string }): Promise<OrchestrationResult>;
+  ensureRuntime?(input: RuntimeHydrationInput, force?: boolean): Promise<void>;
 }
 
 export interface CompatibilityOrchestratorCallbacks {
   startCustomer: (personaId: string) => Promise<RuntimePayload>;
   chat: (input: { sessionId: string; personaId: string; message: string }) => Promise<RuntimePayload>;
+  hasSession?: (sessionId: string) => boolean;
+  restoreSession?: (input: RuntimeHydrationInput) => void;
+  discardSession?: (sessionId: string) => void;
 }
 
 const TOPICS = ["product_model", "configuration", "price", "stock", "delivery", "warranty", "payment", "invoice_or_document", "next_step"];
@@ -91,7 +105,8 @@ function toResult(payload: RuntimePayload): OrchestrationResult {
     runtimeInsight: runtimeInsight(payload),
     scenario: scenario(payload),
     signals: signals(payload),
-    shouldEndSession: payload.should_end_session === true
+    shouldEndSession: payload.should_end_session === true,
+    runtimeSnapshot: record(payload.runtime_snapshot) as unknown as RuntimeRecoverySnapshot | null
   };
 }
 
@@ -110,5 +125,15 @@ export class CompatibilitySimulationOrchestrator implements SimulationOrchestrat
     }));
     if (result.runtimeSessionId !== input.runtimeSessionId) throw new Error("Runtime session linkage mismatch");
     return result;
+  }
+
+  async ensureRuntime(input: RuntimeHydrationInput, force = false): Promise<void> {
+    if (force && !input.snapshot) {
+      this.callbacks.discardSession?.(input.runtimeSessionId);
+      return;
+    }
+    if (!input.snapshot || !this.callbacks.restoreSession) return;
+    if (!force && this.callbacks.hasSession?.(input.runtimeSessionId)) return;
+    this.callbacks.restoreSession(input);
   }
 }

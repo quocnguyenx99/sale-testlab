@@ -29,7 +29,8 @@ function result(runtimeSessionId: string, reply: string, shouldEndSession = fals
     },
     scenario: { id: "scenario-1", title: "Laptop doanh nghiệp", description: "Mua cho đội ngũ", difficulty: "MEDIUM" },
     signals: ["quote_request_signal"],
-    shouldEndSession
+    shouldEndSession,
+    runtimeSnapshot: null
   };
 }
 

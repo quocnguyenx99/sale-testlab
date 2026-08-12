@@ -1,0 +1,20 @@
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: ${TESTLAB_MYSQL_DATABASE}
+      MYSQL_USER: ${TESTLAB_MYSQL_USER}
+      MYSQL_PASSWORD: ${TESTLAB_MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${TESTLAB_MYSQL_ROOT_PASSWORD}
+    ports:
+      - "${TESTLAB_MYSQL_PORT:-3306}:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "--password=${TESTLAB_MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - testlab_mysql_data:/var/lib/mysql
+
+volumes:
+  testlab_mysql_data:

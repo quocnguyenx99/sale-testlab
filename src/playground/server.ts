@@ -63,9 +63,17 @@ import {
   RuntimeReplySource
 } from "../runtime/safetyGuards";
 import { createV3Api } from "./v3/publicApi";
-import { InMemorySessionRepository } from "./v3/inMemorySessionRepository";
 import { CompatibilitySimulationOrchestrator } from "./v3/simulationOrchestrator";
 import { SimulationService } from "./v3/simulationService";
+import { DatabaseSessionRepository } from "./v3/databaseSessionRepository";
+import { DatabaseAuthRepository } from "./v3/databaseAuthRepository";
+import { AuthService } from "./v3/authService";
+import { prisma } from "./v3/prismaClient";
+import {
+  rebuildRuntimeState,
+  RuntimeRecoverySnapshot,
+  toSafeRuntimeMemory
+} from "./v3/runtimeRecovery";
 
 type RuntimePersonaRecord = RuntimePersonaForPrompt & {
   source_entity_id: string;
@@ -136,6 +144,56 @@ const ENRICHED_SUMMARY_FILE = path.join(process.cwd(), "sale-testlab-data", "10d
 const RUNTIME_FILE = path.join(process.cwd(), "sale-testlab-data", "07_runtime_personas", MONTH, "runtime_personas.jsonl");
 
 const sessions = new Map<string, ChatSession>();
+
+function runtimeSnapshot(session: ChatSession): RuntimeRecoverySnapshot | null {
+  if (!session.memorySlots || !session.conversationProgress || !session.identityProfile) return null;
+  return {
+    version: 1,
+    currentState: session.currentState,
+    memory: toSafeRuntimeMemory(session.memorySlots),
+    conversationProgress: session.conversationProgress,
+    identityProfile: session.identityProfile,
+    identitySource: session.identitySource || "persona",
+    personaSalutationStyle: session.personaSalutationStyle || "",
+    recentFallbackVariantIds: session.recentFallbackVariantIds || [],
+    scenarioContext: session.scenarioContext ? {
+      scenario_id: session.scenarioContext.scenario_id,
+      scenario_product: session.scenarioContext.scenario_product,
+      scenario_need: session.scenarioContext.scenario_need,
+      scenario_priority: session.scenarioContext.scenario_priority
+    } : null
+  };
+}
+
+function restoreRuntimeSession(
+  input: { runtimeSessionId: string; personaId: string; messages: import("./v3/simulationSession").SimulationMessage[]; snapshot: RuntimeRecoverySnapshot | null },
+  enriched: EnrichedPersona[]
+): void {
+  if (!input.snapshot) throw new Error("Runtime recovery snapshot missing");
+  const persona = enriched.find((item) => item.persona_id === input.personaId);
+  if (!persona) throw new Error("Runtime recovery persona missing");
+  const recovered = rebuildRuntimeState(input.messages, input.snapshot);
+  const source = input.snapshot.scenarioContext;
+  const scenarioContext: ProductScenario | undefined = source ? {
+    ...source,
+    category: "",
+    suitable_persona_patterns: [],
+    opening_templates: []
+  } : undefined;
+  sessions.set(input.runtimeSessionId, {
+    sessionId: input.runtimeSessionId,
+    enrichedPersona: persona,
+    currentState: input.snapshot.currentState,
+    turns: recovered.turns,
+    scenarioContext,
+    memorySlots: recovered.memorySlots,
+    conversationProgress: recovered.conversationProgress,
+    identityProfile: input.snapshot.identityProfile,
+    identitySource: input.snapshot.identitySource,
+    personaSalutationStyle: input.snapshot.personaSalutationStyle,
+    recentFallbackVariantIds: input.snapshot.recentFallbackVariantIds
+  });
+}
 
 function readJsonl<T>(filePath: string): T[] {
   if (!fs.existsSync(filePath)) throw new Error(`Runtime personas not found: ${filePath}`);
@@ -1156,6 +1214,8 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[]):
     recentFallbackVariantIds: updatedFallbackVariantIds
   });
 
+  const persistedRuntimeSnapshot = runtimeSnapshot(sessions.get(sessionId)!);
+
   return {
     sessionId, persona_id: ep.persona_id, runtime_state: nextState,
     state_confidence: routeAfter.confidence, matched_rules: routeAfter.matched_rules,
@@ -1227,7 +1287,8 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[]):
     closing_signals: dealStateResult.closing_signals,
     objection_signals: dealStateResult.objection_signals,
     completion_topic_used: completionTopicUsed,
-    forbidden_phrase_matches: Array.from(new Set([...assistantHits, ...identityDrift.forbidden_phrase_matches]))
+    forbidden_phrase_matches: Array.from(new Set([...assistantHits, ...identityDrift.forbidden_phrase_matches])),
+    runtime_snapshot: persistedRuntimeSnapshot
   };
 }
 async function handleCustomerStartEnriched(bodyRaw: string, enriched: EnrichedPersona[]): Promise<Record<string, unknown>> {
@@ -1279,6 +1340,7 @@ async function handleCustomerStartEnriched(bodyRaw: string, enriched: EnrichedPe
     personaSalutationStyle,
     recentFallbackVariantIds: []
   });
+  const persistedRuntimeSnapshot = runtimeSnapshot(sessions.get(sessionId)!);
   return {
     sessionId, persona_id: ep.persona_id, runtime_state: state, state_confidence: 0.8,
     matched_rules: ["enriched_persona_opening"], fallback_reason: null,
@@ -1316,11 +1378,13 @@ async function handleCustomerStartEnriched(bodyRaw: string, enriched: EnrichedPe
     next_best_action: dealStateResult.next_best_action,
     buying_signals: dealStateResult.buying_signals,
     closing_signals: dealStateResult.closing_signals,
-    objection_signals: dealStateResult.objection_signals
+    objection_signals: dealStateResult.objection_signals,
+    runtime_snapshot: persistedRuntimeSnapshot
   };
 }
 
 async function main(): Promise<void> {
+  await prisma.$connect();
   const enrichedPersonas = fs.existsSync(ENRICHED_FILE)
     ? readJsonl<EnrichedPersona>(ENRICHED_FILE)
     : [];
@@ -1339,20 +1403,27 @@ async function main(): Promise<void> {
     ...enrichedPersonas.filter(p => !recommendedIds.includes(p.persona_id))
   ];
 
-  const v3SessionRepository = new InMemorySessionRepository();
+  const v3SessionRepository = new DatabaseSessionRepository(prisma);
   const v3Orchestrator = new CompatibilitySimulationOrchestrator({
     startCustomer: (personaId) => handleCustomerStartEnriched(JSON.stringify({ personaId }), sortedEnriched),
     chat: ({ sessionId, personaId, message }) => handleChatEnriched(
       JSON.stringify({ sessionId, personaId, message }),
       sortedEnriched
-    )
+    ),
+    hasSession: (sessionId) => sessions.has(sessionId),
+    restoreSession: (input) => restoreRuntimeSession(input, sortedEnriched),
+    discardSession: (sessionId) => { sessions.delete(sessionId); }
   });
   const v3SimulationService = new SimulationService({
     sessions: v3SessionRepository,
     orchestrator: v3Orchestrator,
     personas: sortedEnriched
   });
-  const handleV3Request = createV3Api(v3SimulationService);
+  const v3AuthService = new AuthService(
+    new DatabaseAuthRepository(prisma),
+    { ttlHours: Number(process.env.AUTH_SESSION_TTL_HOURS || 168) }
+  );
+  const handleV3Request = createV3Api({ service: v3SimulationService, auth: v3AuthService });
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -1415,7 +1486,10 @@ async function main(): Promise<void> {
   });
 }
 
-main();
+main().catch(() => {
+  console.error("Playground startup failed: database or runtime initialization unavailable.");
+  process.exitCode = 1;
+});
 
 
 

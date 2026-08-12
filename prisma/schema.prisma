@@ -1,0 +1,101 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SALE
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum SimulationMode {
+  CUSTOMER_FIRST
+  SALE_FIRST
+}
+
+enum SimulationStatus {
+  RUNNING
+  COMPLETED
+}
+
+enum TurnSender {
+  CUSTOMER
+  SALE
+}
+
+model User {
+  id           String              @id @default(uuid()) @db.Char(36)
+  email        String              @unique @db.VarChar(255)
+  passwordHash String              @map("password_hash") @db.VarChar(255)
+  displayName  String              @map("display_name") @db.VarChar(160)
+  role         UserRole            @default(SALE)
+  status       UserStatus          @default(ACTIVE)
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+  lastLoginAt  DateTime?           @map("last_login_at")
+  authSessions AuthSession[]
+  simulations  SimulationSession[]
+
+  @@map("users")
+}
+
+model AuthSession {
+  id         String    @id @default(uuid()) @db.Char(36)
+  userId     String    @map("user_id") @db.Char(36)
+  tokenHash  String    @unique @map("token_hash") @db.Char(64)
+  expiresAt  DateTime  @map("expires_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  lastSeenAt DateTime? @map("last_seen_at")
+  revokedAt  DateTime? @map("revoked_at")
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("auth_sessions")
+}
+
+model SimulationSession {
+  id                String             @id @db.Char(36)
+  userId            String             @map("user_id") @db.Char(36)
+  personaId         String             @map("persona_id") @db.VarChar(160)
+  mode              SimulationMode
+  status            SimulationStatus
+  personaSnapshot   Json               @map("persona_snapshot")
+  scenarioSnapshot  Json               @map("scenario_snapshot")
+  runtimeSessionId  String             @map("runtime_session_id") @db.Char(36)
+  runtimeSnapshot   Json?              @map("runtime_snapshot")
+  runtimeInsight    Json?              @map("runtime_insight")
+  signals           Json
+  result             Json?
+  version            Int                @default(1)
+  createdAt          DateTime           @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  completedAt        DateTime?          @map("completed_at")
+  user               User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  turns              ConversationTurn[]
+
+  @@index([userId, createdAt])
+  @@map("simulation_sessions")
+}
+
+model ConversationTurn {
+  id        String            @id @db.Char(36)
+  sessionId String            @map("session_id") @db.Char(36)
+  sequence  Int
+  sender    TurnSender
+  content   String            @db.Text
+  createdAt DateTime          @map("created_at")
+  session   SimulationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, sequence])
+  @@index([sessionId, createdAt])
+  @@map("conversation_turns")
+}

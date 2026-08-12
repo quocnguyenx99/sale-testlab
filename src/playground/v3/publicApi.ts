@@ -18,6 +18,9 @@ import {
   toPublicSessionResult
 } from "./publicDtoMapper";
 import { SimulationService, SimulationServiceError } from "./simulationService";
+import { AuthService, AuthServiceError } from "./authService";
+
+const AUTH_COOKIE = "testlab_session";
 
 class HttpRequestError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string) {
@@ -29,12 +32,13 @@ function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
-function sendJson(res: http.ServerResponse, status: number, payload: unknown): void {
+function sendJson(res: http.ServerResponse, status: number, payload: unknown, headers: Record<string, string> = {}): void {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": Buffer.byteLength(body),
-    "Cache-Control": "no-store"
+    "Cache-Control": "no-store",
+    ...headers
   });
   res.end(body);
 }
@@ -66,18 +70,58 @@ function readJsonBody(req: http.IncomingMessage): Promise<Record<string, unknown
 }
 
 function statusFor(error: SimulationServiceError): number {
-  if (error.code === "PERSONA_NOT_FOUND" || error.code === "SESSION_NOT_FOUND") return 404;
+  if (error.code === "PERSONA_NOT_FOUND" || error.code === "SESSION_NOT_FOUND" || error.code === "SESSION_FORBIDDEN") return 404;
   if (error.code === "SESSION_COMPLETED" || error.code === "SESSION_PERSONA_MISMATCH") return 409;
   if (error.code === "RUNTIME_UNAVAILABLE") return 503;
   return 400;
 }
 
-export function createV3Api(service: SimulationService) {
+function cookie(req: http.IncomingMessage, name: string): string | null {
+  for (const part of (req.headers.cookie || "").split(";")) {
+    const [key, ...value] = part.trim().split("=");
+    if (key === name) return decodeURIComponent(value.join("="));
+  }
+  return null;
+}
+
+function authCookie(token: string, expiresAt: Date): string {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return `${AUTH_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Expires=${expiresAt.toUTCString()}${secure}`;
+}
+
+function clearAuthCookie(): string {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return `${AUTH_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`;
+}
+
+export function createV3Api(dependencies: { service: SimulationService; auth: AuthService }) {
+  const { service, auth } = dependencies;
   return async function handleV3Request(req: http.IncomingMessage, res: http.ServerResponse): Promise<boolean> {
     const pathname = new URL(req.url || "/", "http://localhost").pathname;
     if (!pathname.startsWith("/api/v3/")) return false;
 
     try {
+      if (req.method === "POST" && pathname === "/api/v3/auth/login") {
+        const body = await readJsonBody(req);
+        const result = await auth.login(body.email, body.password);
+        sendJson(res, 200, { user: result.user }, { "Set-Cookie": authCookie(result.token, result.expiresAt) });
+        return true;
+      }
+
+      if (req.method === "GET" && pathname === "/api/v3/auth/me") {
+        const user = await auth.currentUser(cookie(req, AUTH_COOKIE));
+        sendJson(res, 200, { user });
+        return true;
+      }
+
+      if (req.method === "POST" && pathname === "/api/v3/auth/logout") {
+        await auth.logout(cookie(req, AUTH_COOKIE));
+        sendJson(res, 200, { ok: true }, { "Set-Cookie": clearAuthCookie() });
+        return true;
+      }
+
+      const currentUser = await auth.currentUser(cookie(req, AUTH_COOKIE));
+
       if (req.method === "GET" && pathname === "/api/v3/personas") {
         sendJson(res, 200, { personas: service.listPersonas().map(toPublicPersona) });
         return true;
@@ -92,14 +136,14 @@ export function createV3Api(service: SimulationService) {
       if (req.method === "POST" && pathname === "/api/v3/sessions") {
         const body = await readJsonBody(req);
         const personaId = typeof body.personaId === "string" ? body.personaId.trim() : "";
-        const session = await service.createSession(personaId, body.mode);
+        const session = await service.createSession(personaId, body.mode, currentUser.id);
         sendJson(res, 201, { session: toPublicSession(session) });
         return true;
       }
 
       const sessionMatch = pathname.match(/^\/api\/v3\/sessions\/([^/]+)$/);
       if (req.method === "GET" && sessionMatch) {
-        const session = await service.getSession(decodeURIComponent(sessionMatch[1]));
+        const session = await service.getSession(decodeURIComponent(sessionMatch[1]), currentUser.id);
         sendJson(res, 200, { session: toPublicSession(session) });
         return true;
       }
@@ -110,7 +154,8 @@ export function createV3Api(service: SimulationService) {
         const result = await service.sendMessage(
           decodeURIComponent(messageMatch[1]),
           body.message,
-          body.personaId
+          body.personaId,
+          currentUser.id
         );
         if (!result.session.runtimeInsight) throw new Error("Runtime insight missing after message");
         sendJson(res, 200, {
@@ -124,7 +169,7 @@ export function createV3Api(service: SimulationService) {
 
       const stopMatch = pathname.match(/^\/api\/v3\/sessions\/([^/]+)\/stop$/);
       if (req.method === "POST" && stopMatch) {
-        const session = await service.stopSession(decodeURIComponent(stopMatch[1]));
+        const session = await service.stopSession(decodeURIComponent(stopMatch[1]), currentUser.id);
         if (!session.result) throw new Error("Session result missing after stop");
         sendJson(res, 200, { session: toPublicSession(session), result: toPublicSessionResult(session.result) });
         return true;
@@ -136,8 +181,10 @@ export function createV3Api(service: SimulationService) {
         sendJson(res, error.status, { error: { code: error.code, message: error.message } });
       } else if (error instanceof SimulationServiceError) {
         sendJson(res, statusFor(error), { error: { code: error.code, message: error.message } });
+      } else if (error instanceof AuthServiceError) {
+        sendJson(res, 401, { error: { code: error.code, message: error.message } });
       } else {
-        sendJson(res, 503, { error: { code: "RUNTIME_UNAVAILABLE", message: "Khách hàng AI chưa thể phản hồi. Vui lòng thử lại." } });
+        sendJson(res, 503, { error: { code: "SERVICE_UNAVAILABLE", message: "Dịch vụ tạm thời chưa sẵn sàng. Vui lòng thử lại." } });
       }
       return true;
     }

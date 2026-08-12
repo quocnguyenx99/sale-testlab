@@ -4,6 +4,9 @@ import { createV3Api } from "./publicApi";
 import { InMemorySessionRepository } from "./inMemorySessionRepository";
 import { CompatibilitySimulationOrchestrator } from "./simulationOrchestrator";
 import { SimulationService } from "./simulationService";
+import { AuthService } from "./authService";
+import { AuthRepository, AuthUserRecord } from "./authRepository";
+import { hash } from "bcryptjs";
 
 const persona = {
   persona_id: "persona-real-001",
@@ -64,18 +67,39 @@ async function main(): Promise<void> {
     }
   });
   const service = new SimulationService({ sessions: new InMemorySessionRepository(), orchestrator, personas: [persona] });
-  const handle = createV3Api(service);
+  const user: AuthUserRecord = {
+    id: "user-001", email: "sale@example.test", passwordHash: await hash("valid-password", 4),
+    displayName: "Sale Test", role: "SALE", status: "ACTIVE"
+  };
+  let activeTokenHash = "";
+  const authRepository: AuthRepository = {
+    findUserByEmail: async (email) => email === user.email ? user : null,
+    createSession: async (input) => { activeTokenHash = input.tokenHash; },
+    findUserBySessionTokenHash: async (tokenHash) => tokenHash === activeTokenHash ? user : null,
+    revokeSession: async () => { activeTokenHash = ""; },
+    touchUserLogin: async () => undefined
+  };
+  const auth = new AuthService(authRepository, { createToken: () => "raw-test-token" });
+  const handle = createV3Api({ service, auth });
   const server = http.createServer(async (req, res) => { if (!await handle(req, res)) { res.writeHead(404); res.end(); } });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   assert(address && typeof address !== "string");
   const base = `http://127.0.0.1:${address.port}`;
+  let cookieHeader = "";
   const json = async (path: string, init?: RequestInit) => {
-    const response = await fetch(`${base}${path}`, { ...init, headers: { "Content-Type": "application/json" } });
-    return { status: response.status, body: await response.json() as Record<string, unknown> };
+    const response = await fetch(`${base}${path}`, { ...init, headers: { "Content-Type": "application/json", ...(cookieHeader ? { Cookie: cookieHeader } : {}) } });
+    const setCookie = response.headers.get("set-cookie");
+    if (setCookie) cookieHeader = setCookie.split(";")[0];
+    return { status: response.status, body: await response.json() as Record<string, unknown>, setCookie };
   };
 
   try {
+    assert.equal((await json("/api/v3/personas")).status, 401);
+    const login = await json("/api/v3/auth/login", { method: "POST", body: JSON.stringify({ email: user.email, password: "valid-password" }) });
+    assert.equal(login.status, 200);
+    assert.match(login.setCookie || "", /HttpOnly/);
+    assert.equal((await json("/api/v3/auth/me")).status, 200);
     const list = await json("/api/v3/personas");
     assert.equal(list.status, 200);
     assert.equal((list.body.personas as unknown[]).length, 1);
@@ -120,6 +144,8 @@ async function main(): Promise<void> {
     runtimeFailure = true;
     assert.equal((await json(`/api/v3/sessions/${(failureSession.body.session as { id: string }).id}/messages`, { method: "POST", body: JSON.stringify({ message: "Runtime fail" }) })).status, 503);
     assert.equal((await json("/api/v3/sessions/unknown")).status, 404);
+    assert.equal((await json("/api/v3/auth/logout", { method: "POST", body: "{}" })).status, 200);
+    assert.equal((await json("/api/v3/auth/me")).status, 401);
     console.log("V3 public API integration tests: PASS");
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

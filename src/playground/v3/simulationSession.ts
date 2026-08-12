@@ -59,6 +59,7 @@ export interface SimulationResult {
 
 export interface SimulationSession {
   id: string;
+  userId: string;
   runtimeSessionId: string;
   personaId: string;
   personaSnapshot: SimulationPersonaSnapshot;
@@ -69,6 +70,8 @@ export interface SimulationSession {
   completedAt: string | null;
   messages: SimulationMessage[];
   runtimeInsight: SimulationRuntimeInsight | null;
+  runtimeSnapshot: RuntimeRecoverySnapshot | null;
   signals: string[];
   result?: SimulationResult;
 }
+import type { RuntimeRecoverySnapshot } from "./runtimeRecovery";

@@ -28,16 +28,29 @@
     "test:phase12f": "tsx src/runtime/phase12f.regression.test.ts",
     "test:phase12f2": "tsx src/runtime/phase12f2.regression.test.ts",
     "test:v3-api": "tsx src/playground/v3/publicApi.integration.test.ts",
-    "test:v3-session": "tsx src/playground/v3/simulationService.test.ts"
+    "test:v3-session": "tsx src/playground/v3/simulationService.test.ts",
+    "test:v3-recovery": "tsx src/playground/v3/runtimeRecovery.test.ts",
+    "test:v3-db": "tsx src/playground/v3/database.integration.test.ts",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:bootstrap": "tsx src/playground/v3/bootstrapUser.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@prisma/client": "6.19.3",
     "@types/node": "^25.7.0",
+    "bcryptjs": "^3.0.2",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "prisma": "6.19.3"
+  },
+  "overrides": {
+    "esbuild": "0.28.2"
   }
 }
