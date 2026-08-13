@@ -92,6 +92,35 @@ export interface EvaluationResponse {
   evaluation: SessionEvaluation | null
 }
 
+export interface CoachingPriority {
+  criterionKey: string
+  priorityKind: 'IMPROVEMENT' | 'REFINEMENT'
+  title: string
+  whyItMatters: string
+  observation: string
+  recommendedAction: string
+  suggestedPhrasing: string | null
+  evidenceTurnSequences: number[]
+}
+
+export interface SessionCoaching {
+  id: string
+  evaluationId: string
+  evaluatorVersion: string
+  coachVersion: string
+  status: 'COMPLETED' | 'FAILED'
+  summary: string | null
+  priorities: CoachingPriority[]
+  strengthReinforcement: { criterionKey: string; message: string } | null
+  nextPracticeFocus: string[]
+  coachedAt: string | null
+}
+
+export interface CoachingResponse {
+  state: 'LOCKED_NEEDS_EVALUATION' | 'NOT_GENERATED' | 'COMPLETED' | 'FAILED'
+  coaching: SessionCoaching | null
+}
+
 export interface SendMessageResponse {
   saleMessage: ChatMessage
   customerMessage: ChatMessage

@@ -1,11 +1,14 @@
 import * as http from "http";
 export type {
   PublicChatMessage,
+  PublicCoachingPriority,
   PublicPersona,
   PublicRecentSession,
   PublicRuntimeInsight,
   PublicScenario,
   PublicSession,
+  PublicSessionCoaching,
+  PublicSessionEvaluation,
   PublicSessionResult,
   PublicSessionStatus,
   PublicTrainingMode
@@ -17,6 +20,7 @@ import {
   toPublicRecentSession,
   toPublicRuntimeInsight,
   toPublicSession,
+  toPublicSessionCoaching,
   toPublicSessionEvaluation,
   toPublicSessionResult
 } from "./publicDtoMapper";
@@ -24,6 +28,7 @@ import { SimulationService, SimulationServiceError } from "./simulationService";
 import { AuthService, AuthServiceError } from "./authService";
 import { SessionHistoryQuery } from "./sessionRepository";
 import { EvaluationService, EvaluationServiceError } from "./evaluation/evaluationService";
+import { CoachingService, CoachingServiceError } from "./coaching/coachingService";
 
 const AUTH_COOKIE = "testlab_session";
 
@@ -126,8 +131,8 @@ function historyQuery(url: URL): SessionHistoryQuery {
   };
 }
 
-export function createV3Api(dependencies: { service: SimulationService; auth: AuthService; evaluationService?: EvaluationService }) {
-  const { service, auth, evaluationService } = dependencies;
+export function createV3Api(dependencies: { service: SimulationService; auth: AuthService; evaluationService?: EvaluationService; coachingService?: CoachingService }) {
+  const { service, auth, evaluationService, coachingService } = dependencies;
   return async function handleV3Request(req: http.IncomingMessage, res: http.ServerResponse): Promise<boolean> {
     const url = new URL(req.url || "/", "http://localhost");
     const pathname = url.pathname;
@@ -154,6 +159,20 @@ export function createV3Api(dependencies: { service: SimulationService; auth: Au
       }
 
       const currentUser = await auth.currentUser(cookie(req, AUTH_COOKIE));
+
+      const coachingMatch = pathname.match(/^\/api\/v3\/sessions\/([^/]+)\/coaching$/);
+      if (coachingMatch && (req.method === "GET" || req.method === "POST")) {
+        if (!coachingService) throw new HttpRequestError(503, "COACHING_UNAVAILABLE", "AI Coach tạm thời chưa sẵn sàng.");
+        const sessionId = decodeURIComponent(coachingMatch[1]);
+        if (req.method === "GET") {
+          const result = await coachingService.get(sessionId, currentUser.id);
+          sendJson(res, 200, { state: result.state, coaching: result.coaching ? toPublicSessionCoaching(result.coaching) : null });
+        } else {
+          const coaching = await coachingService.generate(sessionId, currentUser.id);
+          sendJson(res, 200, { state: coaching.status, coaching: toPublicSessionCoaching(coaching) });
+        }
+        return true;
+      }
 
       const evaluationMatch = pathname.match(/^\/api\/v3\/sessions\/([^/]+)\/evaluation$/);
       if (evaluationMatch && (req.method === "GET" || req.method === "POST")) {
@@ -239,6 +258,9 @@ export function createV3Api(dependencies: { service: SimulationService; auth: Au
         sendJson(res, 401, { error: { code: error.code, message: error.message } });
       } else if (error instanceof EvaluationServiceError) {
         const status = error.code === "EVALUATION_SESSION_NOT_FOUND" ? 404 : error.code === "SESSION_NOT_COMPLETED" ? 409 : 503;
+        sendJson(res, status, { error: { code: error.code, message: error.message } });
+      } else if (error instanceof CoachingServiceError) {
+        const status = error.code === "COACHING_SESSION_NOT_FOUND" ? 404 : error.code === "SESSION_NOT_COMPLETED" || error.code === "EVALUATION_REQUIRED" ? 409 : 503;
         sendJson(res, status, { error: { code: error.code, message: error.message } });
       } else {
         sendJson(res, 503, { error: { code: "SERVICE_UNAVAILABLE", message: "Dịch vụ tạm thời chưa sẵn sàng. Vui lòng thử lại." } });

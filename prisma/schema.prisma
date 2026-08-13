@@ -37,6 +37,11 @@ enum EvaluationStatus {
   FAILED
 }
 
+enum CoachingStatus {
+  COMPLETED
+  FAILED
+}
+
 model User {
   id           String              @id @default(uuid()) @db.Char(36)
   email        String              @unique @db.VarChar(255)
@@ -106,10 +111,31 @@ model SessionEvaluation {
   createdAt        DateTime           @default(now()) @map("created_at")
   updatedAt        DateTime           @updatedAt @map("updated_at")
   session          SimulationSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  coachingFeedback SessionCoachingFeedback[]
 
   @@unique([sessionId, evaluatorVersion])
   @@index([status, overallScore])
   @@map("session_evaluations")
+}
+
+model SessionCoachingFeedback {
+  id                    String            @id @default(uuid()) @db.Char(36)
+  evaluationId          String            @map("evaluation_id") @db.Char(36)
+  coachVersion          String            @map("coach_version") @db.VarChar(80)
+  status                CoachingStatus
+  summary               String?           @db.Text
+  priorities            Json?             @map("priorities_json")
+  strengthReinforcement Json?             @map("strength_reinforcement_json")
+  nextPracticeFocus     Json?             @map("next_practice_focus_json")
+  failureCode           String?           @map("failure_code") @db.VarChar(80)
+  coachedAt             DateTime?         @map("coached_at")
+  createdAt             DateTime          @default(now()) @map("created_at")
+  updatedAt             DateTime          @updatedAt @map("updated_at")
+  evaluation            SessionEvaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+
+  @@unique([evaluationId, coachVersion])
+  @@index([status, coachedAt])
+  @@map("session_coaching_feedback")
 }
 
 model ConversationTurn {

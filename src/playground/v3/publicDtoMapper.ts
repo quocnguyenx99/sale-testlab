@@ -6,9 +6,11 @@ import {
   PublicScenario,
   PublicSession,
   PublicSessionResult,
-  PublicSessionEvaluation
+  PublicSessionEvaluation,
+  PublicSessionCoaching
 } from "./publicContracts";
 import { SessionEvaluationRecord } from "./evaluation/evaluationDomain";
+import { SessionCoachingFeedback } from "./coaching/coachingDomain";
 import { RecentSessionSummary } from "./sessionRepository";
 import {
   SimulationMessage,
@@ -93,6 +95,23 @@ export function toPublicSessionEvaluation(evaluation: SessionEvaluationRecord): 
     strengths: evaluation.strengths,
     improvementAreas: evaluation.improvementAreas,
     evaluatedAt: evaluation.evaluatedAt
+  };
+}
+
+export function toPublicSessionCoaching(coaching: SessionCoachingFeedback): PublicSessionCoaching {
+  return {
+    id: coaching.id,
+    evaluationId: coaching.evaluationId,
+    evaluatorVersion: coaching.evaluatorVersion,
+    coachVersion: coaching.coachVersion,
+    status: coaching.status,
+    summary: coaching.summary,
+    priorities: coaching.priorities.map(({ criterionKey, priorityKind, title, whyItMatters, observation, recommendedAction, suggestedPhrasing, evidenceTurnSequences }) => ({
+      criterionKey, priorityKind, title, whyItMatters, observation, recommendedAction, suggestedPhrasing, evidenceTurnSequences
+    })),
+    strengthReinforcement: coaching.strengthReinforcement ? { ...coaching.strengthReinforcement } : null,
+    nextPracticeFocus: coaching.nextPracticeFocus,
+    coachedAt: coaching.coachedAt
   };
 }
 

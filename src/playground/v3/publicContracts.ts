@@ -24,6 +24,30 @@ export interface PublicSessionEvaluation {
   evaluatedAt: string | null;
 }
 
+export interface PublicCoachingPriority {
+  criterionKey: string;
+  priorityKind: "IMPROVEMENT" | "REFINEMENT";
+  title: string;
+  whyItMatters: string;
+  observation: string;
+  recommendedAction: string;
+  suggestedPhrasing: string | null;
+  evidenceTurnSequences: number[];
+}
+
+export interface PublicSessionCoaching {
+  id: string;
+  evaluationId: string;
+  evaluatorVersion: string;
+  coachVersion: string;
+  status: "COMPLETED" | "FAILED";
+  summary: string | null;
+  priorities: PublicCoachingPriority[];
+  strengthReinforcement: { criterionKey: string; message: string } | null;
+  nextPracticeFocus: string[];
+  coachedAt: string | null;
+}
+
 export interface PublicScenario {
   id: string;
   title: string;

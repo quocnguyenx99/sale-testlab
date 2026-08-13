@@ -72,6 +72,9 @@ import { prisma } from "./v3/prismaClient";
 import { DatabaseEvaluationRepository } from "./v3/evaluation/databaseEvaluationRepository";
 import { EvaluationService } from "./v3/evaluation/evaluationService";
 import { LocalAIEvaluationProvider } from "./v3/evaluation/evaluationProvider";
+import { DatabaseCoachingRepository } from "./v3/coaching/databaseCoachingRepository";
+import { CoachingService } from "./v3/coaching/coachingService";
+import { LocalAICoachingProvider } from "./v3/coaching/coachingProvider";
 import {
   rebuildRuntimeState,
   RuntimeRecoverySnapshot,
@@ -1431,7 +1434,13 @@ async function main(): Promise<void> {
     evaluations: new DatabaseEvaluationRepository(prisma),
     provider: new LocalAIEvaluationProvider()
   });
-  const handleV3Request = createV3Api({ service: v3SimulationService, auth: v3AuthService, evaluationService: v3EvaluationService });
+  const v3CoachingService = new CoachingService({
+    sessions: v3SessionRepository,
+    evaluations: new DatabaseEvaluationRepository(prisma),
+    coaching: new DatabaseCoachingRepository(prisma),
+    provider: new LocalAICoachingProvider()
+  });
+  const handleV3Request = createV3Api({ service: v3SimulationService, auth: v3AuthService, evaluationService: v3EvaluationService, coachingService: v3CoachingService });
 
   const server = http.createServer(async (req, res) => {
     try {

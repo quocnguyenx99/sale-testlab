@@ -1,5 +1,5 @@
 import { ArrowRight, Check, CheckCircle2, Circle, History, Home, RotateCcw, UsersRound } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTraining } from '../app/TrainingContext'
 import { Avatar } from '../components/ui/Avatar'
@@ -8,6 +8,8 @@ import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { LoadingState } from '../components/ui/Feedback'
 import { EvaluationSection } from '../features/practice/EvaluationSection'
+import { CoachingSection } from '../features/practice/CoachingSection'
+import type { EvaluationResponse } from '../types/training'
 import { labelMode, labelOutcome, labelSignal, labelTopic, labelTrainingStatus } from '../utils/trainingLabels'
 
 export function SessionResultPage() {
@@ -16,6 +18,8 @@ export function SessionResultPage() {
   const { session, loadSession } = useTraining()
   const [loading, setLoading] = useState(session?.id !== sessionId)
   const [error, setError] = useState('')
+  const [evaluationState, setEvaluationState] = useState<EvaluationResponse['state'] | 'LOADING'>('LOADING')
+  const handleEvaluationState = useCallback((state: EvaluationResponse['state']) => setEvaluationState(state), [])
 
   useEffect(() => {
     if (!sessionId || session?.id === sessionId) { setLoading(false); return }
@@ -35,7 +39,8 @@ export function SessionResultPage() {
       <div className="space-y-5"><Card className="p-5"><p className="text-xs font-extrabold uppercase tracking-[0.14em] text-slate-400">Khách hàng</p><div className="mt-4 flex items-center gap-4"><Avatar initials={persona.initials} color={persona.color} size="lg" /><div><h2 className="text-xl font-extrabold text-slate-950">{persona.displayName}</h2><p className="font-semibold text-blue-700">{persona.role}</p><p className="text-sm text-slate-500">{persona.customerType}</p></div></div></Card><Card className="p-5"><p className="text-xs font-extrabold uppercase tracking-[0.14em] text-slate-400">Tóm tắt phiên</p><dl className="mt-4 space-y-3 text-sm"><SummaryRow label="Lượt trao đổi của bạn" value={String(result.turnCount)} /><SummaryRow label="Thời lượng" value={duration} /><SummaryRow label="Chế độ" value={labelMode(mode)} /></dl></Card></div>
       <div className="space-y-5"><Card className="overflow-hidden"><div className="border-b border-slate-100 p-5"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div><p className="text-xs font-extrabold uppercase tracking-[0.14em] text-slate-400">Kết quả hội thoại</p><h2 className="mt-2 text-xl font-extrabold text-slate-950">{labelOutcome(result.outcome)}</h2></div><Badge className="bg-emerald-50 text-emerald-700">{labelTrainingStatus(result.trainingStatus)}</Badge></div><p className="mt-3 text-sm leading-6 text-slate-500">Đây là trạng thái phân loại từ dữ liệu phiên, độc lập với điểm đánh giá kỹ năng.</p></div><div className="grid sm:grid-cols-2"><TopicList title="Chủ đề đã trao đổi" items={result.resolvedTopics} resolved /><TopicList title="Chủ đề còn lại" items={result.missingTopics} /></div></Card><Card className="p-5"><p className="text-sm font-extrabold text-slate-800">Tín hiệu an toàn đã ghi nhận</p><div className="mt-4 flex flex-wrap gap-2">{result.signals.length ? result.signals.map((signal) => <Badge key={signal} className="bg-blue-50 text-blue-700"><Check className="mr-1.5 h-3.5 w-3.5" />{labelSignal(signal)}</Badge>) : <p className="text-sm text-slate-500">Chưa có tín hiệu đáng tin cậy để hiển thị.</p>}</div></Card></div>
     </div>
-    <EvaluationSection sessionId={session.id} />
+    <EvaluationSection sessionId={session.id} onStateChange={handleEvaluationState} />
+    <CoachingSection sessionId={session.id} evaluationState={evaluationState} />
     <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row"><Button variant="secondary" icon={<RotateCcw className="h-4 w-4" />} onClick={() => navigate(`/practice/new?personaId=${persona.id}`)}>Luyện tập lại</Button><Button variant="secondary" icon={<UsersRound className="h-4 w-4" />} onClick={() => navigate('/customers')}>Chọn khách hàng khác</Button><Button variant="secondary" icon={<History className="h-4 w-4" />} onClick={() => navigate('/history')}>Về lịch sử</Button><Button icon={<Home className="h-4 w-4" />} onClick={() => navigate('/dashboard')}>Về trang chủ<ArrowRight className="h-4 w-4" /></Button></div>
   </div>
 }

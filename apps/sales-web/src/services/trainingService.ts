@@ -1,4 +1,4 @@
-import type { EvaluationResponse, HistoryPage, HistoryQuery, PublicPersona, RecentSession, SendMessageResponse, TrainingMode, TrainingSession } from '../types/training'
+import type { CoachingResponse, EvaluationResponse, HistoryPage, HistoryQuery, PublicPersona, RecentSession, SendMessageResponse, TrainingMode, TrainingSession } from '../types/training'
 
 interface ApiErrorBody { error?: { code?: string; message?: string } }
 
@@ -93,5 +93,11 @@ export const trainingService = {
   },
   async evaluateSession(sessionId: string): Promise<EvaluationResponse> {
     return request(`/api/v3/sessions/${encodeURIComponent(sessionId)}/evaluation`, { method: 'POST', body: '{}' })
+  },
+  async getCoaching(sessionId: string): Promise<CoachingResponse> {
+    return request(`/api/v3/sessions/${encodeURIComponent(sessionId)}/coaching`)
+  },
+  async generateCoaching(sessionId: string): Promise<CoachingResponse> {
+    return request(`/api/v3/sessions/${encodeURIComponent(sessionId)}/coaching`, { method: 'POST', body: '{}' })
   },
 }

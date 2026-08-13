@@ -3,9 +3,9 @@ import { useEffect, useState } from 'react'
 import { Button } from '../../components/ui/Button'
 import { Card } from '../../components/ui/Card'
 import { trainingService } from '../../services/trainingService'
-import type { EvaluationResponse } from '../../types/training'
+import type { EvaluationResponse, SessionEvaluation } from '../../types/training'
 
-export function EvaluationSection({ sessionId }: { sessionId: string }) {
+export function EvaluationSection({ sessionId, onStateChange }: { sessionId: string; onStateChange?: (state: EvaluationResponse['state'], evaluation: SessionEvaluation | null) => void }) {
   const [data, setData] = useState<EvaluationResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [evaluating, setEvaluating] = useState(false)
@@ -13,15 +13,15 @@ export function EvaluationSection({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     let active = true
-    trainingService.getEvaluation(sessionId).then((value) => { if (active) setData(value) })
+    trainingService.getEvaluation(sessionId).then((value) => { if (active) { setData(value); onStateChange?.(value.state, value.evaluation) } })
       .catch(() => { if (active) setError('Không thể tải trạng thái đánh giá.') })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [sessionId])
+  }, [onStateChange, sessionId])
 
   const evaluate = async () => {
     setEvaluating(true); setError('')
-    try { setData(await trainingService.evaluateSession(sessionId)) }
+    try { const value = await trainingService.evaluateSession(sessionId); setData(value); onStateChange?.(value.state, value.evaluation) }
     catch { setError('Phân tích chưa thành công. Bạn có thể thử lại.') }
     finally { setEvaluating(false) }
   }
