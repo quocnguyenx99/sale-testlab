@@ -72,10 +72,13 @@ export interface SendMessageResponse {
 
 export interface RecentSession {
   id: string
-  customer: string
-  role: string
-  scenario: string
-  dateLabel: string
-  outcomeLabel: string
-  status: 'COMPLETED'
+  persona: Pick<PublicPersona, 'id' | 'displayName' | 'role' | 'customerType'>
+  mode: TrainingMode
+  status: TrainingSession['status']
+  createdAt: string
+  updatedAt: string
+  completedAt: string | null
+  turnCount: number
+  dealOutcome: string | null
+  trainingStatus: string | null
 }

@@ -66,7 +66,15 @@ async function main(): Promise<void> {
       return runtimePayload(sessionId, "FINAL GUARDED CUSTOMER RESPONSE");
     }
   });
-  const service = new SimulationService({ sessions: new InMemorySessionRepository(), orchestrator, personas: [persona] });
+  let generatedId = 0;
+  let clockTick = 0;
+  const service = new SimulationService({
+    sessions: new InMemorySessionRepository(),
+    orchestrator,
+    personas: [persona],
+    createId: () => `test-id-${String(++generatedId).padStart(3, "0")}`,
+    now: () => new Date(Date.UTC(2026, 7, 13, 3, 0, clockTick++))
+  });
   const user: AuthUserRecord = {
     id: "user-001", email: "sale@example.test", passwordHash: await hash("valid-password", 4),
     displayName: "Sale Test", role: "SALE", status: "ACTIVE"
@@ -96,6 +104,7 @@ async function main(): Promise<void> {
 
   try {
     assert.equal((await json("/api/v3/personas")).status, 401);
+    assert.equal((await json("/api/v3/sessions")).status, 401);
     const login = await json("/api/v3/auth/login", { method: "POST", body: JSON.stringify({ email: user.email, password: "valid-password" }) });
     assert.equal(login.status, 200);
     assert.match(login.setCookie || "", /HttpOnly/);
@@ -140,6 +149,21 @@ async function main(): Promise<void> {
     const stoppedAgain = await json(`/api/v3/sessions/${saleSession.id}/stop`, { method: "POST", body: "{}" });
     assert.deepEqual(stoppedAgain.body.result, stopped.body.result);
     assert.equal((await json(`/api/v3/sessions/${saleSession.id}/messages`, { method: "POST", body: JSON.stringify({ message: "Sau stop" }) })).status, 409);
+
+    await service.createSession(persona.persona_id, "SALE_FIRST", "user-002");
+    const recent = await json("/api/v3/sessions?userId=user-002");
+    assert.equal(recent.status, 200);
+    const recentSessions = recent.body.sessions as Array<Record<string, unknown>>;
+    assert.deepEqual(recentSessions.map((session) => session.id), [saleSession.id, customerSession.id]);
+    assert.equal(recentSessions[0].status, "COMPLETED");
+    assert.equal(recentSessions[0].turnCount, 1);
+    assert.equal(recentSessions[1].status, "RUNNING");
+    assert.deepEqual(Object.keys(recentSessions[0]).sort(), [
+      "completedAt", "createdAt", "dealOutcome", "id", "mode", "persona", "status", "trainingStatus", "turnCount", "updatedAt"
+    ]);
+    assert.deepEqual(Object.keys(recentSessions[0].persona as Record<string, unknown>).sort(), ["customerType", "displayName", "id", "role"]);
+    assert.deepEqual(collectKeys(recent.body).filter((key) => forbidden.test(key)), []);
+
     const failureSession = await json("/api/v3/sessions", { method: "POST", body: JSON.stringify({ personaId: persona.persona_id, mode: "SALE_FIRST" }) });
     runtimeFailure = true;
     assert.equal((await json(`/api/v3/sessions/${(failureSession.body.session as { id: string }).id}/messages`, { method: "POST", body: JSON.stringify({ message: "Runtime fail" }) })).status, 503);

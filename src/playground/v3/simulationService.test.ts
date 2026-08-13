@@ -113,6 +113,12 @@ async function main(): Promise<void> {
   await service.sendMessage(saleFirst.id, "Sale mở đầu");
   assert.equal(orchestrator.lastRuntimeSessionId, saleFirst.id);
 
+  await service.createSession(persona.persona_id, "SALE_FIRST", "another-user");
+  const recent = await service.listRecentSessions("phase3-compatibility");
+  assert.deepEqual(recent.map((session) => session.id), [saleFirst.id, customerFirst.id]);
+  assert.equal(recent[0].turnCount, 1);
+  assert.equal(recent[1].status, "COMPLETED");
+
   const mismatchSession = await service.createSession(persona.persona_id, "SALE_FIRST");
   orchestrator.mismatch = true;
   await expectCode(() => service.sendMessage(mismatchSession.id, "Test linkage"), "RUNTIME_UNAVAILABLE");

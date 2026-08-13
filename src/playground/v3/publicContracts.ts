@@ -48,6 +48,19 @@ export interface PublicSessionResult {
   signals: string[];
 }
 
+export interface PublicRecentSession {
+  id: string;
+  persona: Pick<PublicPersona, "id" | "displayName" | "role" | "customerType">;
+  mode: PublicTrainingMode;
+  status: PublicSessionStatus;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  turnCount: number;
+  dealOutcome: string | null;
+  trainingStatus: string | null;
+}
+
 export interface PublicSession {
   id: string;
   persona: PublicPersona;

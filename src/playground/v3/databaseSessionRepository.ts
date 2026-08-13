@@ -1,5 +1,5 @@
 import { Prisma, PrismaClient } from "@prisma/client";
-import { SessionRepository } from "./sessionRepository";
+import { RecentSessionSummary, SessionRepository } from "./sessionRepository";
 import { SimulationMessage, SimulationSession } from "./simulationSession";
 
 const json = (value: unknown): Prisma.InputJsonValue => value as Prisma.InputJsonValue;
@@ -39,6 +39,42 @@ export class DatabaseSessionRepository implements SessionRepository {
     };
   }
 
+  async findRecentByUserId(userId: string, limit: number): Promise<RecentSessionSummary[]> {
+    const stored = await this.client.simulationSession.findMany({
+      where: { userId },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit,
+      select: {
+        id: true,
+        personaSnapshot: true,
+        mode: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        completedAt: true,
+        runtimeInsight: true,
+        result: true,
+        _count: { select: { turns: { where: { sender: "SALE" } } } }
+      }
+    });
+    return stored.map((session) => {
+      const result = objectValue(session.result);
+      const insight = objectValue(session.runtimeInsight);
+      return {
+        id: session.id,
+        persona: session.personaSnapshot as unknown as SimulationSession["personaSnapshot"],
+        mode: session.mode,
+        status: session.status,
+        createdAt: session.createdAt.toISOString(),
+        updatedAt: session.updatedAt.toISOString(),
+        completedAt: session.completedAt?.toISOString() ?? null,
+        turnCount: session._count.turns,
+        dealOutcome: stringValue(result, "outcome") ?? stringValue(insight, "dealOutcome"),
+        trainingStatus: stringValue(result, "trainingStatus") ?? stringValue(insight, "trainingStatus")
+      };
+    });
+  }
+
   async save(session: SimulationSession): Promise<void> {
     const sessionData = {
       userId: session.userId,
@@ -76,4 +112,14 @@ export class DatabaseSessionRepository implements SessionRepository {
       }
     });
   }
+}
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function stringValue(value: Record<string, unknown> | null, key: string): string | null {
+  return value && typeof value[key] === "string" ? value[key] : null;
 }

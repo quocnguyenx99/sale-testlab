@@ -1,5 +1,4 @@
-import { recentSessions } from '../mocks/sessions'
-import type { PublicPersona, SendMessageResponse, TrainingMode, TrainingSession } from '../types/training'
+import type { PublicPersona, RecentSession, SendMessageResponse, TrainingMode, TrainingSession } from '../types/training'
 
 interface ApiErrorBody { error?: { code?: string; message?: string } }
 
@@ -57,7 +56,10 @@ export const trainingService = {
     const data = await request<{ persona: PublicPersona }>(`/api/v3/personas/${encodeURIComponent(personaId)}`)
     return decoratePersona(data.persona)
   },
-  async getRecentSessions() { return recentSessions },
+  async getRecentSessions(): Promise<RecentSession[]> {
+    const data = await request<{ sessions: RecentSession[] }>('/api/v3/sessions')
+    return data.sessions
+  },
   async createSession(personaId: string, mode: TrainingMode): Promise<TrainingSession> {
     const data = await request<{ session: TrainingSession }>('/api/v3/sessions', { method: 'POST', body: JSON.stringify({ personaId, mode }) })
     return decorateSession(data.session)

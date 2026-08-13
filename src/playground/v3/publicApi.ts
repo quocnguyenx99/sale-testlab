@@ -2,6 +2,7 @@ import * as http from "http";
 export type {
   PublicChatMessage,
   PublicPersona,
+  PublicRecentSession,
   PublicRuntimeInsight,
   PublicScenario,
   PublicSession,
@@ -13,6 +14,7 @@ export type { EnrichedPersonaSource } from "./simulationSession";
 import {
   toPublicChatMessage,
   toPublicPersona,
+  toPublicRecentSession,
   toPublicRuntimeInsight,
   toPublicSession,
   toPublicSessionResult
@@ -138,6 +140,12 @@ export function createV3Api(dependencies: { service: SimulationService; auth: Au
         const personaId = typeof body.personaId === "string" ? body.personaId.trim() : "";
         const session = await service.createSession(personaId, body.mode, currentUser.id);
         sendJson(res, 201, { session: toPublicSession(session) });
+        return true;
+      }
+
+      if (req.method === "GET" && pathname === "/api/v3/sessions") {
+        const sessions = await service.listRecentSessions(currentUser.id);
+        sendJson(res, 200, { sessions: sessions.map(toPublicRecentSession) });
         return true;
       }
 

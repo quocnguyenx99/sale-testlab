@@ -134,6 +134,14 @@ async function main(): Promise<void> {
     assert.equal(reloaded?.result?.turnCount, 2);
     assert.equal(await prisma.conversationTurn.count({ where: { sessionId: session.id } }), 4);
 
+    await service.createSession(persona.persona_id, "SALE_FIRST", userB.id);
+    const recent = await service.listRecentSessions(userA.id);
+    assert.equal(recent.length, 1);
+    assert.equal(recent[0].id, session.id);
+    assert.equal(recent[0].status, "COMPLETED");
+    assert.equal(recent[0].turnCount, 2);
+    assert.equal(recent[0].dealOutcome, "quote_requested");
+
     const rawRows = JSON.stringify(await prisma.simulationSession.findUnique({ where: { id: session.id }, include: { turns: true } }));
     assert(!/raw_model_reply|memory_slots|identity_profile|source_entity_id|stock_qty|prompt|guard_trigger|constraint/i.test(rawRows));
     console.log("V3 MySQL persistence/auth/ownership/concurrency tests: PASS");

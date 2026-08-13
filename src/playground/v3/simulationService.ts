@@ -108,6 +108,10 @@ export class SimulationService {
     return persona;
   }
 
+  async listRecentSessions(userId: string, limit = 10) {
+    return this.dependencies.sessions.findRecentByUserId(userId, Math.max(1, Math.min(limit, 20)));
+  }
+
   async createSession(personaId: string, mode: unknown, userId = "phase3-compatibility"): Promise<SimulationSession> {
     const persona = this.getPersona(personaId);
     if (mode !== "CUSTOMER_FIRST" && mode !== "SALE_FIRST") {

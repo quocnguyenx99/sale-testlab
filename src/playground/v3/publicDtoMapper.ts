@@ -1,11 +1,13 @@
 import {
   PublicChatMessage,
   PublicPersona,
+  PublicRecentSession,
   PublicRuntimeInsight,
   PublicScenario,
   PublicSession,
   PublicSessionResult
 } from "./publicContracts";
+import { RecentSessionSummary } from "./sessionRepository";
 import {
   SimulationMessage,
   SimulationPersonaSnapshot,
@@ -74,6 +76,26 @@ export function toPublicSessionResult(result: NonNullable<SimulationSession["res
     resolvedTopics: result.resolvedTopics,
     missingTopics: result.missingTopics,
     signals: result.signals
+  };
+}
+
+export function toPublicRecentSession(session: RecentSessionSummary): PublicRecentSession {
+  return {
+    id: session.id,
+    persona: {
+      id: session.persona.id,
+      displayName: session.persona.displayName,
+      role: session.persona.role,
+      customerType: session.persona.customerType
+    },
+    mode: session.mode,
+    status: session.status,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    completedAt: session.completedAt,
+    turnCount: session.turnCount,
+    dealOutcome: session.dealOutcome,
+    trainingStatus: session.trainingStatus
   };
 }
 
