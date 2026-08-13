@@ -68,6 +68,7 @@ export interface PublicSession {
   mode: PublicTrainingMode;
   status: PublicSessionStatus;
   createdAt: string;
+  completedAt: string | null;
   messages: PublicChatMessage[];
   runtimeInsight: PublicRuntimeInsight | null;
   result?: PublicSessionResult;

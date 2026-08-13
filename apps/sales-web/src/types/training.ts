@@ -30,6 +30,7 @@ export interface TrainingSession {
   mode: TrainingMode
   status: 'RUNNING' | 'COMPLETED'
   createdAt: string
+  completedAt: string | null
   messages: ChatMessage[]
   runtimeInsight: RuntimeInsight | null
   result?: SessionResult
@@ -81,4 +82,20 @@ export interface RecentSession {
   turnCount: number
   dealOutcome: string | null
   trainingStatus: string | null
+}
+
+export interface HistoryQuery {
+  page?: number
+  pageSize?: number
+  status?: TrainingSession['status']
+  mode?: TrainingMode
+  search?: string
+}
+
+export interface HistoryPage {
+  items: RecentSession[]
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
 }

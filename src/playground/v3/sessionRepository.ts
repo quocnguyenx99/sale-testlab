@@ -18,8 +18,24 @@ export interface RecentSessionSummary {
   trainingStatus: string | null;
 }
 
+export interface SessionHistoryQuery {
+  page: number;
+  pageSize: number;
+  status?: SimulationStatus;
+  mode?: SimulationMode;
+  search?: string;
+}
+
+export interface SessionHistoryPage {
+  items: RecentSessionSummary[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
 export interface SessionRepository {
   findById(id: string): Promise<SimulationSession | null>;
-  findRecentByUserId(userId: string, limit: number): Promise<RecentSessionSummary[]>;
+  findHistoryByUserId(userId: string, query: SessionHistoryQuery): Promise<SessionHistoryPage>;
   save(session: SimulationSession): Promise<void>;
 }

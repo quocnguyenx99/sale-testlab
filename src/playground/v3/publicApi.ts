@@ -21,6 +21,7 @@ import {
 } from "./publicDtoMapper";
 import { SimulationService, SimulationServiceError } from "./simulationService";
 import { AuthService, AuthServiceError } from "./authService";
+import { SessionHistoryQuery } from "./sessionRepository";
 
 const AUTH_COOKIE = "testlab_session";
 
@@ -96,10 +97,38 @@ function clearAuthCookie(): string {
   return `${AUTH_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`;
 }
 
+function positiveInteger(value: string | null, fallback: number, name: string): number {
+  if (value === null || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) throw new HttpRequestError(400, "INVALID_QUERY", `${name} không hợp lệ.`);
+  return parsed;
+}
+
+function historyQuery(url: URL): SessionHistoryQuery {
+  const statusValue = url.searchParams.get("status");
+  const modeValue = url.searchParams.get("mode");
+  if (statusValue && statusValue !== "RUNNING" && statusValue !== "COMPLETED") {
+    throw new HttpRequestError(400, "INVALID_QUERY", "Trạng thái phiên không hợp lệ.");
+  }
+  if (modeValue && modeValue !== "CUSTOMER_FIRST" && modeValue !== "SALE_FIRST") {
+    throw new HttpRequestError(400, "INVALID_QUERY", "Chế độ luyện tập không hợp lệ.");
+  }
+  const status = statusValue === "RUNNING" || statusValue === "COMPLETED" ? statusValue : undefined;
+  const mode = modeValue === "CUSTOMER_FIRST" || modeValue === "SALE_FIRST" ? modeValue : undefined;
+  return {
+    page: positiveInteger(url.searchParams.get("page"), 1, "page"),
+    pageSize: positiveInteger(url.searchParams.get("pageSize"), 10, "pageSize"),
+    ...(status ? { status } : {}),
+    ...(mode ? { mode } : {}),
+    ...(url.searchParams.get("search")?.trim() ? { search: url.searchParams.get("search")!.trim() } : {})
+  };
+}
+
 export function createV3Api(dependencies: { service: SimulationService; auth: AuthService }) {
   const { service, auth } = dependencies;
   return async function handleV3Request(req: http.IncomingMessage, res: http.ServerResponse): Promise<boolean> {
-    const pathname = new URL(req.url || "/", "http://localhost").pathname;
+    const url = new URL(req.url || "/", "http://localhost");
+    const pathname = url.pathname;
     if (!pathname.startsWith("/api/v3/")) return false;
 
     try {
@@ -144,14 +173,18 @@ export function createV3Api(dependencies: { service: SimulationService; auth: Au
       }
 
       if (req.method === "GET" && pathname === "/api/v3/sessions") {
-        const sessions = await service.listRecentSessions(currentUser.id);
-        sendJson(res, 200, { sessions: sessions.map(toPublicRecentSession) });
+        const history = await service.listHistorySessions(currentUser.id, historyQuery(url));
+        const items = history.items.map(toPublicRecentSession);
+        sendJson(res, 200, { sessions: items, items, page: history.page, pageSize: history.pageSize, total: history.total, totalPages: history.totalPages });
         return true;
       }
 
       const sessionMatch = pathname.match(/^\/api\/v3\/sessions\/([^/]+)$/);
       if (req.method === "GET" && sessionMatch) {
-        const session = await service.getSession(decodeURIComponent(sessionMatch[1]), currentUser.id);
+        const sessionId = decodeURIComponent(sessionMatch[1]);
+        const session = url.searchParams.get("view") === "replay"
+          ? await service.getPersistedSession(sessionId, currentUser.id)
+          : await service.getSession(sessionId, currentUser.id);
         sendJson(res, 200, { session: toPublicSession(session) });
         return true;
       }

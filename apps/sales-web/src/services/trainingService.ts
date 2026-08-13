@@ -1,4 +1,4 @@
-import type { PublicPersona, RecentSession, SendMessageResponse, TrainingMode, TrainingSession } from '../types/training'
+import type { HistoryPage, HistoryQuery, PublicPersona, RecentSession, SendMessageResponse, TrainingMode, TrainingSession } from '../types/training'
 
 interface ApiErrorBody { error?: { code?: string; message?: string } }
 
@@ -57,8 +57,17 @@ export const trainingService = {
     return decoratePersona(data.persona)
   },
   async getRecentSessions(): Promise<RecentSession[]> {
-    const data = await request<{ sessions: RecentSession[] }>('/api/v3/sessions')
-    return data.sessions
+    return (await this.getHistory({ page: 1, pageSize: 10 })).items
+  },
+  async getHistory(query: HistoryQuery = {}): Promise<HistoryPage> {
+    const params = new URLSearchParams()
+    if (query.page) params.set('page', String(query.page))
+    if (query.pageSize) params.set('pageSize', String(query.pageSize))
+    if (query.status) params.set('status', query.status)
+    if (query.mode) params.set('mode', query.mode)
+    if (query.search?.trim()) params.set('search', query.search.trim())
+    const suffix = params.size ? `?${params.toString()}` : ''
+    return request<HistoryPage>(`/api/v3/sessions${suffix}`)
   },
   async createSession(personaId: string, mode: TrainingMode): Promise<TrainingSession> {
     const data = await request<{ session: TrainingSession }>('/api/v3/sessions', { method: 'POST', body: JSON.stringify({ personaId, mode }) })
@@ -66,6 +75,10 @@ export const trainingService = {
   },
   async getSession(sessionId: string): Promise<TrainingSession> {
     const data = await request<{ session: TrainingSession }>(`/api/v3/sessions/${encodeURIComponent(sessionId)}`)
+    return decorateSession(data.session)
+  },
+  async getReplaySession(sessionId: string): Promise<TrainingSession> {
+    const data = await request<{ session: TrainingSession }>(`/api/v3/sessions/${encodeURIComponent(sessionId)}?view=replay`)
     return decorateSession(data.session)
   },
   async sendMessage(sessionId: string, message: string): Promise<SendMessageResponse> {

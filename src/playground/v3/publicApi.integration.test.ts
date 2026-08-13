@@ -150,10 +150,16 @@ async function main(): Promise<void> {
     assert.deepEqual(stoppedAgain.body.result, stopped.body.result);
     assert.equal((await json(`/api/v3/sessions/${saleSession.id}/messages`, { method: "POST", body: JSON.stringify({ message: "Sau stop" }) })).status, 409);
 
-    await service.createSession(persona.persona_id, "SALE_FIRST", "user-002");
+    const otherUserSession = await service.createSession(persona.persona_id, "SALE_FIRST", "user-002");
+    assert.equal((await json(`/api/v3/sessions/${otherUserSession.id}?view=replay`)).status, 404, "direct replay URL must preserve ownership isolation");
     const recent = await json("/api/v3/sessions?userId=user-002");
     assert.equal(recent.status, 200);
     const recentSessions = recent.body.sessions as Array<Record<string, unknown>>;
+    assert.deepEqual(recent.body.items, recent.body.sessions, "legacy sessions alias must remain compatible");
+    assert.equal(recent.body.page, 1);
+    assert.equal(recent.body.pageSize, 10);
+    assert.equal(recent.body.total, 2);
+    assert.equal(recent.body.totalPages, 1);
     assert.deepEqual(recentSessions.map((session) => session.id), [saleSession.id, customerSession.id]);
     assert.equal(recentSessions[0].status, "COMPLETED");
     assert.equal(recentSessions[0].turnCount, 1);
@@ -164,12 +170,31 @@ async function main(): Promise<void> {
     assert.deepEqual(Object.keys(recentSessions[0].persona as Record<string, unknown>).sort(), ["customerType", "displayName", "id", "role"]);
     assert.deepEqual(collectKeys(recent.body).filter((key) => forbidden.test(key)), []);
 
+    const firstHistoryPage = await json("/api/v3/sessions?page=1&pageSize=1");
+    const secondHistoryPage = await json("/api/v3/sessions?page=2&pageSize=1");
+    assert.equal((firstHistoryPage.body.items as unknown[]).length, 1);
+    assert.equal((secondHistoryPage.body.items as unknown[]).length, 1);
+    assert.notEqual((firstHistoryPage.body.items as Array<{ id: string }>)[0].id, (secondHistoryPage.body.items as Array<{ id: string }>)[0].id);
+    assert.equal((await json("/api/v3/sessions?page=99&pageSize=1")).body.total, 2);
+    assert.equal(((await json("/api/v3/sessions?page=99&pageSize=1")).body.items as unknown[]).length, 0);
+    assert.deepEqual(((await json("/api/v3/sessions?status=COMPLETED")).body.items as Array<{ id: string }>).map((item) => item.id), [saleSession.id]);
+    assert.deepEqual(((await json("/api/v3/sessions?mode=CUSTOMER_FIRST")).body.items as Array<{ id: string }>).map((item) => item.id), [customerSession.id]);
+    assert.equal(((await json("/api/v3/sessions?search=Kh%C3%A1ch%20h%C3%A0ng")).body.items as unknown[]).length, 2);
+    assert.equal((await json("/api/v3/sessions?status=INVALID")).status, 400);
+
+    const replay = await json(`/api/v3/sessions/${saleSession.id}?view=replay`);
+    assert.equal(replay.status, 200);
+    assert.deepEqual(((replay.body.session as { messages: Array<{ content: string }> }).messages).map((message) => message.content), ["Tôi gửi báo giá laptop", "FINAL GUARDED CUSTOMER RESPONSE"]);
+    assert.equal((replay.body.session as { completedAt: string | null }).completedAt !== null, true);
+    assert.deepEqual(collectKeys(replay.body).filter((key) => forbidden.test(key)), []);
+
     const failureSession = await json("/api/v3/sessions", { method: "POST", body: JSON.stringify({ personaId: persona.persona_id, mode: "SALE_FIRST" }) });
     runtimeFailure = true;
     assert.equal((await json(`/api/v3/sessions/${(failureSession.body.session as { id: string }).id}/messages`, { method: "POST", body: JSON.stringify({ message: "Runtime fail" }) })).status, 503);
     assert.equal((await json("/api/v3/sessions/unknown")).status, 404);
     assert.equal((await json("/api/v3/auth/logout", { method: "POST", body: "{}" })).status, 200);
     assert.equal((await json("/api/v3/auth/me")).status, 401);
+    assert.equal((await json(`/api/v3/sessions/${saleSession.id}?view=replay`)).status, 401);
     console.log("V3 public API integration tests: PASS");
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

@@ -1,5 +1,5 @@
 import { Prisma, PrismaClient } from "@prisma/client";
-import { RecentSessionSummary, SessionRepository } from "./sessionRepository";
+import { SessionHistoryPage, SessionHistoryQuery, SessionRepository } from "./sessionRepository";
 import { SimulationMessage, SimulationSession } from "./simulationSession";
 
 const json = (value: unknown): Prisma.InputJsonValue => value as Prisma.InputJsonValue;
@@ -39,25 +39,37 @@ export class DatabaseSessionRepository implements SessionRepository {
     };
   }
 
-  async findRecentByUserId(userId: string, limit: number): Promise<RecentSessionSummary[]> {
-    const stored = await this.client.simulationSession.findMany({
-      where: { userId },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: limit,
-      select: {
-        id: true,
-        personaSnapshot: true,
-        mode: true,
-        status: true,
-        createdAt: true,
-        updatedAt: true,
-        completedAt: true,
-        runtimeInsight: true,
-        result: true,
-        _count: { select: { turns: { where: { sender: "SALE" } } } }
-      }
-    });
-    return stored.map((session) => {
+  async findHistoryByUserId(userId: string, query: SessionHistoryQuery): Promise<SessionHistoryPage> {
+    const where: Prisma.SimulationSessionWhereInput = {
+      userId,
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.mode ? { mode: query.mode } : {}),
+      ...(query.search ? {
+        personaSnapshot: { path: "$.displayName", string_contains: query.search }
+      } : {})
+    };
+    const [total, stored] = await this.client.$transaction([
+      this.client.simulationSession.count({ where }),
+      this.client.simulationSession.findMany({
+        where,
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
+        select: {
+          id: true,
+          personaSnapshot: true,
+          mode: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+          completedAt: true,
+          runtimeInsight: true,
+          result: true,
+          _count: { select: { turns: { where: { sender: "SALE" } } } }
+        }
+      })
+    ]);
+    const items = stored.map((session) => {
       const result = objectValue(session.result);
       const insight = objectValue(session.runtimeInsight);
       return {
@@ -73,6 +85,13 @@ export class DatabaseSessionRepository implements SessionRepository {
         trainingStatus: stringValue(result, "trainingStatus") ?? stringValue(insight, "trainingStatus")
       };
     });
+    return {
+      items,
+      page: query.page,
+      pageSize: query.pageSize,
+      total,
+      totalPages: total === 0 ? 0 : Math.ceil(total / query.pageSize)
+    };
   }
 
   async save(session: SimulationSession): Promise<void> {

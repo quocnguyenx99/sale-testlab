@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { SessionRepository } from "./sessionRepository";
+import { SessionHistoryQuery, SessionRepository } from "./sessionRepository";
 import { OrchestrationResult, SimulationOrchestrator } from "./simulationOrchestrator";
 import {
   EnrichedPersonaSource,
@@ -109,7 +109,18 @@ export class SimulationService {
   }
 
   async listRecentSessions(userId: string, limit = 10) {
-    return this.dependencies.sessions.findRecentByUserId(userId, Math.max(1, Math.min(limit, 20)));
+    return (await this.listHistorySessions(userId, { page: 1, pageSize: limit })).items;
+  }
+
+  async listHistorySessions(userId: string, input: Partial<SessionHistoryQuery> = {}) {
+    const query: SessionHistoryQuery = {
+      page: Math.max(1, Math.floor(input.page ?? 1)),
+      pageSize: Math.max(1, Math.min(20, Math.floor(input.pageSize ?? 10))),
+      ...(input.status ? { status: input.status } : {}),
+      ...(input.mode ? { mode: input.mode } : {}),
+      ...(input.search?.trim() ? { search: input.search.trim().slice(0, 100) } : {})
+    };
+    return this.dependencies.sessions.findHistoryByUserId(userId, query);
   }
 
   async createSession(personaId: string, mode: unknown, userId = "phase3-compatibility"): Promise<SimulationSession> {
@@ -166,9 +177,7 @@ export class SimulationService {
   }
 
   async getSession(sessionId: string, userId?: string): Promise<SimulationSession> {
-    const session = await this.dependencies.sessions.findById(sessionId);
-    if (!session) throw new SimulationServiceError("SESSION_NOT_FOUND", "Phiên luyện tập không tồn tại hoặc đã hết hạn.");
-    if (userId && session.userId !== userId) throw new SimulationServiceError("SESSION_FORBIDDEN", "Phiên luyện tập không tồn tại hoặc đã hết hạn.");
+    const session = await this.getPersistedSession(sessionId, userId);
     if (session.status === "RUNNING" && session.runtimeSnapshot) {
       try {
         await this.dependencies.orchestrator.ensureRuntime?.({
@@ -181,6 +190,13 @@ export class SimulationService {
         throw new SimulationServiceError("RUNTIME_UNAVAILABLE", "Không thể khôi phục phiên Runtime. Vui lòng thử lại.");
       }
     }
+    return session;
+  }
+
+  async getPersistedSession(sessionId: string, userId?: string): Promise<SimulationSession> {
+    const session = await this.dependencies.sessions.findById(sessionId);
+    if (!session) throw new SimulationServiceError("SESSION_NOT_FOUND", "Phiên luyện tập không tồn tại hoặc đã hết hạn.");
+    if (userId && session.userId !== userId) throw new SimulationServiceError("SESSION_FORBIDDEN", "Phiên luyện tập không tồn tại hoặc đã hết hạn.");
     return session;
   }
 

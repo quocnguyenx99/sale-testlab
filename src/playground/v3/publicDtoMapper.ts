@@ -107,6 +107,7 @@ export function toPublicSession(session: SimulationSession): PublicSession {
     mode: session.mode,
     status: session.status,
     createdAt: session.createdAt,
+    completedAt: session.completedAt,
     messages: session.messages.map(toPublicChatMessage),
     runtimeInsight: session.runtimeInsight ? toPublicRuntimeInsight(session.runtimeInsight) : null,
     ...(session.result ? { result: toPublicSessionResult(session.result) } : {})
