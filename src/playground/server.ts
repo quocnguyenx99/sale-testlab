@@ -69,6 +69,9 @@ import { DatabaseSessionRepository } from "./v3/databaseSessionRepository";
 import { DatabaseAuthRepository } from "./v3/databaseAuthRepository";
 import { AuthService } from "./v3/authService";
 import { prisma } from "./v3/prismaClient";
+import { DatabaseEvaluationRepository } from "./v3/evaluation/databaseEvaluationRepository";
+import { EvaluationService } from "./v3/evaluation/evaluationService";
+import { LocalAIEvaluationProvider } from "./v3/evaluation/evaluationProvider";
 import {
   rebuildRuntimeState,
   RuntimeRecoverySnapshot,
@@ -1423,7 +1426,12 @@ async function main(): Promise<void> {
     new DatabaseAuthRepository(prisma),
     { ttlHours: Number(process.env.AUTH_SESSION_TTL_HOURS || 168) }
   );
-  const handleV3Request = createV3Api({ service: v3SimulationService, auth: v3AuthService });
+  const v3EvaluationService = new EvaluationService({
+    sessions: v3SessionRepository,
+    evaluations: new DatabaseEvaluationRepository(prisma),
+    provider: new LocalAIEvaluationProvider()
+  });
+  const handleV3Request = createV3Api({ service: v3SimulationService, auth: v3AuthService, evaluationService: v3EvaluationService });
 
   const server = http.createServer(async (req, res) => {
     try {

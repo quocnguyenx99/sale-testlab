@@ -7,6 +7,9 @@ import { SimulationService } from "./simulationService";
 import { AuthService } from "./authService";
 import { AuthRepository, AuthUserRecord } from "./authRepository";
 import { hash } from "bcryptjs";
+import { EvaluationService } from "./evaluation/evaluationService";
+import { InMemoryEvaluationRepository } from "./evaluation/inMemoryEvaluationRepository";
+import { QualitativeEvaluation } from "./evaluation/evaluationDomain";
 
 const persona = {
   persona_id: "persona-real-001",
@@ -68,8 +71,9 @@ async function main(): Promise<void> {
   });
   let generatedId = 0;
   let clockTick = 0;
+  const sessionsRepository = new InMemorySessionRepository();
   const service = new SimulationService({
-    sessions: new InMemorySessionRepository(),
+    sessions: sessionsRepository,
     orchestrator,
     personas: [persona],
     createId: () => `test-id-${String(++generatedId).padStart(3, "0")}`,
@@ -88,7 +92,17 @@ async function main(): Promise<void> {
     touchUserLogin: async () => undefined
   };
   const auth = new AuthService(authRepository, { createToken: () => "raw-test-token" });
-  const handle = createV3Api({ service, auth });
+  let evaluationCalls = 0;
+  const evaluationService = new EvaluationService({
+    sessions: sessionsRepository,
+    evaluations: new InMemoryEvaluationRepository(),
+    provider: { evaluate: async (): Promise<QualitativeEvaluation> => { evaluationCalls += 1; return { criteria: [
+      { key: "NEEDS_DISCOVERY", score: 80, summary: "Lam ro nhu cau.", evidenceTurnSequences: [1] },
+      { key: "PRODUCT_CONSULTATION", score: 75, summary: "Tu van dung boi canh.", evidenceTurnSequences: [1] },
+      { key: "COMMUNICATION", score: 85, summary: "Trao doi ro rang.", evidenceTurnSequences: [1] }
+    ] }; } }
+  });
+  const handle = createV3Api({ service, auth, evaluationService });
   const server = http.createServer(async (req, res) => { if (!await handle(req, res)) { res.writeHead(404); res.end(); } });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -105,6 +119,8 @@ async function main(): Promise<void> {
   try {
     assert.equal((await json("/api/v3/personas")).status, 401);
     assert.equal((await json("/api/v3/sessions")).status, 401);
+    assert.equal((await json("/api/v3/sessions/missing/evaluation")).status, 401);
+    assert.equal((await json("/api/v3/sessions/missing/evaluation", { method: "POST", body: "{}" })).status, 401);
     const login = await json("/api/v3/auth/login", { method: "POST", body: JSON.stringify({ email: user.email, password: "valid-password" }) });
     assert.equal(login.status, 200);
     assert.match(login.setCookie || "", /HttpOnly/);
@@ -129,6 +145,7 @@ async function main(): Promise<void> {
     const saleFirst = await json("/api/v3/sessions", { method: "POST", body: JSON.stringify({ personaId: persona.persona_id, mode: "SALE_FIRST" }) });
     const saleSession = saleFirst.body.session as { id: string; messages: unknown[] };
     assert.equal(saleSession.messages.length, 0);
+    assert.equal((await json(`/api/v3/sessions/${saleSession.id}/evaluation`, { method: "POST", body: "{}" })).status, 409);
     const mismatch = await json(`/api/v3/sessions/${saleSession.id}/messages`, { method: "POST", body: JSON.stringify({ message: "Xin chào", personaId: "another" }) });
     assert.equal(mismatch.status, 409);
     assert.equal(chatCalls, 0);
@@ -148,6 +165,15 @@ async function main(): Promise<void> {
     assert.equal((stopped.body.session as { status: string }).status, "COMPLETED");
     const stoppedAgain = await json(`/api/v3/sessions/${saleSession.id}/stop`, { method: "POST", body: "{}" });
     assert.deepEqual(stoppedAgain.body.result, stopped.body.result);
+    const notEvaluated = await json(`/api/v3/sessions/${saleSession.id}/evaluation`);
+    assert.equal(notEvaluated.status, 200);
+    assert.equal(notEvaluated.body.state, "NOT_EVALUATED");
+    const evaluated = await json(`/api/v3/sessions/${saleSession.id}/evaluation`, { method: "POST", body: "{}" });
+    assert.equal(evaluated.status, 200);
+    assert.equal(evaluated.body.state, "COMPLETED");
+    assert.equal(evaluationCalls, 1);
+    await json(`/api/v3/sessions/${saleSession.id}/evaluation`, { method: "POST", body: "{}" });
+    assert.equal(evaluationCalls, 1);
     assert.equal((await json(`/api/v3/sessions/${saleSession.id}/messages`, { method: "POST", body: JSON.stringify({ message: "Sau stop" }) })).status, 409);
 
     const otherUserSession = await service.createSession(persona.persona_id, "SALE_FIRST", "user-002");

@@ -5,8 +5,10 @@ import {
   PublicRuntimeInsight,
   PublicScenario,
   PublicSession,
-  PublicSessionResult
+  PublicSessionResult,
+  PublicSessionEvaluation
 } from "./publicContracts";
+import { SessionEvaluationRecord } from "./evaluation/evaluationDomain";
 import { RecentSessionSummary } from "./sessionRepository";
 import {
   SimulationMessage,
@@ -76,6 +78,21 @@ export function toPublicSessionResult(result: NonNullable<SimulationSession["res
     resolvedTopics: result.resolvedTopics,
     missingTopics: result.missingTopics,
     signals: result.signals
+  };
+}
+
+export function toPublicSessionEvaluation(evaluation: SessionEvaluationRecord): PublicSessionEvaluation {
+  return {
+    id: evaluation.id,
+    evaluatorVersion: evaluation.evaluatorVersion,
+    status: evaluation.status,
+    overallScore: evaluation.overallScore,
+    criteria: evaluation.criteria.map(({ key, label, score, weight, effectiveWeight, source, applicability, summary, evidenceTurnSequences }) => ({
+      key, label, score, weight, effectiveWeight, source, applicability, summary, evidenceTurnSequences
+    })),
+    strengths: evaluation.strengths,
+    improvementAreas: evaluation.improvementAreas,
+    evaluatedAt: evaluation.evaluatedAt
   };
 }
 

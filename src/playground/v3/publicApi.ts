@@ -17,11 +17,13 @@ import {
   toPublicRecentSession,
   toPublicRuntimeInsight,
   toPublicSession,
+  toPublicSessionEvaluation,
   toPublicSessionResult
 } from "./publicDtoMapper";
 import { SimulationService, SimulationServiceError } from "./simulationService";
 import { AuthService, AuthServiceError } from "./authService";
 import { SessionHistoryQuery } from "./sessionRepository";
+import { EvaluationService, EvaluationServiceError } from "./evaluation/evaluationService";
 
 const AUTH_COOKIE = "testlab_session";
 
@@ -124,8 +126,8 @@ function historyQuery(url: URL): SessionHistoryQuery {
   };
 }
 
-export function createV3Api(dependencies: { service: SimulationService; auth: AuthService }) {
-  const { service, auth } = dependencies;
+export function createV3Api(dependencies: { service: SimulationService; auth: AuthService; evaluationService?: EvaluationService }) {
+  const { service, auth, evaluationService } = dependencies;
   return async function handleV3Request(req: http.IncomingMessage, res: http.ServerResponse): Promise<boolean> {
     const url = new URL(req.url || "/", "http://localhost");
     const pathname = url.pathname;
@@ -152,6 +154,17 @@ export function createV3Api(dependencies: { service: SimulationService; auth: Au
       }
 
       const currentUser = await auth.currentUser(cookie(req, AUTH_COOKIE));
+
+      const evaluationMatch = pathname.match(/^\/api\/v3\/sessions\/([^/]+)\/evaluation$/);
+      if (evaluationMatch && (req.method === "GET" || req.method === "POST")) {
+        if (!evaluationService) throw new HttpRequestError(503, "EVALUATION_UNAVAILABLE", "Tinh nang danh gia tam thoi chua san sang.");
+        const sessionId = decodeURIComponent(evaluationMatch[1]);
+        const evaluation = req.method === "GET"
+          ? await evaluationService.get(sessionId, currentUser.id)
+          : await evaluationService.evaluate(sessionId, currentUser.id);
+        sendJson(res, 200, { state: evaluation?.status ?? "NOT_EVALUATED", evaluation: evaluation ? toPublicSessionEvaluation(evaluation) : null });
+        return true;
+      }
 
       if (req.method === "GET" && pathname === "/api/v3/personas") {
         sendJson(res, 200, { personas: service.listPersonas().map(toPublicPersona) });
@@ -224,6 +237,9 @@ export function createV3Api(dependencies: { service: SimulationService; auth: Au
         sendJson(res, statusFor(error), { error: { code: error.code, message: error.message } });
       } else if (error instanceof AuthServiceError) {
         sendJson(res, 401, { error: { code: error.code, message: error.message } });
+      } else if (error instanceof EvaluationServiceError) {
+        const status = error.code === "EVALUATION_SESSION_NOT_FOUND" ? 404 : error.code === "SESSION_NOT_COMPLETED" ? 409 : 503;
+        sendJson(res, status, { error: { code: error.code, message: error.message } });
       } else {
         sendJson(res, 503, { error: { code: "SERVICE_UNAVAILABLE", message: "Dịch vụ tạm thời chưa sẵn sàng. Vui lòng thử lại." } });
       }

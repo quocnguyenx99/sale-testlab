@@ -64,6 +64,34 @@ export interface SessionResult {
   signals: string[]
 }
 
+export interface EvaluationCriterion {
+  key: string
+  label: string
+  score: number | null
+  weight: number
+  effectiveWeight: number
+  source: 'DETERMINISTIC' | 'LLM' | 'HYBRID'
+  applicability: 'APPLICABLE' | 'NOT_APPLICABLE'
+  summary: string
+  evidenceTurnSequences: number[]
+}
+
+export interface SessionEvaluation {
+  id: string
+  evaluatorVersion: string
+  status: 'COMPLETED' | 'FAILED'
+  overallScore: number | null
+  criteria: EvaluationCriterion[]
+  strengths: string[]
+  improvementAreas: string[]
+  evaluatedAt: string | null
+}
+
+export interface EvaluationResponse {
+  state: 'NOT_EVALUATED' | 'COMPLETED' | 'FAILED'
+  evaluation: SessionEvaluation | null
+}
+
 export interface SendMessageResponse {
   saleMessage: ChatMessage
   customerMessage: ChatMessage

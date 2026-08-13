@@ -1,4 +1,4 @@
-import type { HistoryPage, HistoryQuery, PublicPersona, RecentSession, SendMessageResponse, TrainingMode, TrainingSession } from '../types/training'
+import type { EvaluationResponse, HistoryPage, HistoryQuery, PublicPersona, RecentSession, SendMessageResponse, TrainingMode, TrainingSession } from '../types/training'
 
 interface ApiErrorBody { error?: { code?: string; message?: string } }
 
@@ -87,5 +87,11 @@ export const trainingService = {
   async stopSession(sessionId: string): Promise<TrainingSession> {
     const data = await request<{ session: TrainingSession }>(`/api/v3/sessions/${encodeURIComponent(sessionId)}/stop`, { method: 'POST', body: '{}' })
     return decorateSession(data.session)
+  },
+  async getEvaluation(sessionId: string): Promise<EvaluationResponse> {
+    return request(`/api/v3/sessions/${encodeURIComponent(sessionId)}/evaluation`)
+  },
+  async evaluateSession(sessionId: string): Promise<EvaluationResponse> {
+    return request(`/api/v3/sessions/${encodeURIComponent(sessionId)}/evaluation`, { method: 'POST', body: '{}' })
   },
 }

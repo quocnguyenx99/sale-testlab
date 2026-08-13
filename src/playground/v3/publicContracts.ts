@@ -1,6 +1,29 @@
 export type PublicTrainingMode = "CUSTOMER_FIRST" | "SALE_FIRST";
 export type PublicSessionStatus = "RUNNING" | "COMPLETED";
 
+export interface PublicEvaluationCriterion {
+  key: string;
+  label: string;
+  score: number | null;
+  weight: number;
+  effectiveWeight: number;
+  source: "DETERMINISTIC" | "LLM" | "HYBRID";
+  applicability: "APPLICABLE" | "NOT_APPLICABLE";
+  summary: string;
+  evidenceTurnSequences: number[];
+}
+
+export interface PublicSessionEvaluation {
+  id: string;
+  evaluatorVersion: string;
+  status: "COMPLETED" | "FAILED";
+  overallScore: number | null;
+  criteria: PublicEvaluationCriterion[];
+  strengths: string[];
+  improvementAreas: string[];
+  evaluatedAt: string | null;
+}
+
 export interface PublicScenario {
   id: string;
   title: string;

@@ -32,6 +32,8 @@
     "test:v3-recovery": "tsx src/playground/v3/runtimeRecovery.test.ts",
     "test:v3-history": "tsx src/playground/v3/history.test.ts",
     "test:v3-replay": "tsx src/playground/v3/replay.test.ts",
+    "test:v3-evaluation": "tsx src/playground/v3/evaluation/evaluation.test.ts",
+    "test:v3-evaluation-db": "tsx src/playground/v3/evaluation/evaluation.database.test.ts",
     "test:v3-db": "tsx src/playground/v3/database.integration.test.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",

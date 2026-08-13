@@ -32,6 +32,11 @@ enum TurnSender {
   SALE
 }
 
+enum EvaluationStatus {
+  COMPLETED
+  FAILED
+}
+
 model User {
   id           String              @id @default(uuid()) @db.Char(36)
   email        String              @unique @db.VarChar(255)
@@ -81,9 +86,30 @@ model SimulationSession {
   completedAt        DateTime?          @map("completed_at")
   user               User               @relation(fields: [userId], references: [id], onDelete: Restrict)
   turns              ConversationTurn[]
+  evaluations        SessionEvaluation[]
 
   @@index([userId, createdAt])
   @@map("simulation_sessions")
+}
+
+model SessionEvaluation {
+  id               String             @id @default(uuid()) @db.Char(36)
+  sessionId        String             @map("session_id") @db.Char(36)
+  evaluatorVersion String             @map("evaluator_version") @db.VarChar(80)
+  status           EvaluationStatus
+  overallScore     Int?               @map("overall_score")
+  criteria         Json?              @map("criteria_json")
+  strengths        Json?              @map("strengths_json")
+  improvementAreas Json?              @map("improvement_areas_json")
+  failureCode      String?            @map("failure_code") @db.VarChar(80)
+  evaluatedAt      DateTime?          @map("evaluated_at")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+  session          SimulationSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, evaluatorVersion])
+  @@index([status, overallScore])
+  @@map("session_evaluations")
 }
 
 model ConversationTurn {
