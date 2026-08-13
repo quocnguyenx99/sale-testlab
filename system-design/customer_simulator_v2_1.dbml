@@ -1,0 +1,525 @@
+// CUSTOMER SIMULATOR DATABASE — Recommended v2.1
+// Paste directly into https://dbdiagram.io/
+// Scope: operational DB only. Raw Zalo/pipeline data stays outside the web runtime.
+
+Enum lifecycle_status {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+Enum user_role {
+  SUPER_ADMIN
+  ADMIN
+  REVIEWER
+}
+
+Enum dataset_type {
+  CONTEXT
+  EXAMPLE_DIALOG
+  KNOWLEDGE_BASE
+  EVALUATION
+}
+
+Enum dataset_storage_type {
+  INLINE_JSON
+  DATABASE_ITEMS
+  LOCAL_FILE
+}
+
+Enum prompt_template_type {
+  SYSTEM
+  RUNTIME
+  EVALUATOR
+}
+
+Enum ai_provider {
+  OLLAMA
+  VLLM
+  LM_STUDIO
+  OPENAI_COMPATIBLE
+}
+
+Enum health_status {
+  HEALTHY
+  DEGRADED
+  UNHEALTHY
+  UNKNOWN
+}
+
+Enum simulation_mode {
+  SALE_FIRST
+  CUSTOMER_FIRST
+  API
+}
+
+Enum simulation_status {
+  CREATED
+  RUNNING
+  COMPLETED
+  STOPPED
+  FAILED
+}
+
+Enum turn_status {
+  PENDING
+  GENERATING
+  GUARDING
+  STREAMING
+  COMPLETED
+  FAILED
+  CANCELLED
+  BLOCKED
+}
+
+Enum reply_source {
+  LOCAL_AI
+  LOCAL_AI_REWRITTEN
+  DETERMINISTIC_FALLBACK
+  SYSTEM
+}
+
+Enum import_status {
+  QUEUED
+  RUNNING
+  COMPLETED
+  PARTIAL
+  FAILED
+  CANCELLED
+}
+
+Enum evaluation_outcome {
+  PASSED
+  PARTIAL
+  FAILED
+  NOT_EVALUATED
+}
+
+Table app_users {
+  id char(36) [pk]
+  email varchar(190) [not null, unique]
+  display_name varchar(160) [not null]
+  password_hash varchar(255) [note: 'Only when using local authentication']
+  role user_role [not null, default: 'ADMIN']
+  is_active boolean [not null, default: true]
+  last_login_at datetime(3)
+  created_at datetime(3) [not null]
+  updated_at datetime(3) [not null]
+  deleted_at datetime(3)
+
+  Indexes {
+    (role, is_active)
+  }
+}
+
+Table prompt_templates {
+  id char(36) [pk]
+  slug varchar(120) [not null]
+  name varchar(250) [not null]
+  type prompt_template_type [not null]
+  version int [not null, default: 1]
+  template longtext [not null]
+  input_schema json
+  output_schema json
+  status lifecycle_status [not null, default: 'DRAFT']
+  parent_template_id char(36) [note: 'Previous version or clone source']
+  created_by char(36)
+  published_at datetime(3)
+  metadata json
+  created_at datetime(3) [not null]
+  updated_at datetime(3) [not null]
+  deleted_at datetime(3)
+
+  Indexes {
+    (slug, version) [unique]
+    (type, status)
+  }
+}
+
+Table customer_personas {
+  id char(36) [pk]
+  slug varchar(120) [not null, unique]
+  name varchar(200) [not null]
+  age int
+  personality_summary text
+  personality_traits json
+  buyer_role varchar(200)
+  organization_type varchar(200)
+  purchase_context text
+  system_prompt longtext [not null]
+  temperature decimal(4,3) [not null, default: 0.350]
+  top_p decimal(4,3) [not null, default: 0.900]
+  max_tokens int [not null, default: 512]
+  stop_sequences json
+  difficulty varchar(30)
+  source_runtime_persona_key varchar(150) [unique]
+  version int [not null, default: 1]
+  status lifecycle_status [not null, default: 'DRAFT']
+  is_anonymized boolean [not null, default: true]
+  prompt_template_id char(36)
+  created_by char(36)
+  metadata json
+  created_at datetime(3) [not null]
+  updated_at datetime(3) [not null]
+  deleted_at datetime(3)
+
+  Indexes {
+    (status, updated_at)
+    (difficulty, status)
+  }
+}
+
+Table ai_model_configs {
+  id char(36) [pk]
+  name varchar(150) [not null, unique]
+  provider ai_provider [not null]
+  base_url varchar(500) [not null]
+  chat_path varchar(250) [not null, default: '/v1/chat/completions']
+  models_path varchar(250)
+  model_name varchar(200) [not null]
+  api_key_ciphertext text
+  request_headers json
+  timeout_ms int [not null, default: 30000]
+  max_tokens int [not null, default: 512]
+  temperature decimal(4,3) [not null, default: 0.350]
+  top_p decimal(4,3) [not null, default: 0.900]
+  supports_streaming boolean [not null, default: true]
+  disable_thinking boolean [not null, default: true]
+  is_active boolean [not null, default: false]
+  created_by char(36)
+  metadata json
+  created_at datetime(3) [not null]
+  updated_at datetime(3) [not null]
+  deleted_at datetime(3)
+
+  Indexes {
+    (provider, is_active)
+  }
+}
+
+Table scenarios {
+  id char(36) [pk]
+  slug varchar(120) [not null, unique]
+  title varchar(250) [not null]
+  description text
+  objective text
+  initial_customer_message text
+  max_turns int [not null, default: 12]
+  timeout_seconds int [not null, default: 120]
+  version int [not null, default: 1]
+  status lifecycle_status [not null, default: 'DRAFT']
+  default_prompt_template_id char(36)
+  default_ai_model_config_id char(36)
+  created_by char(36)
+  config json
+  created_at datetime(3) [not null]
+  updated_at datetime(3) [not null]
+  deleted_at datetime(3)
+
+  Indexes {
+    (status, updated_at)
+  }
+}
+
+Table scenario_personas {
+  scenario_id char(36) [not null]
+  persona_id char(36) [not null]
+  is_default boolean [not null, default: false]
+  overrides json
+  created_at datetime(3) [not null]
+
+  Indexes {
+    (scenario_id, persona_id) [pk]
+    persona_id
+  }
+}
+
+Table datasets {
+  id char(36) [pk]
+  slug varchar(120) [not null, unique]
+  name varchar(250) [not null]
+  description text
+  type dataset_type [not null]
+  storage_type dataset_storage_type [not null, default: 'DATABASE_ITEMS']
+  content json
+  local_path varchar(500)
+  checksum_sha256 char(64)
+  schema_version varchar(50)
+  source_stage varchar(100)
+  is_anonymized boolean [not null, default: true]
+  status lifecycle_status [not null, default: 'DRAFT']
+  created_by char(36)
+  metadata json
+  created_at datetime(3) [not null]
+  updated_at datetime(3) [not null]
+  deleted_at datetime(3)
+
+  Indexes {
+    (type, status)
+  }
+}
+
+Table dataset_items {
+  id char(36) [pk]
+  dataset_id char(36) [not null]
+  external_key varchar(200)
+  content json [not null]
+  metadata json
+  sort_order int [not null, default: 0]
+  created_at datetime(3) [not null]
+  updated_at datetime(3) [not null]
+
+  Indexes {
+    (dataset_id, external_key) [unique]
+    (dataset_id, sort_order)
+  }
+}
+
+Table scenario_datasets {
+  scenario_id char(36) [not null]
+  dataset_id char(36) [not null]
+  prompt_key varchar(100)
+  sort_order int [not null, default: 0]
+  is_required boolean [not null, default: false]
+  created_at datetime(3) [not null]
+
+  Indexes {
+    (scenario_id, dataset_id) [pk]
+    dataset_id
+  }
+}
+
+Table products {
+  id char(36) [pk]
+  external_key varchar(150) [unique]
+  sku varchar(120)
+  name varchar(500) [not null]
+  normalized_name varchar(500) [not null]
+  brand varchar(160)
+  category varchar(200)
+  price decimal(15,2)
+  currency char(3) [default: 'VND']
+  availability varchar(80)
+  specifications json
+  source_payload json
+  search_text text
+  source_checksum char(64)
+  is_active boolean [not null, default: true]
+  created_at datetime(3) [not null]
+  updated_at datetime(3) [not null]
+
+  Indexes {
+    (sku)
+    (brand, category)
+    (is_active, updated_at)
+  }
+}
+
+Table product_aliases {
+  id char(36) [pk]
+  product_id char(36) [not null]
+  alias varchar(500) [not null]
+  normalized_alias varchar(500) [not null]
+  alias_type varchar(50) [note: 'MODEL, SKU, COMMON_NAME, ORDINAL_CONTEXT']
+  created_at datetime(3) [not null]
+
+  Indexes {
+    (product_id, normalized_alias) [unique]
+    normalized_alias
+  }
+}
+
+Table ai_model_health_logs {
+  id char(36) [pk]
+  ai_model_config_id char(36) [not null]
+  status health_status [not null, default: 'UNKNOWN']
+  latency_ms int
+  available_models json
+  error_code varchar(100)
+  error_message text
+  checked_at datetime(3) [not null]
+
+  Indexes {
+    (ai_model_config_id, checked_at)
+  }
+}
+
+Table simulation_sessions {
+  id char(36) [pk]
+  persona_id char(36) [not null]
+  scenario_id char(36)
+  ai_model_config_id char(36)
+  mode simulation_mode [not null]
+  status simulation_status [not null, default: 'CREATED']
+  client_session_key varchar(150) [unique]
+  persona_version int [not null]
+  scenario_version int
+  model_name_snapshot varchar(200)
+  prompt_snapshot longtext
+  runtime_snapshot json
+  memory_state json
+  progress_state json
+  deal_state json
+  total_turns int [not null, default: 0]
+  total_input_tokens int [not null, default: 0]
+  total_output_tokens int [not null, default: 0]
+  started_at datetime(3)
+  ended_at datetime(3)
+  last_activity_at datetime(3)
+  created_by char(36)
+  created_at datetime(3) [not null]
+  updated_at datetime(3) [not null]
+
+  Indexes {
+    (status, created_at)
+    (persona_id, started_at)
+    (scenario_id, started_at)
+  }
+}
+
+Table conversation_turns {
+  id char(36) [pk]
+  session_id char(36) [not null]
+  turn_number int [not null]
+  idempotency_key varchar(100)
+  request_id varchar(100)
+  user_input longtext
+  raw_model_output longtext [note: 'Never send directly to FE before guards']
+  final_ai_response longtext
+  runtime_state varchar(80)
+  state_confidence decimal(5,4)
+  reply_source reply_source
+  status turn_status [not null, default: 'PENDING']
+  first_token_latency_ms int
+  latency_ms int
+  input_tokens int
+  output_tokens int
+  total_tokens int
+  guard_actions json
+  safety_flags json
+  diagnostics json
+  error_code varchar(100)
+  error_message text
+  started_at datetime(3)
+  completed_at datetime(3)
+  created_at datetime(3) [not null]
+  updated_at datetime(3) [not null]
+
+  Indexes {
+    (session_id, turn_number) [unique]
+    (session_id, idempotency_key) [unique]
+    (session_id, created_at)
+    (status, created_at)
+    (reply_source, created_at)
+  }
+}
+
+Table simulation_feedback {
+  id char(36) [pk]
+  session_id char(36) [not null]
+  conversation_turn_id char(36)
+  rating int
+  is_helpful boolean
+  tags json
+  comment text
+  created_by char(36)
+  created_at datetime(3) [not null]
+
+  Indexes {
+    (session_id, created_at)
+    (rating, created_at)
+  }
+}
+
+Table simulation_evaluations {
+  id char(36) [pk]
+  session_id char(36) [not null]
+  evaluator_prompt_template_id char(36)
+  evaluator_model_config_id char(36)
+  evaluator_version varchar(80) [not null]
+  outcome evaluation_outcome [not null, default: 'NOT_EVALUATED']
+  total_score decimal(6,2)
+  rubric_scores json
+  detected_signals json
+  summary text
+  diagnostics json
+  evaluated_at datetime(3)
+  created_at datetime(3) [not null]
+
+  Indexes {
+    (session_id, evaluator_version) [unique]
+    (outcome, created_at)
+  }
+}
+
+Table import_jobs {
+  id char(36) [pk]
+  job_type varchar(80) [not null, note: 'PERSONA, PRODUCT, DATASET']
+  source_path varchar(500)
+  source_checksum char(64)
+  status import_status [not null, default: 'QUEUED']
+  total_records int [not null, default: 0]
+  processed_records int [not null, default: 0]
+  succeeded_records int [not null, default: 0]
+  failed_records int [not null, default: 0]
+  validation_report json
+  error_summary text
+  created_by char(36)
+  started_at datetime(3)
+  completed_at datetime(3)
+  created_at datetime(3) [not null]
+  updated_at datetime(3) [not null]
+
+  Indexes {
+    (job_type, status, created_at)
+  }
+}
+
+Table system_audit_logs {
+  id char(36) [pk]
+  request_id varchar(100)
+  actor_user_id char(36)
+  action varchar(100) [not null]
+  resource_type varchar(100) [not null]
+  resource_id varchar(100)
+  before_data json
+  after_data json
+  metadata json
+  created_at datetime(3) [not null]
+
+  Indexes {
+    (resource_type, resource_id, created_at)
+    (action, created_at)
+    (actor_user_id, created_at)
+  }
+}
+
+Ref: prompt_templates.parent_template_id > prompt_templates.id
+Ref: prompt_templates.created_by > app_users.id
+Ref: customer_personas.prompt_template_id > prompt_templates.id
+Ref: customer_personas.created_by > app_users.id
+Ref: ai_model_configs.created_by > app_users.id
+Ref: scenarios.default_prompt_template_id > prompt_templates.id
+Ref: scenarios.default_ai_model_config_id > ai_model_configs.id
+Ref: scenarios.created_by > app_users.id
+Ref: scenario_personas.scenario_id > scenarios.id
+Ref: scenario_personas.persona_id > customer_personas.id
+Ref: datasets.created_by > app_users.id
+Ref: dataset_items.dataset_id > datasets.id
+Ref: scenario_datasets.scenario_id > scenarios.id
+Ref: scenario_datasets.dataset_id > datasets.id
+Ref: product_aliases.product_id > products.id
+Ref: ai_model_health_logs.ai_model_config_id > ai_model_configs.id
+Ref: simulation_sessions.persona_id > customer_personas.id
+Ref: simulation_sessions.scenario_id > scenarios.id
+Ref: simulation_sessions.ai_model_config_id > ai_model_configs.id
+Ref: simulation_sessions.created_by > app_users.id
+Ref: conversation_turns.session_id > simulation_sessions.id
+Ref: simulation_feedback.session_id > simulation_sessions.id
+Ref: simulation_feedback.conversation_turn_id > conversation_turns.id
+Ref: simulation_feedback.created_by > app_users.id
+Ref: simulation_evaluations.session_id > simulation_sessions.id
+Ref: simulation_evaluations.evaluator_prompt_template_id > prompt_templates.id
+Ref: simulation_evaluations.evaluator_model_config_id > ai_model_configs.id
+Ref: import_jobs.created_by > app_users.id
+Ref: system_audit_logs.actor_user_id > app_users.id
