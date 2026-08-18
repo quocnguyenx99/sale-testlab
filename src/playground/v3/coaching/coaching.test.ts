@@ -43,6 +43,7 @@ async function main() {
   for (const forbidden of ["overallScore", '"score"', '"weight"', "effectiveWeight"]) assert.equal(serialized.includes(forbidden), false);
   const promptPayload = `${buildCoachingSystemPrompt(providerInput)}\n${serialized}`;
   for (const forbidden of ["overallScore", '"score"', '"weight"', "effectiveWeight"]) assert.equal(promptPayload.includes(forbidden), false);
+  assert.match(buildCoachingSystemPrompt(providerInput), /exactly 1 or 2 concise strings/);
   assert.deepEqual(providerInput.turns.map((turn) => turn.sequence), [...providerInput.turns.map((turn) => turn.sequence)].sort((a, b) => a - b));
   assert.equal(new Set(providerInput.turns.map((turn) => turn.sequence)).size, providerInput.turns.length);
 
@@ -64,17 +65,52 @@ async function main() {
   assert.equal(valid.status, "COMPLETED");
   const mismatch = output(providerInput); mismatch.strengthReinforcement = { criterionKey: "TOPIC_COVERAGE", message: "wrong" };
   assert.throws(() => buildCoachingFeedback({ id: "x", evaluation: weak, providerInput, output: mismatch, coachedAt: "2026-08-13T09:00:00.000Z" }), /INVALID_REINFORCEMENT/);
+  const wrongPriority = output(providerInput); wrongPriority.priorities[0].criterionKey = wrongPriority.priorities[1].criterionKey;
+  assert.throws(() => buildCoachingFeedback({ id: "x", evaluation: weak, providerInput, output: wrongPriority, coachedAt: "2026-08-13T09:00:00.000Z" }), /INVALID_PRIORITY_SET/);
+  const wrongOrder = output(providerInput); [wrongOrder.priorities[0], wrongOrder.priorities[1]] = [wrongOrder.priorities[1], wrongOrder.priorities[0]];
+  assert.throws(() => buildCoachingFeedback({ id: "x", evaluation: weak, providerInput, output: wrongOrder, coachedAt: "2026-08-13T09:00:00.000Z" }), /INVALID_PRIORITY_SET/);
+  const wrongKind = output(providerInput); wrongKind.priorities[0].priorityKind = "REFINEMENT";
+  assert.throws(() => buildCoachingFeedback({ id: "x", evaluation: weak, providerInput, output: wrongKind, coachedAt: "2026-08-13T09:00:00.000Z" }), /INVALID_PRIORITY_SET/);
   const fabricated = output(providerInput); fabricated.priorities[0].evidenceTurnSequences = [999];
   assert.throws(() => buildCoachingFeedback({ id: "x", evaluation: weak, providerInput, output: fabricated, coachedAt: "2026-08-13T09:00:00.000Z" }), /INVALID_COACH_EVIDENCE/);
+  const crossPriority = output(providerInput); crossPriority.priorities[0].evidenceTurnSequences = [...providerInput.priorities[1].evidenceTurnSequences];
+  assert.throws(() => buildCoachingFeedback({ id: "x", evaluation: weak, providerInput, output: crossPriority, coachedAt: "2026-08-13T09:00:00.000Z" }), /INVALID_COACH_EVIDENCE/);
+  const emptyTopicEvidence = evaluation(weak.criteria.map((item) => item.key === "TOPIC_COVERAGE" ? { ...item, evidenceTurnSequences: [] } : item));
+  const emptyTopicInput = buildCoachingProviderInput(session(), emptyTopicEvidence, selectCoachingPlan(emptyTopicEvidence));
+  assert.deepEqual(emptyTopicInput.priorities[0].evidenceTurnSequences, []);
+  assert.equal(buildCoachingFeedback({ id: "empty-topic", evaluation: emptyTopicEvidence, providerInput: emptyTopicInput, output: output(emptyTopicInput), coachedAt: "2026-08-13T09:00:00.000Z" }).status, "COMPLETED");
   const falseWeakness = output(buildCoachingProviderInput(session(), allStrong, refinement)); falseWeakness.priorities[0].title = "Điểm yếu cần khắc phục";
   assert.throws(() => buildCoachingFeedback({ id: "x", evaluation: allStrong, providerInput: buildCoachingProviderInput(session(), allStrong, refinement), output: falseWeakness, coachedAt: "2026-08-13T09:00:00.000Z" }), /INVALID_REFINEMENT_LANGUAGE/);
   assert.equal(coachingProviderOutputSchema.safeParse({ ...output(providerInput), overallScore: 80 }).success, false);
+  const missingSummary = output(providerInput) as Partial<ReturnType<typeof output>>; delete missingSummary.summary;
+  assert.equal(coachingProviderOutputSchema.safeParse(missingSummary).success, false);
+  const invalidKind = output(providerInput) as unknown as { priorities: Array<{ priorityKind: string }> }; invalidKind.priorities[0].priorityKind = "OTHER";
+  assert.equal(coachingProviderOutputSchema.safeParse(invalidKind).success, false);
 
   const originalFetch = globalThis.fetch;
   try {
-    globalThis.fetch = (async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ ...output(providerInput), overallScore: 80 }) } }] }), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch;
-    const malformedProvider = new LocalAICoachingProvider({ baseUrl: "http://local.test/v1", model: "test", apiKey: "", timeoutMs: 100 });
-    await assert.rejects(() => malformedProvider.coach(providerInput), (error: unknown) => error instanceof CoachingProviderError && error.code === "INVALID_PROVIDER_RESPONSE");
+    const provider = new LocalAICoachingProvider({ baseUrl: "http://local.test/v1", model: "test", apiKey: "", timeoutMs: 100 });
+    const respondWith = (content: unknown) => {
+      globalThis.fetch = (async () => new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+    };
+    const rejectsWith = async (content: unknown, code: string) => {
+      respondWith(content);
+      await assert.rejects(() => provider.coach(providerInput), (error: unknown) => error instanceof CoachingProviderError && error.code === code);
+    };
+
+    respondWith(JSON.stringify(output(providerInput)));
+    assert.equal((await provider.coach(providerInput)).priorities.length, providerInput.priorities.length);
+    respondWith(`\`\`\`json\n${JSON.stringify(output(providerInput))}\n\`\`\``);
+    assert.equal((await provider.coach(providerInput)).nextPracticeFocus.length, 1);
+    await rejectsWith(JSON.stringify({ ...output(providerInput), overallScore: 80 }), "PROVIDER_SCHEMA_VALIDATION_FAILED");
+    await rejectsWith(JSON.stringify({ ...output(providerInput), nextPracticeFocus: ["one", "two", "three"] }), "PROVIDER_SCHEMA_VALIDATION_FAILED");
+    await rejectsWith("", "PROVIDER_EMPTY_CONTENT");
+    await rejectsWith(null, "PROVIDER_CONTENT_EXTRACTION_FAILED");
+    await rejectsWith("not-json", "PROVIDER_JSON_PARSE_FAILED");
+    await rejectsWith('{"summary":"truncated"', "PROVIDER_JSON_PARSE_FAILED");
+    await rejectsWith(`${JSON.stringify(output(providerInput))}${JSON.stringify(output(providerInput))}`, "PROVIDER_JSON_PARSE_FAILED");
+    await rejectsWith(`leading prose ${JSON.stringify(output(providerInput))}`, "PROVIDER_JSON_PARSE_FAILED");
+    await rejectsWith(`${JSON.stringify(output(providerInput))} trailing prose`, "PROVIDER_JSON_PARSE_FAILED");
 
     globalThis.fetch = ((_: string | URL | Request, init?: RequestInit) => new Promise<Response>((_, reject) => {
       init?.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true });
@@ -88,12 +124,22 @@ async function main() {
   const sessions = new InMemorySessionRepository(); await sessions.save(session());
   const evaluations = new InMemoryEvaluationRepository(); await evaluations.saveCompleted(weak);
   const coaching = new InMemoryCoachingRepository(); let calls = 0; let fail = true;
-  const service = new CoachingService({ sessions, evaluations, coaching, createId: () => "coach-stable", now: () => new Date("2026-08-13T09:00:00.000Z"), provider: { coach: async (input) => { calls += 1; if (fail) throw new CoachingProviderError("PROVIDER_TIMEOUT"); return output(input); } } });
+  const service = new CoachingService({ sessions, evaluations, coaching, createId: () => "coach-stable", now: () => new Date("2026-08-13T09:00:00.000Z"), provider: { coach: async (input) => { calls += 1; if (fail) throw new CoachingProviderError("PROVIDER_SCHEMA_VALIDATION_FAILED"); return output(input); } } });
   await assert.rejects(() => service.generate("session-001", "owner-001"), CoachingServiceError);
-  const failed = await coaching.findByEvaluationAndVersion(weak.id, COACH_VERSION); assert.equal(failed?.status, "FAILED"); assert.equal(failed?.id, "coach-stable");
+  const failed = await coaching.findByEvaluationAndVersion(weak.id, COACH_VERSION); assert.equal(failed?.status, "FAILED"); assert.equal(failed?.id, "coach-stable"); assert.equal(failed?.failureCode, "PROVIDER_SCHEMA_VALIDATION_FAILED");
   fail = false; const retried = await service.generate("session-001", "owner-001"); assert.equal(retried.id, "coach-stable"); assert.equal(retried.status, "COMPLETED"); assert.equal(calls, 2);
   const repeated = await service.generate("session-001", "owner-001"); assert.equal(repeated.id, retried.id); assert.equal(calls, 2);
   const protectedRecord = await coaching.saveFailure({ id: "different", evaluationId: weak.id, evaluatorVersion: EVALUATOR_VERSION, coachVersion: COACH_VERSION, failureCode: "PROVIDER_TIMEOUT", now: "2026-08-13T10:00:00.000Z" }); assert.equal(protectedRecord.status, "COMPLETED");
+
+  const semanticCoaching = new InMemoryCoachingRepository();
+  const semanticService = new CoachingService({ sessions, evaluations, coaching: semanticCoaching, provider: { coach: async (input) => { const value = output(input); value.strengthReinforcement = { criterionKey: "TOPIC_COVERAGE", message: "wrong" }; return value; } } });
+  await assert.rejects(() => semanticService.generate("session-001", "owner-001"), CoachingServiceError);
+  assert.equal((await semanticCoaching.findByEvaluationAndVersion(weak.id, COACH_VERSION))?.failureCode, "PROVIDER_SEMANTIC_VALIDATION_FAILED");
+
+  const evidenceCoaching = new InMemoryCoachingRepository();
+  const evidenceService = new CoachingService({ sessions, evaluations, coaching: evidenceCoaching, provider: { coach: async (input) => { const value = output(input); value.priorities[0].evidenceTurnSequences = [999]; return value; } } });
+  await assert.rejects(() => evidenceService.generate("session-001", "owner-001"), CoachingServiceError);
+  assert.equal((await evidenceCoaching.findByEvaluationAndVersion(weak.id, COACH_VERSION))?.failureCode, "PROVIDER_EVIDENCE_VALIDATION_FAILED");
   await assert.rejects(() => service.generate("session-001", "other"), (error: unknown) => error instanceof CoachingServiceError && error.code === "COACHING_SESSION_NOT_FOUND");
   const missingEvaluations = new InMemoryEvaluationRepository(); const locked = new CoachingService({ sessions, evaluations: missingEvaluations, coaching: new InMemoryCoachingRepository(), provider: { coach: async () => { throw new Error("not called"); } } });
   assert.equal((await locked.get("session-001", "owner-001")).state, "LOCKED_NEEDS_EVALUATION");

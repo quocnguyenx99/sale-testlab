@@ -53,7 +53,7 @@ export class CoachingService {
       const feedback = buildCoachingFeedback({ id, evaluation, providerInput, output, coachedAt: now });
       return await this.dependencies.coaching.saveCompleted(feedback);
     } catch (error) {
-      const failureCode = error instanceof CoachingProviderError ? error.code : error instanceof CoachingInputError ? error.code : "INVALID_PROVIDER_RESPONSE";
+      const failureCode = coachingFailureCode(error);
       const persisted = await this.dependencies.coaching.saveFailure({ id, evaluationId: evaluation.id, evaluatorVersion: evaluation.evaluatorVersion, coachVersion: COACH_VERSION, failureCode, now });
       if (persisted.status === "COMPLETED") return persisted;
       throw new CoachingServiceError("COACHING_FAILED", "AI Coach chưa thể tạo gợi ý lúc này. Vui lòng thử lại.");
@@ -71,4 +71,13 @@ export class CoachingService {
     const evaluation = await this.dependencies.evaluations.findBySessionAndVersion(sessionId, EVALUATOR_VERSION);
     return evaluation?.status === "COMPLETED" ? evaluation : null;
   }
+}
+
+function coachingFailureCode(error: unknown): string {
+  if (error instanceof CoachingProviderError || error instanceof CoachingInputError) return error.code;
+  if (error instanceof Error && error.message === "INVALID_COACH_EVIDENCE") return "PROVIDER_EVIDENCE_VALIDATION_FAILED";
+  if (error instanceof Error && ["INVALID_PRIORITY_SET", "INVALID_REFINEMENT_LANGUAGE", "INVALID_REINFORCEMENT"].includes(error.message)) {
+    return "PROVIDER_SEMANTIC_VALIDATION_FAILED";
+  }
+  return "INVALID_PROVIDER_RESPONSE";
 }

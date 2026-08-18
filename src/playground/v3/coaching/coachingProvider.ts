@@ -4,8 +4,17 @@ import { CoachingProviderInput, CoachingProviderOutput, coachingProviderOutputSc
 
 export interface CoachingProvider { coach(input: CoachingProviderInput): Promise<CoachingProviderOutput>; }
 
+export type CoachingProviderFailureCode =
+  | "PROVIDER_UNAVAILABLE"
+  | "PROVIDER_TIMEOUT"
+  | "PROVIDER_CONTENT_EXTRACTION_FAILED"
+  | "PROVIDER_EMPTY_CONTENT"
+  | "PROVIDER_JSON_PARSE_FAILED"
+  | "PROVIDER_SCHEMA_VALIDATION_FAILED"
+  | "INVALID_PROVIDER_RESPONSE";
+
 export class CoachingProviderError extends Error {
-  constructor(public readonly code: "PROVIDER_UNAVAILABLE" | "PROVIDER_TIMEOUT" | "INVALID_PROVIDER_RESPONSE") { super(code); }
+  constructor(public readonly code: CoachingProviderFailureCode) { super(code); }
 }
 
 export class LocalAICoachingProvider implements CoachingProvider {
@@ -32,11 +41,12 @@ export class LocalAICoachingProvider implements CoachingProvider {
       if (!response.ok) throw new CoachingProviderError("PROVIDER_UNAVAILABLE");
       const body = await response.json() as { choices?: Array<{ message?: { content?: unknown } }> };
       const content = body.choices?.[0]?.message?.content;
-      if (typeof content !== "string") throw new CoachingProviderError("INVALID_PROVIDER_RESPONSE");
+      if (typeof content !== "string") throw new CoachingProviderError("PROVIDER_CONTENT_EXTRACTION_FAILED");
+      if (!content.trim()) throw new CoachingProviderError("PROVIDER_EMPTY_CONTENT");
       let parsed: unknown;
-      try { parsed = JSON.parse(stripFence(content)); } catch { throw new CoachingProviderError("INVALID_PROVIDER_RESPONSE"); }
+      try { parsed = JSON.parse(stripFence(content)); } catch { throw new CoachingProviderError("PROVIDER_JSON_PARSE_FAILED"); }
       const validated = coachingProviderOutputSchema.safeParse(parsed);
-      if (!validated.success) throw new CoachingProviderError("INVALID_PROVIDER_RESPONSE");
+      if (!validated.success) throw new CoachingProviderError("PROVIDER_SCHEMA_VALIDATION_FAILED");
       return validated.data;
     } catch (error) {
       if (error instanceof CoachingProviderError) throw error;
@@ -56,6 +66,7 @@ export function buildCoachingSystemPrompt(input: CoachingProviderInput): string 
     "suggestedPhrasing là ví dụ giả định, không phải lời đã xuất hiện trong lịch sử.",
     `Trả đúng priorities theo thứ tự: ${priorityContract}. Strength reinforcement chỉ được dùng key ${reinforcement}.`,
     "JSON strict: {summary,priorities:[{criterionKey,priorityKind,title,whyItMatters,observation,recommendedAction,suggestedPhrasing,evidenceTurnSequences}],strengthReinforcement:{criterionKey,message}|null,nextPracticeFocus:[string]}.",
+    "nextPracticeFocus must contain exactly 1 or 2 concise strings; never return 0 or more than 2 items.",
     "Không thêm bất kỳ chỉ số đánh giá, mức điểm, trọng số hoặc thuộc tính ngoài schema."
   ].join("\n");
 }

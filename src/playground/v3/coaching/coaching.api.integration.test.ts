@@ -48,7 +48,9 @@ async function main() {
     assert.deepEqual(collectKeys(first.body).filter((key) => /overallScore|^score$|weight|effectiveWeight|failureCode|prompt|credential/i.test(key)), []);
     fail = true;
     const freshEvaluation = { ...evaluation, id: "eval-fail", sessionId: "locked" }; await evaluations.saveCompleted(freshEvaluation);
-    assert.equal((await request("/api/v3/sessions/locked/coaching", "owner-token", "POST")).status, 503);
+    const failedResponse = await request("/api/v3/sessions/locked/coaching", "owner-token", "POST");
+    assert.equal(failedResponse.status, 503);
+    assert.equal((failedResponse.body.error as { code?: string })?.code, "COACHING_FAILED");
     assert.equal((await request("/api/v3/sessions/locked/coaching", "owner-token")).body.state, "FAILED");
   } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
   console.log("Phase 8 coaching API integration tests passed");
