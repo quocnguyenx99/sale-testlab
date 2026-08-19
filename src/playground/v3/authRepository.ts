@@ -1,4 +1,6 @@
-export type AuthUserRole = "SALE" | "ADMIN";
+import { UserRole } from "./userRole";
+
+export type AuthUserRole = UserRole;
 
 export interface AuthUserRecord {
   id: string;

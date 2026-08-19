@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "crypto";
 import { compare } from "bcryptjs";
 import { AuthRepository, AuthUserRecord, PublicAuthUser } from "./authRepository";
+import { parseUserRole } from "./userRole";
 
 export type AuthErrorCode = "INVALID_CREDENTIALS" | "UNAUTHENTICATED";
 
@@ -55,5 +56,5 @@ export function hashAuthToken(token: string): string {
 }
 
 export function toPublicAuthUser(user: AuthUserRecord): PublicAuthUser {
-  return { id: user.id, email: user.email, displayName: user.displayName, role: user.role };
+  return { id: user.id, email: user.email, displayName: user.displayName, role: parseUserRole(user.role) };
 }
