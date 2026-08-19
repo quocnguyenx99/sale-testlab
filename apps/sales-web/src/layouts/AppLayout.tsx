@@ -1,4 +1,4 @@
-import { History, Home, Library, LogOut, Menu, MessageSquareText, Sparkles, UserRound, X } from 'lucide-react'
+import { BarChart3, History, Home, Library, LogOut, Menu, MessageSquareText, Sparkles, UserRound, X } from 'lucide-react'
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../app/AuthContext'
@@ -8,6 +8,7 @@ const navItems = [
   { to: '/dashboard', label: 'Trang chủ', icon: Home },
   { to: '/customers', label: 'Khách hàng AI', icon: Library },
   { to: '/practice/new', label: 'Luyện tập 1vs1', icon: MessageSquareText },
+  { to: '/progress', label: 'Tiến độ luyện tập', icon: BarChart3 },
   { to: '/history', label: 'Lịch sử luyện tập', icon: History },
 ]
 

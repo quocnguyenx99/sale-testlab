@@ -75,6 +75,8 @@ import { LocalAIEvaluationProvider } from "./v3/evaluation/evaluationProvider";
 import { DatabaseCoachingRepository } from "./v3/coaching/databaseCoachingRepository";
 import { CoachingService } from "./v3/coaching/coachingService";
 import { LocalAICoachingProvider } from "./v3/coaching/coachingProvider";
+import { DatabaseProgressRepository } from "./v3/progress/databaseProgressRepository";
+import { ProgressService } from "./v3/progress/progressService";
 import {
   rebuildRuntimeState,
   RuntimeRecoverySnapshot,
@@ -1440,7 +1442,16 @@ async function main(): Promise<void> {
     coaching: new DatabaseCoachingRepository(prisma),
     provider: new LocalAICoachingProvider()
   });
-  const handleV3Request = createV3Api({ service: v3SimulationService, auth: v3AuthService, evaluationService: v3EvaluationService, coachingService: v3CoachingService });
+  const v3ProgressService = new ProgressService({
+    repository: new DatabaseProgressRepository(prisma)
+  });
+  const handleV3Request = createV3Api({
+    service: v3SimulationService,
+    auth: v3AuthService,
+    evaluationService: v3EvaluationService,
+    coachingService: v3CoachingService,
+    progressService: v3ProgressService
+  });
 
   const server = http.createServer(async (req, res) => {
     try {

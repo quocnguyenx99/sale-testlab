@@ -156,3 +156,41 @@ export interface HistoryPage {
   total: number
   totalPages: number
 }
+
+export type ProgressTrendState = 'NO_DATA' | 'BASELINE_ONLY' | 'LIMITED_DATA' | 'IMPROVING' | 'STABLE' | 'DECLINING'
+
+export interface ProgressTrend {
+  state: ProgressTrendState
+  delta: number | null
+  sampleCount: number
+  comparisonWindowSize: number
+}
+
+export interface ProgressAnalytics {
+  evaluatorVersion: string
+  summary: {
+    totalSessions: number
+    completedSessions: number
+    evaluatedSessions: number
+    averageOverallScore: number | null
+    recentAverageScore: number | null
+    trainingFrequency: { windowDays: 28; completedSessions: number; averagePerWeek: number }
+  }
+  overallTrend: ProgressTrend & { points: Array<{ sessionId: string; evaluatedAt: string; score: number }> }
+  skills: Array<{
+    criterionKey: string
+    label: string
+    averageScore: number | null
+    recentScore: number | null
+    sampleCount: number
+    trend: ProgressTrend
+  }>
+  highlights: { strongestSkillKey: string | null; needsAttentionSkillKey: string | null }
+  recentEvaluatedSessions: Array<{
+    sessionId: string
+    evaluatedAt: string
+    persona: { displayName: string }
+    mode: TrainingMode
+    overallScore: number
+  }>
+}

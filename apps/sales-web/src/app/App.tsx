@@ -7,6 +7,7 @@ import { HistoryPage } from '../pages/HistoryPage'
 import { LoginPage } from '../pages/LoginPage'
 import { NotFoundPage } from '../pages/NotFoundPage'
 import { PracticePage } from '../pages/PracticePage'
+import { ProgressPage } from '../pages/ProgressPage'
 import { SessionResultPage } from '../pages/SessionResultPage'
 import { SessionReplayPage } from '../pages/SessionReplayPage'
 import { SessionSetupPage } from '../pages/SessionSetupPage'
@@ -27,5 +28,5 @@ function LoginGate() {
 }
 
 export function App() {
-  return <Routes><Route element={<LoginGate />}><Route element={<AuthLayout />}><Route path="/login" element={<LoginPage />} /></Route></Route><Route element={<RequireAuth />}><Route element={<AppLayout />}><Route path="/dashboard" element={<DashboardPage />} /><Route path="/customers" element={<CustomersPage />} /><Route path="/history" element={<HistoryPage />} /><Route path="/history/:sessionId" element={<SessionReplayPage />} /><Route path="/practice/new" element={<SessionSetupPage />} /><Route path="/practice/:sessionId" element={<PracticePage />} /><Route path="/practice/:sessionId/result" element={<SessionResultPage />} /></Route></Route><Route path="/" element={<Navigate to="/dashboard" replace />} /><Route path="*" element={<NotFoundPage />} /></Routes>
+  return <Routes><Route element={<LoginGate />}><Route element={<AuthLayout />}><Route path="/login" element={<LoginPage />} /></Route></Route><Route element={<RequireAuth />}><Route element={<AppLayout />}><Route path="/dashboard" element={<DashboardPage />} /><Route path="/customers" element={<CustomersPage />} /><Route path="/progress" element={<ProgressPage />} /><Route path="/history" element={<HistoryPage />} /><Route path="/history/:sessionId" element={<SessionReplayPage />} /><Route path="/practice/new" element={<SessionSetupPage />} /><Route path="/practice/:sessionId" element={<PracticePage />} /><Route path="/practice/:sessionId/result" element={<SessionResultPage />} /></Route></Route><Route path="/" element={<Navigate to="/dashboard" replace />} /><Route path="*" element={<NotFoundPage />} /></Routes>
 }

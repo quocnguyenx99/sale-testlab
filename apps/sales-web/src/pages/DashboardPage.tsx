@@ -1,5 +1,5 @@
-import { ArrowRight, CalendarDays, CheckCircle2, Clock3, MessageCircleMore, PlayCircle, UsersRound } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { ArrowRight, BarChart3, CalendarDays, CheckCircle2, Clock3, MessageCircleMore, PlayCircle, RefreshCw, TrendingDown, TrendingUp, UsersRound } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../app/AuthContext'
 import { PageHeader } from '../components/common/PageHeader'
@@ -9,13 +9,28 @@ import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { LoadingState } from '../components/ui/Feedback'
 import { trainingService } from '../services/trainingService'
-import type { PublicPersona, RecentSession } from '../types/training'
+import type { ProgressAnalytics, PublicPersona, RecentSession } from '../types/training'
 import { labelMode, labelOutcome, labelTrainingStatus } from '../utils/trainingLabels'
+import { formatProgressScore, labelProgressTrend } from '../utils/progressPresentation'
 
 const formatActivity = (value: string) => new Intl.DateTimeFormat('vi-VN', {
   dateStyle: 'short',
   timeStyle: 'short',
 }).format(new Date(value))
+
+function DashboardProgressCard({ progress, loading, unavailable, onRetry }: { progress: ProgressAnalytics | null; loading: boolean; unavailable: boolean; onRetry: () => void }) {
+  const navigate = useNavigate()
+  if (loading) return <Card data-testid="dashboard-progress-card" className="mt-7 p-5"><div className="flex items-center gap-3 text-sm text-slate-500"><BarChart3 className="h-5 w-5 animate-pulse text-blue-600" /><span>Đang tải tiến độ luyện tập...</span></div></Card>
+  if (unavailable || !progress) return <Card data-testid="dashboard-progress-card" className="mt-7 p-5"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="font-extrabold text-slate-900">Tiến độ luyện tập</h2><p role="status" className="mt-1 text-sm text-slate-500">Chưa thể tải tiến độ lúc này.</p></div><div className="flex flex-wrap gap-2"><Button className="min-h-9 px-3 py-1.5" variant="secondary" icon={<RefreshCw className="h-4 w-4" />} onClick={onRetry}>Thử lại</Button><Button className="min-h-9 px-3 py-1.5" variant="secondary" onClick={() => navigate('/progress')}>Xem tiến độ</Button></div></div></Card>
+
+  const noEvaluation = progress.summary.evaluatedSessions === 0 || progress.summary.averageOverallScore === null
+  const { overallTrend } = progress
+  return <Card data-testid="dashboard-progress-card" className="mt-7 p-5"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><h2 className="text-lg font-extrabold text-slate-900">Tiến độ luyện tập</h2><p className="mt-1 text-sm text-slate-500">Tóm tắt nhanh từ các phiên đã được đánh giá.</p></div><Button className="min-h-9 px-3 py-1.5" variant="secondary" onClick={() => navigate('/progress')}>Xem tiến độ<ArrowRight className="h-4 w-4" /></Button></div>{noEvaluation ? <div className="mt-5 rounded-xl bg-slate-50 p-4"><p className="font-bold text-slate-800">Chưa có dữ liệu đánh giá</p><p className="mt-1 text-sm leading-6 text-slate-500">Hoàn thành một phiên và xem kết quả để tiến độ bắt đầu được tổng hợp.</p><Button className="mt-4" variant="secondary" onClick={() => navigate('/customers')}>Bắt đầu luyện tập</Button></div> : <div className="mt-5 grid gap-4 sm:grid-cols-3"><ProgressMetric label="Phiên đã đánh giá" value={String(progress.summary.evaluatedSessions)} /><ProgressMetric label="Điểm trung bình" value={formatProgressScore(progress.summary.averageOverallScore)} /><div><p className="text-xs font-bold uppercase tracking-wide text-slate-400">Xu hướng</p><p className="mt-2 inline-flex items-center gap-1.5 text-sm font-extrabold text-slate-800">{overallTrend.state === 'IMPROVING' ? <TrendingUp className="h-4 w-4 text-emerald-600" /> : overallTrend.state === 'DECLINING' ? <TrendingDown className="h-4 w-4 text-amber-700" /> : <BarChart3 className="h-4 w-4 text-blue-600" />}{labelProgressTrend(overallTrend.state)}</p>{overallTrend.delta !== null && <p className="mt-1 text-xs text-slate-500">{overallTrend.delta > 0 ? '+' : ''}{formatProgressScore(overallTrend.delta)} điểm so với nhóm phiên trước</p>}</div></div>}</Card>
+}
+
+function ProgressMetric({ label, value }: { label: string; value: string }) {
+  return <div><p className="text-xs font-bold uppercase tracking-wide text-slate-400">{label}</p><p className="mt-2 text-2xl font-extrabold text-slate-950">{value}</p></div>
+}
 
 export function DashboardPage() {
   const navigate = useNavigate()
@@ -24,6 +39,9 @@ export function DashboardPage() {
   const [sessions, setSessions] = useState<RecentSession[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [progress, setProgress] = useState<ProgressAnalytics | null>(null)
+  const [progressLoading, setProgressLoading] = useState(true)
+  const [progressUnavailable, setProgressUnavailable] = useState(false)
 
   useEffect(() => {
     Promise.all([trainingService.getRecommendedPersonas(), trainingService.getRecentSessions()])
@@ -32,12 +50,23 @@ export function DashboardPage() {
       .finally(() => setLoading(false))
   }, [])
 
+  const loadProgress = useCallback(() => {
+    let active = true
+    setProgressLoading(true)
+    setProgressUnavailable(false)
+    trainingService.getProgress().then((value) => { if (active) setProgress(value) }).catch(() => { if (active) setProgressUnavailable(true) }).finally(() => { if (active) setProgressLoading(false) })
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => loadProgress(), [loadProgress])
+
   const activeCount = sessions.filter((session) => session.status === 'RUNNING').length
   const completedCount = sessions.filter((session) => session.status === 'COMPLETED').length
 
   return <>
     <PageHeader eyebrow="Sales workspace" title={`Xin chào, ${user?.displayName ?? 'bạn'} 👋`} description="Hôm nay bạn muốn luyện tình huống bán hàng nào?" />
     <Card className="relative overflow-hidden border-0 bg-[#0b1f47] p-6 text-white sm:p-8"><div className="absolute -right-20 -top-28 h-72 w-72 rounded-full border-[50px] border-blue-500/15" /><div className="absolute right-28 top-10 h-20 w-20 rounded-full bg-cyan-400/10 blur-xl" /><div className="relative max-w-2xl"><Badge className="bg-white/10 text-blue-100">Phiên luyện tập tiếp theo</Badge><h2 className="mt-5 text-balance text-2xl font-extrabold sm:text-3xl">Sẵn sàng cho một cuộc hội thoại mới?</h2><p className="mt-3 max-w-xl text-sm leading-6 text-slate-300">Chọn một khách hàng AI, nắm bối cảnh và thực hành cách khám phá nhu cầu trong vài phút.</p><Button className="mt-6 bg-blue-500 hover:bg-blue-400" icon={<ArrowRight className="h-4 w-4" />} onClick={() => navigate('/customers')}>Bắt đầu luyện tập</Button></div></Card>
+    <DashboardProgressCard progress={progress} loading={progressLoading} unavailable={progressUnavailable} onRetry={loadProgress} />
 
     {loading ? <LoadingState label="Đang tải dữ liệu luyện tập..." /> : error ? <Card className="mt-7 p-6 text-center"><p role="alert" className="text-sm font-semibold text-red-700">{error}</p><Button className="mt-4" variant="secondary" onClick={() => window.location.reload()}>Thử tải lại</Button></Card> : <>
       <section className="mt-9"><div className="mb-4 flex items-end justify-between"><div><h2 className="text-lg font-extrabold text-slate-900">Khách hàng đề xuất</h2><p className="mt-1 text-sm text-slate-500">Chọn một phong cách khách hàng để bắt đầu.</p></div><button className="text-sm font-bold text-blue-600 hover:text-blue-700" onClick={() => navigate('/customers')}>Xem tất cả</button></div><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{personas.map((persona) => <PersonaCard key={persona.id} persona={persona} onPractice={() => navigate(`/practice/new?personaId=${persona.id}`)} />)}</div></section>

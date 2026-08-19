@@ -2,6 +2,7 @@ import * as http from "http";
 export type {
   PublicChatMessage,
   PublicCoachingPriority,
+  PublicProgress,
   PublicPersona,
   PublicRecentSession,
   PublicRuntimeInsight,
@@ -29,6 +30,7 @@ import { AuthService, AuthServiceError } from "./authService";
 import { SessionHistoryQuery } from "./sessionRepository";
 import { EvaluationService, EvaluationServiceError } from "./evaluation/evaluationService";
 import { CoachingService, CoachingServiceError } from "./coaching/coachingService";
+import { ProgressService } from "./progress/progressService";
 
 const AUTH_COOKIE = "testlab_session";
 
@@ -131,8 +133,8 @@ function historyQuery(url: URL): SessionHistoryQuery {
   };
 }
 
-export function createV3Api(dependencies: { service: SimulationService; auth: AuthService; evaluationService?: EvaluationService; coachingService?: CoachingService }) {
-  const { service, auth, evaluationService, coachingService } = dependencies;
+export function createV3Api(dependencies: { service: SimulationService; auth: AuthService; evaluationService?: EvaluationService; coachingService?: CoachingService; progressService?: ProgressService }) {
+  const { service, auth, evaluationService, coachingService, progressService } = dependencies;
   return async function handleV3Request(req: http.IncomingMessage, res: http.ServerResponse): Promise<boolean> {
     const url = new URL(req.url || "/", "http://localhost");
     const pathname = url.pathname;
@@ -159,6 +161,16 @@ export function createV3Api(dependencies: { service: SimulationService; auth: Au
       }
 
       const currentUser = await auth.currentUser(cookie(req, AUTH_COOKIE));
+
+      if (req.method === "GET" && pathname === "/api/v3/progress") {
+        if (!progressService) throw new HttpRequestError(503, "PROGRESS_UNAVAILABLE", "Tiến độ luyện tập tạm thời chưa sẵn sàng.");
+        try {
+          sendJson(res, 200, { progress: await progressService.get(currentUser.id) });
+        } catch {
+          throw new HttpRequestError(503, "PROGRESS_UNAVAILABLE", "Tiến độ luyện tập tạm thời chưa sẵn sàng.");
+        }
+        return true;
+      }
 
       const coachingMatch = pathname.match(/^\/api\/v3\/sessions\/([^/]+)\/coaching$/);
       if (coachingMatch && (req.method === "GET" || req.method === "POST")) {

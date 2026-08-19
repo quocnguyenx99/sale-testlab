@@ -1,4 +1,4 @@
-import type { CoachingResponse, EvaluationResponse, HistoryPage, HistoryQuery, PublicPersona, RecentSession, SendMessageResponse, TrainingMode, TrainingSession } from '../types/training'
+import type { CoachingResponse, EvaluationResponse, HistoryPage, HistoryQuery, ProgressAnalytics, PublicPersona, RecentSession, SendMessageResponse, TrainingMode, TrainingSession } from '../types/training'
 
 interface ApiErrorBody { error?: { code?: string; message?: string } }
 
@@ -58,6 +58,9 @@ export const trainingService = {
   },
   async getRecentSessions(): Promise<RecentSession[]> {
     return (await this.getHistory({ page: 1, pageSize: 10 })).items
+  },
+  async getProgress(): Promise<ProgressAnalytics> {
+    return (await request<{ progress: ProgressAnalytics }>('/api/v3/progress')).progress
   },
   async getHistory(query: HistoryQuery = {}): Promise<HistoryPage> {
     const params = new URLSearchParams()
