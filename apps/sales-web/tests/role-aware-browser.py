@@ -30,6 +30,50 @@ PROGRESS = {
     "highlights": {"strongestSkillKey": None, "needsAttentionSkillKey": None},
     "recentEvaluatedSessions": [],
 }
+PERSONA = {
+    "id": "phase10a5-persona",
+    "displayName": "Khách hàng RBAC",
+    "initials": "RB",
+    "role": "Quản lý mua hàng",
+    "customerType": "Doanh nghiệp",
+    "difficulty": "MEDIUM",
+    "summary": "Fixture an toàn cho role acceptance.",
+    "interests": ["sản phẩm mẫu"],
+    "scenarioContext": "Tư vấn sản phẩm mẫu.",
+    "defaultScenario": {
+        "id": "phase10a5-scenario",
+        "title": "Tình huống RBAC",
+        "description": "Fixture không gọi AI.",
+        "difficulty": "MEDIUM",
+    },
+    "color": "#2f6fed",
+}
+RUNNING_SESSION = {
+    "id": "phase10a5-running",
+    "persona": PERSONA,
+    "scenario": PERSONA["defaultScenario"],
+    "mode": "SALE_FIRST",
+    "status": "RUNNING",
+    "createdAt": "2026-08-20T01:00:00.000Z",
+    "completedAt": None,
+    "messages": [],
+    "runtimeInsight": None,
+}
+COMPLETED_SESSION = {
+    **RUNNING_SESSION,
+    "id": "phase10a5-completed",
+    "status": "COMPLETED",
+    "completedAt": "2026-08-20T01:05:00.000Z",
+    "result": {
+        "outcome": "completed",
+        "trainingStatus": "completed",
+        "turnCount": 0,
+        "durationSeconds": 300,
+        "resolvedTopics": [],
+        "missingTopics": [],
+        "signals": [],
+    },
+}
 
 
 def fulfill(route, body, status=200):
@@ -65,7 +109,17 @@ def install_api(page, state, requests):
             if status != 200:
                 code = "UNAUTHENTICATED" if status == 401 else "FORBIDDEN"
                 return fulfill(route, {"error": {"code": code, "message": "Safe authorization fixture"}}, status)
-            return fulfill(route, {"personas": []})
+            return fulfill(route, {"personas": [PERSONA]})
+        if url.endswith(f"/api/v3/personas/{PERSONA['id']}"):
+            return fulfill(route, {"persona": PERSONA})
+        if url.endswith("/api/v3/sessions/phase10a5-running") and method == "GET":
+            return fulfill(route, {"session": RUNNING_SESSION})
+        if url.endswith("/api/v3/sessions/phase10a5-completed") and method == "GET":
+            return fulfill(route, {"session": COMPLETED_SESSION})
+        if url.endswith("/api/v3/sessions/phase10a5-completed/evaluation") and method == "GET":
+            return fulfill(route, {"state": "NOT_EVALUATED", "evaluation": None})
+        if url.endswith("/api/v3/sessions/phase10a5-completed/coaching") and method == "GET":
+            return fulfill(route, {"state": "LOCKED_NEEDS_EVALUATION", "coaching": None})
         if "/api/v3/sessions" in url and method == "GET":
             return fulfill(route, {"sessions": [], "items": [], "page": 1, "pageSize": 10, "total": 0, "totalPages": 0})
         if url.endswith("/api/v3/progress"):
@@ -116,6 +170,21 @@ with sync_playwright() as playwright:
         assert_no_ai_calls(requests)
         assert not console_errors, console_errors
 
+        own_training_routes = [
+            ("/customers", "Thư viện khách hàng AI"),
+            (f"/practice/new?personaId={PERSONA['id']}", "Thiết lập phiên luyện tập"),
+            (f"/practice/{RUNNING_SESSION['id']}", PERSONA["displayName"]),
+            (f"/practice/{COMPLETED_SESSION['id']}/result", "Tổng kết phiên luyện tập"),
+            ("/history", "Lịch sử luyện tập"),
+            ("/progress", "Tiến độ luyện tập"),
+        ]
+        for path, marker in own_training_routes:
+            page.goto(f"{BASE_URL}{path}", wait_until="networkidle")
+            page.get_by_text(marker, exact=True).first.wait_for()
+            page.get_by_text(label, exact=True).wait_for()
+        assert_no_ai_calls(requests)
+        assert not console_errors, console_errors
+
         if role == "SALE":
             page.set_viewport_size({"width": 390, "height": 844})
             page.locator("header button").click()
@@ -135,6 +204,13 @@ with sync_playwright() as playwright:
             page.reload(wait_until="networkidle")
             page.get_by_text(ROLE_LABELS["SALE"], exact=True).wait_for()
             assert page.get_by_text(ROLE_LABELS["MANAGER"], exact=True).count() == 0
+
+        page.set_viewport_size({"width": 1280, "height": 900})
+        page.get_by_role("button", name="Đăng xuất").first.click()
+        page.wait_for_url("**/login")
+        page.locator("form").wait_for()
+        assert sum(method == "POST" and url.endswith("/api/v3/auth/logout") for method, url in requests) == 1
+        assert_no_ai_calls(requests)
 
         page.close()
 

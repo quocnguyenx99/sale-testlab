@@ -67,4 +67,14 @@ unsubscribeDuplicate()
 notifyApiAccess(401)
 assert.deepEqual(notifications, ['UNAUTHENTICATED', 'FORBIDDEN'])
 
+const remountNotifications: string[] = []
+const unsubscribeRemount = subscribeApiAccess((status) => remountNotifications.push(status))
+notifyApiAccess(401)
+notifyApiAccess(401)
+notifyApiAccess(403)
+assert.deepEqual(remountNotifications, ['UNAUTHENTICATED', 'UNAUTHENTICATED', 'FORBIDDEN'])
+unsubscribeRemount()
+notifyApiAccess(403)
+assert.deepEqual(remountNotifications, ['UNAUTHENTICATED', 'UNAUTHENTICATED', 'FORBIDDEN'])
+
 console.log('Phase 10A-4 frontend authorization policy/notifier tests: PASS')
