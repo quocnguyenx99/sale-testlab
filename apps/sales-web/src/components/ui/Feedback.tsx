@@ -1,4 +1,4 @@
-import { AlertCircle, Inbox, LoaderCircle } from 'lucide-react'
+import { AlertCircle, Inbox, LoaderCircle, ShieldAlert } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 export function LoadingState({ label = 'Đang tải dữ liệu...' }: { label?: string }) {
@@ -47,6 +47,21 @@ export function ErrorState({
       </div>
       <h3 className="mt-3 font-semibold text-red-900">{title}</h3>
       <p className="mt-1 max-w-sm text-sm text-red-700">{description}</p>
+      {action && <div className="mt-4">{action}</div>}
+    </div>
+  )
+}
+
+export function ForbiddenState({ action }: { action?: ReactNode }) {
+  return (
+    <div className="flex min-h-52 flex-col items-center justify-center rounded-xl border border-border bg-surface p-6 text-center sm:p-8">
+      <div className="grid h-10 w-10 place-items-center rounded-xl bg-brand-soft text-brand">
+        <ShieldAlert className="h-5 w-5" aria-hidden="true" />
+      </div>
+      <h2 className="mt-3 font-semibold text-ink">Bạn không có quyền truy cập</h2>
+      <p className="mt-1 max-w-md text-sm text-ink-secondary">
+        Tài khoản hiện tại không có quyền sử dụng chức năng này.
+      </p>
       {action && <div className="mt-4">{action}</div>}
     </div>
   )

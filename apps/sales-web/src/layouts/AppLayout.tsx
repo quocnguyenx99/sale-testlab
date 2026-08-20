@@ -8,24 +8,28 @@ import {
   MessageSquareText,
   UserRound,
   X,
+  type LucideIcon,
 } from 'lucide-react'
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../app/AuthContext'
+import { hasUiCapability, userRoleLabel, type UiCapability } from '../app/authorizationPolicy'
 import { Brand } from '../components/common/Brand'
 
-const navItems = [
-  { to: '/dashboard', label: 'Tổng quan', icon: Home },
-  { to: '/customers', label: 'Khách hàng AI', icon: Library },
-  { to: '/practice/new', label: 'Luyện tập', icon: MessageSquareText },
-  { to: '/history', label: 'Lịch sử', icon: History },
-  { to: '/progress', label: 'Tiến độ', icon: BarChart3 },
+const navItems: ReadonlyArray<{ to: string; label: string; icon: LucideIcon; requiredCapability: UiCapability }> = [
+  { to: '/dashboard', label: 'Tổng quan', icon: Home, requiredCapability: 'USE_OWN_TRAINING' },
+  { to: '/customers', label: 'Khách hàng AI', icon: Library, requiredCapability: 'USE_OWN_TRAINING' },
+  { to: '/practice/new', label: 'Luyện tập', icon: MessageSquareText, requiredCapability: 'USE_OWN_TRAINING' },
+  { to: '/history', label: 'Lịch sử', icon: History, requiredCapability: 'USE_OWN_TRAINING' },
+  { to: '/progress', label: 'Tiến độ', icon: BarChart3, requiredCapability: 'USE_OWN_TRAINING' },
 ]
 
 export function AppLayout() {
   const [open, setOpen] = useState(false)
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const visibleNavItems = navItems.filter(({ requiredCapability }) => hasUiCapability(user?.role, requiredCapability))
+  const roleLabel = userRoleLabel(user?.role)
 
   const signOut = async () => {
     await logout()
@@ -47,7 +51,7 @@ export function AppLayout() {
         </div>
 
         <nav aria-label="Điều hướng chính" className="mt-4 space-y-1 px-3">
-          {navItems.map(({ to, label, icon: Icon }) => (
+          {visibleNavItems.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
@@ -73,10 +77,11 @@ export function AppLayout() {
             <UserRound className="h-4 w-4" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-semibold text-ink">
+            <p className="truncate text-xs font-semibold text-ink" title={user?.displayName}>
               {user?.displayName ?? 'Chuyên viên'}
             </p>
-            <p className="truncate text-[11px] text-ink-muted">{user?.email}</p>
+            <p className="truncate text-[11px] font-medium text-brand" title={roleLabel}>{roleLabel}</p>
+            <p className="truncate text-[11px] text-ink-muted" title={user?.email}>{user?.email}</p>
           </div>
           <button
             aria-label="Đăng xuất"

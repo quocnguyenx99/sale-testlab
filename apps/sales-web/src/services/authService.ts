@@ -1,8 +1,11 @@
+import { notifyApiAccess } from '../app/apiAccessNotifier'
+import type { UserRole } from '../app/authorizationPolicy'
+
 export interface PublicAuthUser {
   id: string
   email: string
   displayName: string
-  role: 'SALE' | 'MANAGER' | 'ADMIN'
+  role: UserRole
 }
 
 interface ApiErrorBody { error?: { message?: string } }
@@ -14,7 +17,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json', ...init?.headers },
   })
   const body = await response.json() as T & ApiErrorBody
-  if (!response.ok) throw new Error(body.error?.message ?? 'Yêu cầu xác thực không thành công.')
+  if (!response.ok) {
+    notifyApiAccess(response.status)
+    throw new Error(body.error?.message ?? 'Yêu cầu xác thực không thành công.')
+  }
   return body
 }
 

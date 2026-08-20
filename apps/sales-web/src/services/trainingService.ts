@@ -1,3 +1,4 @@
+import { notifyApiAccess } from '../app/apiAccessNotifier'
 import type { CoachingResponse, EvaluationResponse, HistoryPage, HistoryQuery, ProgressAnalytics, PublicPersona, RecentSession, SendMessageResponse, TrainingMode, TrainingSession } from '../types/training'
 
 interface ApiErrorBody { error?: { code?: string; message?: string } }
@@ -21,6 +22,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const body = await response.json() as T & ApiErrorBody
   if (!response.ok) {
+    notifyApiAccess(response.status)
     throw new TrainingServiceError(body.error?.code ?? 'REQUEST_FAILED', body.error?.message ?? 'Yêu cầu không thành công.', response.status)
   }
   return body

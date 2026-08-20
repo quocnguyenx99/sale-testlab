@@ -6,10 +6,10 @@ import { PersonaCard } from '../components/common/PersonaCard'
 import { Avatar } from '../components/ui/Avatar'
 import { Badge, DifficultyBadge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
-import { EmptyState, ErrorState, LoadingState } from '../components/ui/Feedback'
+import { EmptyState, ErrorState, ForbiddenState, LoadingState } from '../components/ui/Feedback'
 import { SearchInput, Select } from '../components/ui/FormControls'
 import { Modal } from '../components/ui/Modal'
-import { trainingService } from '../services/trainingService'
+import { TrainingServiceError, trainingService } from '../services/trainingService'
 import type { Difficulty, PublicPersona } from '../types/training'
 
 export function CustomersPage() {
@@ -21,14 +21,19 @@ export function CustomersPage() {
   const [type, setType] = useState('ALL')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [forbidden, setForbidden] = useState(false)
 
   useEffect(() => {
     trainingService
       .getPersonas()
       .then(setPersonas)
-      .catch((reason: unknown) =>
+      .catch((reason: unknown) => {
+        if (reason instanceof TrainingServiceError && reason.status === 403) {
+          setForbidden(true)
+          return
+        }
         setError(reason instanceof Error ? reason.message : 'Không thể tải thư viện khách hàng.')
-      )
+      })
       .finally(() => setLoading(false))
   }, [])
 
@@ -62,6 +67,14 @@ export function CustomersPage() {
   }
 
   const isFiltered = search.trim() !== '' || difficulty !== 'ALL' || type !== 'ALL'
+
+  if (forbidden) {
+    return (
+      <ForbiddenState
+        action={<Button onClick={() => navigate('/dashboard')}>Về trang tổng quan</Button>}
+      />
+    )
+  }
 
   return (
     <>
