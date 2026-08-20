@@ -132,6 +132,10 @@ with sync_playwright() as playwright:
             return fulfill(route, SEND_RESPONSE, 200)
         if url.endswith("/api/v3/sessions/sess-cf-1/stop") and method == "POST":
             return fulfill(route, STOP_RESPONSE, 200)
+        if url.endswith("/api/v3/sessions/sess-cf-1/evaluation"):
+            return fulfill(route, {"state": "NOT_EVALUATED", "evaluation": None})
+        if url.endswith("/api/v3/sessions/sess-cf-1/coaching"):
+            return fulfill(route, {"state": "NOT_GENERATED", "coaching": None})
         if url.endswith("/api/v3/sessions/sess-cf-1"):
             return fulfill(route, CUSTOMER_FIRST_SESSION)
         if url.endswith("/api/v3/sessions/sess-sf-1"):
