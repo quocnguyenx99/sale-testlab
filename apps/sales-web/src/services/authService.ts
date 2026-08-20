@@ -2,7 +2,7 @@ export interface PublicAuthUser {
   id: string
   email: string
   displayName: string
-  role: 'SALE' | 'ADMIN'
+  role: 'SALE' | 'MANAGER' | 'ADMIN'
 }
 
 interface ApiErrorBody { error?: { message?: string } }

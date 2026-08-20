@@ -109,22 +109,47 @@ async function main(): Promise<void> {
   assert(address && typeof address !== "string");
   const base = `http://127.0.0.1:${address.port}`;
   let cookieHeader = "";
-  const json = async (path: string, init?: RequestInit) => {
-    const response = await fetch(`${base}${path}`, { ...init, headers: { "Content-Type": "application/json", ...(cookieHeader ? { Cookie: cookieHeader } : {}) } });
+  const json = async (path: string, init?: RequestInit, cookieOverride?: string | null) => {
+    const requestCookie = cookieOverride === undefined ? cookieHeader : cookieOverride || "";
+    const response = await fetch(`${base}${path}`, { ...init, headers: { "Content-Type": "application/json", ...(requestCookie ? { Cookie: requestCookie } : {}) } });
     const setCookie = response.headers.get("set-cookie");
     if (setCookie) cookieHeader = setCookie.split(";")[0];
     return { status: response.status, body: await response.json() as Record<string, unknown>, setCookie };
   };
 
   try {
-    assert.equal((await json("/api/v3/personas")).status, 401);
+    const missingSession = await json("/api/v3/personas");
+    assert.equal(missingSession.status, 401);
+    assert.equal((missingSession.body.error as { code: string }).code, "UNAUTHENTICATED");
     assert.equal((await json("/api/v3/sessions")).status, 401);
     assert.equal((await json("/api/v3/sessions/missing/evaluation")).status, 401);
     assert.equal((await json("/api/v3/sessions/missing/evaluation", { method: "POST", body: "{}" })).status, 401);
     const login = await json("/api/v3/auth/login", { method: "POST", body: JSON.stringify({ email: user.email, password: "valid-password" }) });
     assert.equal(login.status, 200);
     assert.match(login.setCookie || "", /HttpOnly/);
-    assert.equal((await json("/api/v3/auth/me")).status, 200);
+    assert.doesNotMatch(login.setCookie || "", /SALE|MANAGER|ADMIN|MANAGE_TRAINING_PROGRAMS/);
+    const saleMe = await json("/api/v3/auth/me");
+    assert.equal(saleMe.status, 200);
+    const salePublicUser = saleMe.body.user as Record<string, unknown>;
+    assert.equal(salePublicUser.id, user.id);
+    assert.equal(salePublicUser.email, user.email);
+    assert.equal(salePublicUser.displayName, user.displayName);
+    assert.equal(salePublicUser.role, "SALE");
+    assert.deepEqual(collectKeys(salePublicUser).filter((key) => /password|token|session|capabilit|authorization|credential|secret/i.test(key)), []);
+
+    user.role = "MANAGER";
+    assert.equal(((await json("/api/v3/auth/me")).body.user as { role: string }).role, "MANAGER");
+    user.role = "ADMIN";
+    assert.equal(((await json("/api/v3/auth/me")).body.user as { role: string }).role, "ADMIN");
+    user.role = "SALE";
+    assert.equal(((await json("/api/v3/auth/me")).body.user as { role: string }).role, "SALE");
+
+    const malformedCookie = await json("/api/v3/auth/me", undefined, "testlab_session=%");
+    assert.equal(malformedCookie.status, 401);
+    assert.equal((malformedCookie.body.error as { code: string }).code, "UNAUTHENTICATED");
+    const unknownCookie = await json("/api/v3/auth/me", undefined, "testlab_session=unknown-token");
+    assert.equal(unknownCookie.status, 401);
+    assert.equal((unknownCookie.body.error as { code: string }).code, "UNAUTHENTICATED");
     const list = await json("/api/v3/personas");
     assert.equal(list.status, 200);
     assert.equal((list.body.personas as unknown[]).length, 1);

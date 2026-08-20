@@ -105,7 +105,14 @@ function statusFor(error: SimulationServiceError): number {
 function cookie(req: http.IncomingMessage, name: string): string | null {
   for (const part of (req.headers.cookie || "").split(";")) {
     const [key, ...value] = part.trim().split("=");
-    if (key === name) return decodeURIComponent(value.join("="));
+    if (key === name) {
+      try {
+        return decodeURIComponent(value.join("="));
+      } catch (error) {
+        if (error instanceof URIError) return null;
+        throw error;
+      }
+    }
   }
   return null;
 }
