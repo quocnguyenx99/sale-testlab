@@ -170,7 +170,7 @@ export function SessionSetupPage() {
               Chọn cách bắt đầu phù hợp với mục tiêu luyện tập của bạn.
             </p>
 
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div role="radiogroup" aria-label="Ai sẽ mở đầu cuộc trò chuyện?" className="mt-4 grid gap-3 sm:grid-cols-2">
               {modes.map(({ value, title, label, description, icon: Icon }) => {
                 const active = mode === value
                 return (
@@ -180,6 +180,12 @@ export function SessionSetupPage() {
                     role="radio"
                     aria-checked={active}
                     onClick={() => setMode(value)}
+                    onKeyDown={(event) => {
+                      if (event.key === ' ' || event.key === 'Enter') {
+                        event.preventDefault()
+                        setMode(value)
+                      }
+                    }}
                     className={`relative rounded-xl border p-4 text-left transition-all duration-150 ${
                       active
                         ? 'border-brand bg-brand-soft/50 ring-2 ring-brand/15'

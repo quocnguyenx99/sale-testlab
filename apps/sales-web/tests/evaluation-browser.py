@@ -42,11 +42,11 @@ with sync_playwright() as playwright:
 
     page.route("**/api/v3/**", api)
     page.goto(f"http://localhost:5173/practice/{SESSION_ID}/result", wait_until="networkidle")
-    page.get_by_role("button", name="Phân tích kết quả").wait_for()
+    page.get_by_role("button", name="Đánh giá phiên luyện tập").wait_for()
     assert page.locator("text=82/100").count() == 0
-    page.get_by_role("button", name="Phân tích kết quả").click()
+    page.get_by_role("button", name="Đánh giá phiên luyện tập").click()
     page.get_by_text("82", exact=True).wait_for()
-    assert page.get_by_text("Kết quả phân tích", exact=True).is_visible()
+    assert page.get_by_text("Đánh giá kỹ năng", exact=True).is_visible()
     assert page.get_by_text("Không áp dụng", exact=True).is_visible()
     page.screenshot(path=str(Path.cwd() / "playground-phase7-evaluation.png"), full_page=True)
     browser.close()

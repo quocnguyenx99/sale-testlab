@@ -152,7 +152,7 @@ export function CustomersPage() {
         </>
       ) : (
         <EmptyState
-          title="Không tìm thấy khách hàng phù compliance"
+          title="Không tìm thấy khách hàng phù hợp"
           description="Thử thay đổi từ khóa tìm kiếm hoặc bộ lọc để xem thêm lựa chọn."
           action={
             isFiltered ? (

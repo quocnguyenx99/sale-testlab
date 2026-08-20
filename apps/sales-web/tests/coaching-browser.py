@@ -29,7 +29,7 @@ with sync_playwright() as playwright:
         page.get_by_role("button", name="Nhận gợi ý từ AI Coach").click()
         page.get_by_text("Tinh chỉnh phần xác nhận", exact=True).wait_for()
         assert page.get_by_text("Tinh chỉnh thêm", exact=True).is_visible()
-        assert page.get_by_text("Cách diễn đạt gợi ý", exact=True).is_visible()
+        assert page.get_by_text("Cách diễn đạt mẫu", exact=True).is_visible()
         assert page.get_by_text("Điểm yếu", exact=False).count() == 0
         assert page.screenshot(full_page=True)
         page.close()
