@@ -31,6 +31,7 @@ import { SessionHistoryQuery } from "./sessionRepository";
 import { EvaluationService, EvaluationServiceError } from "./evaluation/evaluationService";
 import { CoachingService, CoachingServiceError } from "./coaching/coachingService";
 import { ProgressService } from "./progress/progressService";
+import { AuthorizationError } from "./authorizationPolicy";
 
 const AUTH_COOKIE = "testlab_session";
 
@@ -38,6 +39,19 @@ class HttpRequestError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string) {
     super(message);
   }
+}
+
+export interface AuthorizationHttpErrorResponse {
+  status: 403;
+  payload: { error: { code: "FORBIDDEN"; message: string } };
+}
+
+export function mapAuthorizationError(error: unknown): AuthorizationHttpErrorResponse | null {
+  if (!(error instanceof AuthorizationError)) return null;
+  return {
+    status: 403,
+    payload: { error: { code: error.code, message: error.message } }
+  };
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -262,7 +276,10 @@ export function createV3Api(dependencies: { service: SimulationService; auth: Au
 
       throw new HttpRequestError(404, "NOT_FOUND", "API không tồn tại.");
     } catch (error) {
-      if (error instanceof HttpRequestError) {
+      const authorizationError = mapAuthorizationError(error);
+      if (authorizationError) {
+        sendJson(res, authorizationError.status, authorizationError.payload);
+      } else if (error instanceof HttpRequestError) {
         sendJson(res, error.status, { error: { code: error.code, message: error.message } });
       } else if (error instanceof SimulationServiceError) {
         sendJson(res, statusFor(error), { error: { code: error.code, message: error.message } });

@@ -28,6 +28,7 @@
     "test:phase12f": "tsx src/runtime/phase12f.regression.test.ts",
     "test:phase12f2": "tsx src/runtime/phase12f2.regression.test.ts",
     "test:v3-api": "tsx src/playground/v3/publicApi.integration.test.ts",
+    "test:v3-authorization": "tsx src/playground/v3/authorizationPolicy.test.ts",
     "test:v3-session": "tsx src/playground/v3/simulationService.test.ts",
     "test:v3-recovery": "tsx src/playground/v3/runtimeRecovery.test.ts",
     "test:v3-history": "tsx src/playground/v3/history.test.ts",
