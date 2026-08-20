@@ -1,35 +1,171 @@
-import { ArrowRight, BarChart3, CalendarDays, CheckCircle2, Clock3, MessageCircleMore, PlayCircle, RefreshCw, TrendingDown, TrendingUp, UsersRound } from 'lucide-react'
+import {
+  ArrowRight,
+  BarChart3,
+  CalendarDays,
+  CheckCircle2,
+  Clock3,
+  MessageCircleMore,
+  PlayCircle,
+  RefreshCw,
+  Sparkles,
+  TrendingDown,
+  TrendingUp,
+} from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../app/AuthContext'
 import { PageHeader } from '../components/common/PageHeader'
 import { PersonaCard } from '../components/common/PersonaCard'
-import { Badge } from '../components/ui/Badge'
+import { Avatar } from '../components/ui/Avatar'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
-import { LoadingState } from '../components/ui/Feedback'
+import { EmptyState, LoadingState } from '../components/ui/Feedback'
 import { trainingService } from '../services/trainingService'
 import type { ProgressAnalytics, PublicPersona, RecentSession } from '../types/training'
-import { labelMode, labelOutcome, labelTrainingStatus } from '../utils/trainingLabels'
 import { formatProgressScore, labelProgressTrend } from '../utils/progressPresentation'
+import { labelMode, labelOutcome, labelTrainingStatus } from '../utils/trainingLabels'
 
-const formatActivity = (value: string) => new Intl.DateTimeFormat('vi-VN', {
-  dateStyle: 'short',
-  timeStyle: 'short',
-}).format(new Date(value))
+const formatActivity = (value: string) =>
+  new Intl.DateTimeFormat('vi-VN', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(new Date(value))
 
-function DashboardProgressCard({ progress, loading, unavailable, onRetry }: { progress: ProgressAnalytics | null; loading: boolean; unavailable: boolean; onRetry: () => void }) {
+function DashboardProgressCard({
+  progress,
+  loading,
+  unavailable,
+  onRetry,
+}: {
+  progress: ProgressAnalytics | null
+  loading: boolean
+  unavailable: boolean
+  onRetry: () => void
+}) {
   const navigate = useNavigate()
-  if (loading) return <Card data-testid="dashboard-progress-card" className="mt-7 p-5"><div className="flex items-center gap-3 text-sm text-slate-500"><BarChart3 className="h-5 w-5 animate-pulse text-blue-600" /><span>Đang tải tiến độ luyện tập...</span></div></Card>
-  if (unavailable || !progress) return <Card data-testid="dashboard-progress-card" className="mt-7 p-5"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="font-extrabold text-slate-900">Tiến độ luyện tập</h2><p role="status" className="mt-1 text-sm text-slate-500">Chưa thể tải tiến độ lúc này.</p></div><div className="flex flex-wrap gap-2"><Button className="min-h-9 px-3 py-1.5" variant="secondary" icon={<RefreshCw className="h-4 w-4" />} onClick={onRetry}>Thử lại</Button><Button className="min-h-9 px-3 py-1.5" variant="secondary" onClick={() => navigate('/progress')}>Xem tiến độ</Button></div></div></Card>
 
-  const noEvaluation = progress.summary.evaluatedSessions === 0 || progress.summary.averageOverallScore === null
+  if (loading) {
+    return (
+      <Card data-testid="dashboard-progress-card" className="mt-6 p-5 sm:p-6">
+        <div className="flex items-center gap-3 text-sm text-ink-secondary">
+          <BarChart3 className="h-5 w-5 animate-pulse text-brand" />
+          <span>Đang tải tiến độ luyện tập...</span>
+        </div>
+      </Card>
+    )
+  }
+
+  if (unavailable || !progress) {
+    return (
+      <Card data-testid="dashboard-progress-card" className="mt-6 p-5 sm:p-6">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+          <div>
+            <h2 className="text-base font-bold text-ink">Tiến độ luyện tập</h2>
+            <p role="status" className="mt-1 text-sm text-ink-secondary">
+              Chưa thể tải tiến độ lúc này.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<RefreshCw className="h-3.5 w-3.5" />}
+              onClick={onRetry}
+            >
+              Thử lại
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => navigate('/progress')}>
+              Xem tiến độ
+            </Button>
+          </div>
+        </div>
+      </Card>
+    )
+  }
+
+  const noEvaluation =
+    progress.summary.evaluatedSessions === 0 || progress.summary.averageOverallScore === null
   const { overallTrend } = progress
-  return <Card data-testid="dashboard-progress-card" className="mt-7 p-5"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><h2 className="text-lg font-extrabold text-slate-900">Tiến độ luyện tập</h2><p className="mt-1 text-sm text-slate-500">Tóm tắt nhanh từ các phiên đã được đánh giá.</p></div><Button className="min-h-9 px-3 py-1.5" variant="secondary" onClick={() => navigate('/progress')}>Xem tiến độ<ArrowRight className="h-4 w-4" /></Button></div>{noEvaluation ? <div className="mt-5 rounded-xl bg-slate-50 p-4"><p className="font-bold text-slate-800">Chưa có dữ liệu đánh giá</p><p className="mt-1 text-sm leading-6 text-slate-500">Hoàn thành một phiên và xem kết quả để tiến độ bắt đầu được tổng hợp.</p><Button className="mt-4" variant="secondary" onClick={() => navigate('/customers')}>Bắt đầu luyện tập</Button></div> : <div className="mt-5 grid gap-4 sm:grid-cols-3"><ProgressMetric label="Phiên đã đánh giá" value={String(progress.summary.evaluatedSessions)} /><ProgressMetric label="Điểm trung bình" value={formatProgressScore(progress.summary.averageOverallScore)} /><div><p className="text-xs font-bold uppercase tracking-wide text-slate-400">Xu hướng</p><p className="mt-2 inline-flex items-center gap-1.5 text-sm font-extrabold text-slate-800">{overallTrend.state === 'IMPROVING' ? <TrendingUp className="h-4 w-4 text-emerald-600" /> : overallTrend.state === 'DECLINING' ? <TrendingDown className="h-4 w-4 text-amber-700" /> : <BarChart3 className="h-4 w-4 text-blue-600" />}{labelProgressTrend(overallTrend.state)}</p>{overallTrend.delta !== null && <p className="mt-1 text-xs text-slate-500">{overallTrend.delta > 0 ? '+' : ''}{formatProgressScore(overallTrend.delta)} điểm so với nhóm phiên trước</p>}</div></div>}</Card>
+
+  return (
+    <Card data-testid="dashboard-progress-card" className="mt-6 p-5 sm:p-6">
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
+        <div>
+          <h2 className="text-base font-bold text-ink">Tiến độ luyện tập</h2>
+          <p className="mt-1 text-xs text-ink-secondary">
+            Tóm tắt nhanh từ các phiên đã được đánh giá.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="secondary"
+          className="shrink-0"
+          onClick={() => navigate('/progress')}
+        >
+          Xem tiến độ
+          <ArrowRight className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+
+      {noEvaluation ? (
+        <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4">
+          <p className="font-semibold text-sm text-ink">Chưa có dữ liệu đánh giá</p>
+          <p className="mt-1 text-xs leading-relaxed text-ink-secondary">
+            Hoàn thành một phiên và xem kết quả để tiến độ bắt đầu được tổng hợp.
+          </p>
+          <Button
+            size="sm"
+            variant="secondary"
+            className="mt-3"
+            onClick={() => navigate('/customers')}
+          >
+            Bắt đầu luyện tập
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-5 grid gap-4 sm:grid-cols-3">
+          <ProgressMetric
+            label="Phiên đã đánh giá"
+            value={String(progress.summary.evaluatedSessions)}
+          />
+          <ProgressMetric
+            label="Điểm trung bình"
+            value={formatProgressScore(progress.summary.averageOverallScore)}
+          />
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
+              Xu hướng
+            </p>
+            <p className="mt-1.5 inline-flex items-center gap-1.5 text-sm font-bold text-ink">
+              {overallTrend.state === 'IMPROVING' ? (
+                <TrendingUp className="h-4 w-4 text-emerald-600" />
+              ) : overallTrend.state === 'DECLINING' ? (
+                <TrendingDown className="h-4 w-4 text-amber-600" />
+              ) : (
+                <BarChart3 className="h-4 w-4 text-brand" />
+              )}
+              {labelProgressTrend(overallTrend.state)}
+            </p>
+            {overallTrend.delta !== null && (
+              <p className="mt-1 text-xs text-ink-muted tabular-nums">
+                {overallTrend.delta > 0 ? '+' : ''}
+                {formatProgressScore(overallTrend.delta)} điểm so với nhóm trước
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </Card>
+  )
 }
 
 function ProgressMetric({ label, value }: { label: string; value: string }) {
-  return <div><p className="text-xs font-bold uppercase tracking-wide text-slate-400">{label}</p><p className="mt-2 text-2xl font-extrabold text-slate-950">{value}</p></div>
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wider text-ink-muted">{label}</p>
+      <p className="mt-1.5 text-2xl font-bold tracking-tight text-ink tabular-nums">{value}</p>
+    </div>
+  )
 }
 
 export function DashboardPage() {
@@ -45,8 +181,13 @@ export function DashboardPage() {
 
   useEffect(() => {
     Promise.all([trainingService.getRecommendedPersonas(), trainingService.getRecentSessions()])
-      .then(([nextPersonas, nextSessions]) => { setPersonas(nextPersonas); setSessions(nextSessions) })
-      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Không thể tải dữ liệu luyện tập.'))
+      .then(([nextPersonas, nextSessions]) => {
+        setPersonas(nextPersonas)
+        setSessions(nextSessions)
+      })
+      .catch((reason: unknown) =>
+        setError(reason instanceof Error ? reason.message : 'Không thể tải dữ liệu luyện tập.')
+      )
       .finally(() => setLoading(false))
   }, [])
 
@@ -54,8 +195,20 @@ export function DashboardPage() {
     let active = true
     setProgressLoading(true)
     setProgressUnavailable(false)
-    trainingService.getProgress().then((value) => { if (active) setProgress(value) }).catch(() => { if (active) setProgressUnavailable(true) }).finally(() => { if (active) setProgressLoading(false) })
-    return () => { active = false }
+    trainingService
+      .getProgress()
+      .then((value) => {
+        if (active) setProgress(value)
+      })
+      .catch(() => {
+        if (active) setProgressUnavailable(true)
+      })
+      .finally(() => {
+        if (active) setProgressLoading(false)
+      })
+    return () => {
+      active = false
+    }
   }, [])
 
   useEffect(() => loadProgress(), [loadProgress])
@@ -63,24 +216,229 @@ export function DashboardPage() {
   const activeCount = sessions.filter((session) => session.status === 'RUNNING').length
   const completedCount = sessions.filter((session) => session.status === 'COMPLETED').length
 
-  return <>
-    <PageHeader eyebrow="Sales workspace" title={`Xin chào, ${user?.displayName ?? 'bạn'} 👋`} description="Hôm nay bạn muốn luyện tình huống bán hàng nào?" />
-    <Card className="relative overflow-hidden border-0 bg-[#0b1f47] p-6 text-white sm:p-8"><div className="absolute -right-20 -top-28 h-72 w-72 rounded-full border-[50px] border-blue-500/15" /><div className="absolute right-28 top-10 h-20 w-20 rounded-full bg-cyan-400/10 blur-xl" /><div className="relative max-w-2xl"><Badge className="bg-white/10 text-blue-100">Phiên luyện tập tiếp theo</Badge><h2 className="mt-5 text-balance text-2xl font-extrabold sm:text-3xl">Sẵn sàng cho một cuộc hội thoại mới?</h2><p className="mt-3 max-w-xl text-sm leading-6 text-slate-300">Chọn một khách hàng AI, nắm bối cảnh và thực hành cách khám phá nhu cầu trong vài phút.</p><Button className="mt-6 bg-blue-500 hover:bg-blue-400" icon={<ArrowRight className="h-4 w-4" />} onClick={() => navigate('/customers')}>Bắt đầu luyện tập</Button></div></Card>
-    <DashboardProgressCard progress={progress} loading={progressLoading} unavailable={progressUnavailable} onRetry={loadProgress} />
+  return (
+    <>
+      <PageHeader
+        eyebrow="Không gian luyện tập"
+        title={`Xin chào, ${user?.displayName ?? 'bạn'} 👋`}
+        description="Hôm nay bạn muốn thực hành tình huống bán hàng nào?"
+      />
 
-    {loading ? <LoadingState label="Đang tải dữ liệu luyện tập..." /> : error ? <Card className="mt-7 p-6 text-center"><p role="alert" className="text-sm font-semibold text-red-700">{error}</p><Button className="mt-4" variant="secondary" onClick={() => window.location.reload()}>Thử tải lại</Button></Card> : <>
-      <section className="mt-9"><div className="mb-4 flex items-end justify-between"><div><h2 className="text-lg font-extrabold text-slate-900">Khách hàng đề xuất</h2><p className="mt-1 text-sm text-slate-500">Chọn một phong cách khách hàng để bắt đầu.</p></div><button className="text-sm font-bold text-blue-600 hover:text-blue-700" onClick={() => navigate('/customers')}>Xem tất cả</button></div><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{personas.map((persona) => <PersonaCard key={persona.id} persona={persona} onPractice={() => navigate(`/practice/new?personaId=${persona.id}`)} />)}</div></section>
+      {/* Primary Practice CTA */}
+      <Card className="border border-brand-border/60 bg-gradient-to-br from-brand-soft/40 via-surface to-surface p-6 sm:p-7">
+        <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-center">
+          <div className="max-w-2xl">
+            <div className="inline-flex items-center gap-1.5 rounded-md border border-brand-border bg-brand-soft px-2.5 py-0.5 text-xs font-semibold text-brand">
+              <Sparkles className="h-3.5 w-3.5" />
+              Phiên luyện tập tiếp theo
+            </div>
+            <h2 className="mt-3 text-xl font-bold tracking-tight text-ink sm:text-2xl">
+              Sẵn sàng cho một cuộc hội thoại mới?
+            </h2>
+            <p className="mt-1.5 text-sm leading-relaxed text-ink-secondary">
+              Chọn một khách hàng AI, nắm bối cảnh và thực hành cách khám phá nhu cầu trong vài
+              phút.
+            </p>
+          </div>
+          <div className="shrink-0">
+            <Button
+              size="lg"
+              icon={<ArrowRight className="h-4 w-4" />}
+              onClick={() => navigate('/customers')}
+            >
+              Bắt đầu luyện tập
+            </Button>
+          </div>
+        </div>
+      </Card>
 
-      <section className="mt-9"><div className="mb-4"><h2 className="text-lg font-extrabold text-slate-900">Phiên luyện tập gần đây</h2><p className="mt-1 text-sm text-slate-500">Tiếp tục phiên đang hoạt động hoặc xem kết quả phiên đã hoàn thành.</p></div>
-        {sessions.length === 0 ? <Card className="border-dashed p-8 text-center"><MessageCircleMore className="mx-auto h-8 w-8 text-slate-400" /><h3 className="mt-3 font-bold text-slate-800">Bạn chưa có phiên luyện tập</h3><p className="mx-auto mt-1 max-w-sm text-sm text-slate-500">Bắt đầu một phiên để dữ liệu hoạt động và kết quả xuất hiện tại đây.</p><Button className="mt-5" onClick={() => navigate('/customers')}>Bắt đầu luyện tập</Button></Card> : <Card className="overflow-hidden"><div className="divide-y divide-slate-100">{sessions.map((session) => {
-          const active = session.status === 'RUNNING'
-          const statusLabel = active ? 'Đang hoạt động' : 'Đã hoàn thành'
-          const detailLabel = session.dealOutcome ? labelOutcome(session.dealOutcome) : session.trainingStatus ? labelTrainingStatus(session.trainingStatus) : 'Chưa có kết quả'
-          return <div key={session.id} className="grid gap-4 p-4 transition hover:bg-slate-50 lg:grid-cols-[1.1fr_1.2fr_0.8fr_auto] lg:items-center lg:p-5"><div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-blue-50 text-blue-600"><UsersRound className="h-4 w-4" /></div><div><p className="text-sm font-bold text-slate-900">{session.persona.displayName}</p><p className="text-xs text-slate-500">{session.persona.role}</p></div></div><div><p className="text-sm font-semibold text-slate-700">{labelMode(session.mode)} · {session.turnCount} lượt trao đổi</p><p className="mt-1 flex items-center gap-1.5 text-xs text-slate-400"><CalendarDays className="h-3.5 w-3.5" />{formatActivity(session.updatedAt)}</p></div><div><span className={`inline-flex items-center gap-1.5 text-xs font-bold ${active ? 'text-blue-700' : 'text-emerald-700'}`}>{active ? <Clock3 className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}{statusLabel}</span><p className="mt-1 text-xs text-slate-500">{detailLabel}</p></div><Button className="min-h-9 px-3 py-1.5" variant={active ? 'primary' : 'secondary'} icon={active ? <PlayCircle className="h-4 w-4" /> : undefined} onClick={() => navigate(active ? `/practice/${session.id}` : `/history/${session.id}`)}>{active ? 'Tiếp tục luyện tập' : 'Xem lại'}</Button></div>
-        })}</div></Card>}
-      </section>
+      {/* Progress Snapshot */}
+      <DashboardProgressCard
+        progress={progress}
+        loading={progressLoading}
+        unavailable={progressUnavailable}
+        onRetry={loadProgress}
+      />
 
-      {sessions.length > 0 && <section className="mt-7 grid gap-4 sm:grid-cols-3"><Card className="flex items-center gap-3 p-4"><div className="rounded-xl bg-blue-50 p-3 text-blue-600"><MessageCircleMore className="h-5 w-5" /></div><div><p className="text-xl font-extrabold">{sessions.length}</p><p className="text-xs text-slate-500">Phiên gần đây</p></div></Card><Card className="flex items-center gap-3 p-4"><div className="rounded-xl bg-amber-50 p-3 text-amber-600"><Clock3 className="h-5 w-5" /></div><div><p className="text-xl font-extrabold">{activeCount}</p><p className="text-xs text-slate-500">Đang hoạt động</p></div></Card><Card className="flex items-center gap-3 p-4"><div className="rounded-xl bg-emerald-50 p-3 text-emerald-600"><CheckCircle2 className="h-5 w-5" /></div><div><p className="text-xl font-extrabold">{completedCount}</p><p className="text-xs text-slate-500">Đã hoàn thành</p></div></Card></section>}
-    </>}
-  </>
+      {loading ? (
+        <div className="mt-8">
+          <LoadingState label="Đang tải dữ liệu luyện tập..." />
+        </div>
+      ) : error ? (
+        <Card className="mt-8 p-6 text-center">
+          <p role="alert" className="text-sm font-semibold text-red-700">
+            {error}
+          </p>
+          <Button className="mt-4" variant="secondary" onClick={() => window.location.reload()}>
+            Thử tải lại
+          </Button>
+        </Card>
+      ) : (
+        <>
+          {/* Recommended Personas */}
+          <section className="mt-9">
+            <div className="mb-4 flex items-end justify-between">
+              <div>
+                <h2 className="text-base font-bold text-ink">Khách hàng đề xuất</h2>
+                <p className="mt-0.5 text-xs text-ink-secondary">
+                  Chọn một phong cách khách hàng để bắt đầu.
+                </p>
+              </div>
+              <button
+                className="text-xs font-semibold text-brand hover:text-brand-hover transition-colors"
+                onClick={() => navigate('/customers')}
+              >
+                Xem tất cả
+              </button>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {personas.map((persona) => (
+                <PersonaCard
+                  key={persona.id}
+                  persona={persona}
+                  onPractice={() => navigate(`/practice/new?personaId=${persona.id}`)}
+                />
+              ))}
+            </div>
+          </section>
+
+          {/* Recent Training Sessions */}
+          <section className="mt-9">
+            <div className="mb-4">
+              <h2 className="text-base font-bold text-ink">Phiên luyện tập gần đây</h2>
+              <p className="mt-0.5 text-xs text-ink-secondary">
+                Tiếp tục phiên đang hoạt động hoặc xem kết quả phiên đã hoàn thành.
+              </p>
+            </div>
+
+            {sessions.length === 0 ? (
+              <EmptyState
+                title="Bạn chưa có phiên luyện tập"
+                description="Bắt đầu một phiên để dữ liệu hoạt động và kết quả xuất hiện tại đây."
+                action={
+                  <Button
+                    icon={<ArrowRight className="h-4 w-4" />}
+                    onClick={() => navigate('/customers')}
+                  >
+                    Bắt đầu luyện tập
+                  </Button>
+                }
+              />
+            ) : (
+              <Card className="overflow-hidden">
+                <div className="divide-y divide-border">
+                  {sessions.map((session) => {
+                    const active = session.status === 'RUNNING'
+                    const statusLabel = active ? 'Đang hoạt động' : 'Đã hoàn thành'
+                    const detailLabel = session.dealOutcome
+                      ? labelOutcome(session.dealOutcome)
+                      : session.trainingStatus
+                        ? labelTrainingStatus(session.trainingStatus)
+                        : 'Chưa có kết quả'
+
+                    return (
+                      <div
+                        key={session.id}
+                        className="grid gap-4 p-4 transition-colors duration-150 hover:bg-surface-hover lg:grid-cols-[1.1fr_1.2fr_0.8fr_auto] lg:items-center lg:p-5"
+                      >
+                        <div className="flex items-center gap-3">
+                          <Avatar
+                            initials={session.persona.displayName.slice(0, 2).toUpperCase()}
+                            color="#4F46E5"
+                            size="sm"
+                          />
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-bold text-ink">
+                              {session.persona.displayName}
+                            </p>
+                            <p className="truncate text-xs text-ink-secondary">
+                              {session.persona.role}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div>
+                          <p className="text-xs font-semibold text-ink">
+                            {labelMode(session.mode)} · {session.turnCount} lượt trao đổi
+                          </p>
+                          <p className="mt-1 flex items-center gap-1.5 text-xs text-ink-muted tabular-nums">
+                            <CalendarDays className="h-3.5 w-3.5" />
+                            {formatActivity(session.updatedAt)}
+                          </p>
+                        </div>
+
+                        <div>
+                          <span
+                            className={`inline-flex items-center gap-1.5 text-xs font-semibold ${
+                              active ? 'text-brand' : 'text-emerald-700'
+                            }`}
+                          >
+                            {active ? (
+                              <Clock3 className="h-3.5 w-3.5 text-brand" />
+                            ) : (
+                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                            )}
+                            {statusLabel}
+                          </span>
+                          <p className="mt-0.5 text-xs text-ink-secondary">{detailLabel}</p>
+                        </div>
+
+                        <div className="flex lg:justify-end">
+                          <Button
+                            size="sm"
+                            variant={active ? 'primary' : 'secondary'}
+                            icon={active ? <PlayCircle className="h-3.5 w-3.5" /> : undefined}
+                            onClick={() =>
+                              navigate(
+                                active ? `/practice/${session.id}` : `/history/${session.id}`
+                              )
+                            }
+                          >
+                            {active ? 'Tiếp tục luyện tập' : 'Xem lại'}
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </Card>
+            )}
+          </section>
+
+          {/* Activity Metrics Overview */}
+          {sessions.length > 0 && (
+            <section className="mt-6 grid gap-4 sm:grid-cols-3">
+              <Card className="flex items-center gap-3.5 p-4">
+                <div className="grid h-10 w-10 place-items-center rounded-lg bg-brand-soft text-brand shrink-0">
+                  <MessageCircleMore className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-xl font-bold text-ink tabular-nums">{sessions.length}</p>
+                  <p className="text-xs text-ink-secondary">Phiên gần đây</p>
+                </div>
+              </Card>
+              <Card className="flex items-center gap-3.5 p-4">
+                <div className="grid h-10 w-10 place-items-center rounded-lg bg-amber-50 text-amber-600 shrink-0">
+                  <Clock3 className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-xl font-bold text-ink tabular-nums">{activeCount}</p>
+                  <p className="text-xs text-ink-secondary">Đang hoạt động</p>
+                </div>
+              </Card>
+              <Card className="flex items-center gap-3.5 p-4">
+                <div className="grid h-10 w-10 place-items-center rounded-lg bg-emerald-50 text-emerald-600 shrink-0">
+                  <CheckCircle2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-xl font-bold text-ink tabular-nums">{completedCount}</p>
+                  <p className="text-xs text-ink-secondary">Đã hoàn thành</p>
+                </div>
+              </Card>
+            </section>
+          )}
+        </>
+      )}
+    </>
+  )
 }
