@@ -1,5 +1,43 @@
 export type PublicTrainingMode = "CUSTOMER_FIRST" | "SALE_FIRST";
 export type PublicSessionStatus = "RUNNING" | "COMPLETED";
+export type PublicTrainingAssignmentState = "ASSIGNED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+export type PublicTrainingAssignmentItemState = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
+
+export interface PublicTrainingAssignee {
+  id: string;
+  displayName: string;
+  email: string;
+  role: "SALE";
+}
+
+export interface PublicManagedTrainingAssignment {
+  id: string;
+  program: { id: string; name: string; description: string | null; status: "DRAFT" | "PUBLISHED" | "ARCHIVED" };
+  assignedTo: { id: string; displayName: string; email: string };
+  assignedBy: { id: string; displayName: string };
+  assignedAt: string;
+  dueAt: string | null;
+  cancelledAt: string | null;
+  state: PublicTrainingAssignmentState;
+  isOverdue: boolean;
+  completedItems: number;
+  totalItems: number;
+  progressPercent: number;
+  items: Array<{
+    id: string;
+    sortOrder: number;
+    personaId: string;
+    personaLabel: string | null;
+    scenarioId: string;
+    scenarioLabel: string | null;
+    mode: PublicTrainingMode;
+    state: PublicTrainingAssignmentItemState;
+  }>;
+}
+
+export interface PublicOwnTrainingAssignment extends Omit<PublicManagedTrainingAssignment, "assignedTo" | "assignedBy" | "items"> {
+  items: Array<PublicManagedTrainingAssignment["items"][number] & { activeSessionId: string | null }>;
+}
 
 export interface PublicTrainingProgram {
   id: string;

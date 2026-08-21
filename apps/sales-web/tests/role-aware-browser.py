@@ -10,9 +10,9 @@ ROLE_LABELS = {
 }
 BASE_NAV = ["/dashboard", "/customers", "/practice/new", "/history", "/progress"]
 EXPECTED_NAV = {
-    "SALE": BASE_NAV,
-    "MANAGER": [*BASE_NAV, "/training-programs"],
-    "ADMIN": [*BASE_NAV, "/training-programs"],
+    "SALE": [*BASE_NAV, "/my-training-assignments"],
+    "MANAGER": [*BASE_NAV, "/training-programs", "/training-assignments"],
+    "ADMIN": [*BASE_NAV, "/training-programs", "/training-assignments"],
 }
 PROGRESS = {
     "evaluatorVersion": "testlab-evaluator-v1",
@@ -170,6 +170,8 @@ with sync_playwright() as playwright:
         nav_paths = page.locator("aside nav a").evaluate_all("links => links.map(link => new URL(link.href).pathname)")
         assert nav_paths == EXPECTED_NAV[role], (role, nav_paths)
         assert page.locator("a[href='/training-programs']").count() == (0 if role == "SALE" else 1)
+        assert page.locator("a[href='/training-assignments']").count() == (0 if role == "SALE" else 1)
+        assert page.locator("a[href='/my-training-assignments']").count() == (1 if role == "SALE" else 0)
         assert page.locator("a[href='/programs']").count() == 0
         assert page.locator("a[href='/assignments']").count() == 0
         assert page.locator("a[href='/users']").count() == 0

@@ -34,6 +34,11 @@ export interface SendMessageResult {
   session: SimulationSession;
 }
 
+export interface AssignedSessionContext {
+  trainingAssignmentId: string;
+  trainingProgramItemId: string;
+}
+
 interface SimulationServiceDependencies {
   sessions: SessionRepository;
   orchestrator: SimulationOrchestrator;
@@ -124,6 +129,27 @@ export class SimulationService {
   }
 
   async createSession(personaId: string, mode: unknown, userId = "phase3-compatibility"): Promise<SimulationSession> {
+    return this.createSessionWithContext(personaId, mode, userId, null);
+  }
+
+  async createAssignedSession(
+    personaId: string,
+    mode: unknown,
+    userId: string,
+    context: AssignedSessionContext
+  ): Promise<SimulationSession> {
+    if (!context.trainingAssignmentId.trim() || !context.trainingProgramItemId.trim()) {
+      throw new SimulationServiceError("SESSION_NOT_FOUND", "Không tìm thấy nội dung được phân công.");
+    }
+    return this.createSessionWithContext(personaId, mode, userId, context);
+  }
+
+  private async createSessionWithContext(
+    personaId: string,
+    mode: unknown,
+    userId: string,
+    assignmentContext: AssignedSessionContext | null
+  ): Promise<SimulationSession> {
     const persona = this.getPersona(personaId);
     if (mode !== "CUSTOMER_FIRST" && mode !== "SALE_FIRST") {
       throw new SimulationServiceError("INVALID_MODE", "Chế độ luyện tập không hợp lệ.");
@@ -160,7 +186,9 @@ export class SimulationService {
       messages,
       runtimeInsight,
       runtimeSnapshot,
-      signals: []
+      signals: [],
+      trainingAssignmentId: assignmentContext?.trainingAssignmentId ?? null,
+      trainingProgramItemId: assignmentContext?.trainingProgramItemId ?? null
     };
     try {
       await this.dependencies.sessions.save(session);

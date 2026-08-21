@@ -7,6 +7,8 @@ import {
   Menu,
   MessageSquareText,
   BookOpenCheck,
+  ClipboardList,
+  ListChecks,
   UserRound,
   X,
   type LucideIcon,
@@ -14,23 +16,28 @@ import {
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../app/AuthContext'
-import { hasUiCapability, userRoleLabel, type UiCapability } from '../app/authorizationPolicy'
+import { userRoleLabel, type UiCapability, type UserRole } from '../app/authorizationPolicy'
+import { isNavigationItemVisible } from '../app/navigationPolicy'
 import { Brand } from '../components/common/Brand'
 
-const navItems: ReadonlyArray<{ to: string; label: string; icon: LucideIcon; requiredCapability: UiCapability }> = [
+type NavItem = { to: string; label: string; icon: LucideIcon; requiredCapability?: UiCapability; roles?: readonly UserRole[] }
+
+const navItems: ReadonlyArray<NavItem> = [
   { to: '/dashboard', label: 'Tổng quan', icon: Home, requiredCapability: 'USE_OWN_TRAINING' },
   { to: '/customers', label: 'Khách hàng AI', icon: Library, requiredCapability: 'USE_OWN_TRAINING' },
   { to: '/practice/new', label: 'Luyện tập', icon: MessageSquareText, requiredCapability: 'USE_OWN_TRAINING' },
   { to: '/history', label: 'Lịch sử', icon: History, requiredCapability: 'USE_OWN_TRAINING' },
   { to: '/progress', label: 'Tiến độ', icon: BarChart3, requiredCapability: 'USE_OWN_TRAINING' },
   { to: '/training-programs', label: 'Chương trình đào tạo', icon: BookOpenCheck, requiredCapability: 'MANAGE_TRAINING_PROGRAMS' },
+  { to: '/training-assignments', label: 'Phân công đào tạo', icon: ClipboardList, requiredCapability: 'ASSIGN_TRAINING' },
+  { to: '/my-training-assignments', label: 'Bài tập được giao', icon: ListChecks, roles: ['SALE'] },
 ]
 
 export function AppLayout() {
   const [open, setOpen] = useState(false)
   const { user, logout } = useAuth()
   const navigate = useNavigate()
-  const visibleNavItems = navItems.filter(({ requiredCapability }) => hasUiCapability(user?.role, requiredCapability))
+  const visibleNavItems = navItems.filter((item) => isNavigationItemVisible(item, user?.role))
   const roleLabel = userRoleLabel(user?.role)
 
   const signOut = async () => {

@@ -79,6 +79,8 @@ import { DatabaseProgressRepository } from "./v3/progress/databaseProgressReposi
 import { ProgressService } from "./v3/progress/progressService";
 import { DatabaseTrainingProgramRepository } from "./v3/trainingPrograms/databaseTrainingProgramRepository";
 import { TrainingProgramService } from "./v3/trainingPrograms/trainingProgramService";
+import { DatabaseTrainingAssignmentRepository } from "./v3/trainingAssignments/databaseTrainingAssignmentRepository";
+import { TrainingAssignmentService } from "./v3/trainingAssignments/trainingAssignmentService";
 import { toPublicPersona } from "./v3/publicDtoMapper";
 import {
   rebuildRuntimeState,
@@ -1448,10 +1450,8 @@ async function main(): Promise<void> {
   const v3ProgressService = new ProgressService({
     repository: new DatabaseProgressRepository(prisma)
   });
-  const v3TrainingProgramService = new TrainingProgramService({
-    repository: new DatabaseTrainingProgramRepository(prisma),
-    catalog: {
-      resolve: (personaId, scenarioId) => {
+  const trainingProgramCatalog = {
+      resolve: (personaId: string, scenarioId: string) => {
         try {
           const persona = toPublicPersona(v3SimulationService.getPersona(personaId));
           if (persona.defaultScenario.id !== scenarioId) return null;
@@ -1465,7 +1465,15 @@ async function main(): Promise<void> {
           return null;
         }
       }
-    }
+  };
+  const v3TrainingProgramService = new TrainingProgramService({
+    repository: new DatabaseTrainingProgramRepository(prisma),
+    catalog: trainingProgramCatalog
+  });
+  const v3TrainingAssignmentService = new TrainingAssignmentService({
+    repository: new DatabaseTrainingAssignmentRepository(prisma),
+    simulation: v3SimulationService,
+    catalog: trainingProgramCatalog
   });
   const handleV3Request = createV3Api({
     service: v3SimulationService,
@@ -1473,7 +1481,8 @@ async function main(): Promise<void> {
     evaluationService: v3EvaluationService,
     coachingService: v3CoachingService,
     progressService: v3ProgressService,
-    trainingProgramService: v3TrainingProgramService
+    trainingProgramService: v3TrainingProgramService,
+    trainingAssignmentService: v3TrainingAssignmentService
   });
 
   const server = http.createServer(async (req, res) => {

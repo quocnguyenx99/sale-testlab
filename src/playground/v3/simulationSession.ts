@@ -73,5 +73,7 @@ export interface SimulationSession {
   runtimeSnapshot: RuntimeRecoverySnapshot | null;
   signals: string[];
   result?: SimulationResult;
+  trainingAssignmentId?: string | null;
+  trainingProgramItemId?: string | null;
 }
 import type { RuntimeRecoverySnapshot } from "./runtimeRecovery";

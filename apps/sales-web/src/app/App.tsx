@@ -10,13 +10,18 @@ import { PracticePage } from '../pages/PracticePage'
 import { ProgressPage } from '../pages/ProgressPage'
 import { TrainingProgramsPage } from '../pages/TrainingProgramsPage'
 import { TrainingProgramEditorPage } from '../pages/TrainingProgramEditorPage'
+import { TrainingAssignmentsPage } from '../pages/TrainingAssignmentsPage'
+import { TrainingAssignmentCreatePage } from '../pages/TrainingAssignmentCreatePage'
+import { TrainingAssignmentDetailPage } from '../pages/TrainingAssignmentDetailPage'
+import { MyTrainingAssignmentsPage } from '../pages/MyTrainingAssignmentsPage'
+import { MyTrainingAssignmentDetailPage } from '../pages/MyTrainingAssignmentDetailPage'
 import { SessionResultPage } from '../pages/SessionResultPage'
 import { SessionReplayPage } from '../pages/SessionReplayPage'
 import { SessionSetupPage } from '../pages/SessionSetupPage'
 import { useAuth } from './AuthContext'
 import { ForbiddenState, LoadingState } from '../components/ui/Feedback'
 import { Button } from '../components/ui/Button'
-import { hasUiCapability, type UiCapability } from './authorizationPolicy'
+import { hasUiCapability, isUserRole, type UiCapability, type UserRole } from './authorizationPolicy'
 
 function RequireAuth() {
   const { user, loading } = useAuth()
@@ -39,6 +44,14 @@ function RequireCapability({ capability }: { capability: UiCapability }) {
     : <ForbiddenState action={<Button onClick={() => navigate('/dashboard')}>Về trang tổng quan</Button>} />
 }
 
+function RequireRole({ roles }: { roles: readonly UserRole[] }) {
+  const { user } = useAuth()
+  const navigate = useNavigate()
+  return isUserRole(user?.role) && roles.includes(user.role)
+    ? <Outlet />
+    : <ForbiddenState action={<Button onClick={() => navigate('/dashboard')}>Về trang tổng quan</Button>} />
+}
+
 export function App() {
-  return <Routes><Route element={<LoginGate />}><Route element={<AuthLayout />}><Route path="/login" element={<LoginPage />} /></Route></Route><Route element={<RequireAuth />}><Route element={<AppLayout />}><Route path="/dashboard" element={<DashboardPage />} /><Route path="/customers" element={<CustomersPage />} /><Route path="/progress" element={<ProgressPage />} /><Route path="/history" element={<HistoryPage />} /><Route path="/history/:sessionId" element={<SessionReplayPage />} /><Route path="/practice/new" element={<SessionSetupPage />} /><Route path="/practice/:sessionId" element={<PracticePage />} /><Route path="/practice/:sessionId/result" element={<SessionResultPage />} /><Route element={<RequireCapability capability="MANAGE_TRAINING_PROGRAMS" />}><Route path="/training-programs" element={<TrainingProgramsPage />} /><Route path="/training-programs/new" element={<TrainingProgramEditorPage />} /><Route path="/training-programs/:programId" element={<TrainingProgramEditorPage />} /></Route></Route></Route><Route path="/" element={<Navigate to="/dashboard" replace />} /><Route path="*" element={<NotFoundPage />} /></Routes>
+  return <Routes><Route element={<LoginGate />}><Route element={<AuthLayout />}><Route path="/login" element={<LoginPage />} /></Route></Route><Route element={<RequireAuth />}><Route element={<AppLayout />}><Route path="/dashboard" element={<DashboardPage />} /><Route path="/customers" element={<CustomersPage />} /><Route path="/progress" element={<ProgressPage />} /><Route path="/history" element={<HistoryPage />} /><Route path="/history/:sessionId" element={<SessionReplayPage />} /><Route path="/practice/new" element={<SessionSetupPage />} /><Route path="/practice/:sessionId" element={<PracticePage />} /><Route path="/practice/:sessionId/result" element={<SessionResultPage />} /><Route element={<RequireCapability capability="MANAGE_TRAINING_PROGRAMS" />}><Route path="/training-programs" element={<TrainingProgramsPage />} /><Route path="/training-programs/new" element={<TrainingProgramEditorPage />} /><Route path="/training-programs/:programId" element={<TrainingProgramEditorPage />} /></Route><Route element={<RequireCapability capability="ASSIGN_TRAINING" />}><Route path="/training-assignments" element={<TrainingAssignmentsPage />} /><Route path="/training-assignments/new" element={<TrainingAssignmentCreatePage />} /><Route path="/training-assignments/:assignmentId" element={<TrainingAssignmentDetailPage />} /></Route><Route element={<RequireRole roles={['SALE']} />}><Route path="/my-training-assignments" element={<MyTrainingAssignmentsPage />} /><Route path="/my-training-assignments/:assignmentId" element={<MyTrainingAssignmentDetailPage />} /></Route></Route></Route><Route path="/" element={<Navigate to="/dashboard" replace />} /><Route path="*" element={<NotFoundPage />} /></Routes>
 }

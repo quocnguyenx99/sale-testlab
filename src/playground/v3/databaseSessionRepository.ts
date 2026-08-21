@@ -35,6 +35,8 @@ export class DatabaseSessionRepository implements SessionRepository {
       runtimeInsight: stored.runtimeInsight as unknown as SimulationSession["runtimeInsight"],
       runtimeSnapshot: stored.runtimeSnapshot as unknown as SimulationSession["runtimeSnapshot"],
       signals: stored.signals as unknown as string[],
+      trainingAssignmentId: stored.trainingAssignmentId,
+      trainingProgramItemId: stored.trainingProgramItemId,
       ...(stored.result ? { result: stored.result as unknown as NonNullable<SimulationSession["result"]> } : {})
     };
   }
@@ -108,7 +110,9 @@ export class DatabaseSessionRepository implements SessionRepository {
       signals: json(session.signals),
       result: nullableJson(session.result),
       createdAt: new Date(session.createdAt),
-      completedAt: session.completedAt ? new Date(session.completedAt) : null
+      completedAt: session.completedAt ? new Date(session.completedAt) : null,
+      trainingAssignmentId: session.trainingAssignmentId ?? null,
+      trainingProgramItemId: session.trainingProgramItemId ?? null
     };
     await this.client.$transaction(async (transaction) => {
       await transaction.simulationSession.upsert({

@@ -13,7 +13,10 @@ export type {
   PublicSessionResult,
   PublicSessionStatus,
   PublicTrainingMode,
-  PublicTrainingProgram
+  PublicTrainingProgram,
+  PublicManagedTrainingAssignment,
+  PublicOwnTrainingAssignment,
+  PublicTrainingAssignee
 } from "./publicContracts";
 export type { EnrichedPersonaSource } from "./simulationSession";
 import {
@@ -34,6 +37,7 @@ import { CoachingService, CoachingServiceError } from "./coaching/coachingServic
 import { ProgressService } from "./progress/progressService";
 import { AuthorizationError, requireCapability } from "./authorizationPolicy";
 import { TrainingProgramService, TrainingProgramServiceError } from "./trainingPrograms/trainingProgramService";
+import { TrainingAssignmentService, TrainingAssignmentServiceError } from "./trainingAssignments/trainingAssignmentService";
 
 const AUTH_COOKIE = "testlab_session";
 
@@ -156,8 +160,8 @@ function historyQuery(url: URL): SessionHistoryQuery {
   };
 }
 
-export function createV3Api(dependencies: { service: SimulationService; auth: AuthService; evaluationService?: EvaluationService; coachingService?: CoachingService; progressService?: ProgressService; trainingProgramService?: TrainingProgramService }) {
-  const { service, auth, evaluationService, coachingService, progressService, trainingProgramService } = dependencies;
+export function createV3Api(dependencies: { service: SimulationService; auth: AuthService; evaluationService?: EvaluationService; coachingService?: CoachingService; progressService?: ProgressService; trainingProgramService?: TrainingProgramService; trainingAssignmentService?: TrainingAssignmentService }) {
+  const { service, auth, evaluationService, coachingService, progressService, trainingProgramService, trainingAssignmentService } = dependencies;
   return async function handleV3Request(req: http.IncomingMessage, res: http.ServerResponse): Promise<boolean> {
     const url = new URL(req.url || "/", "http://localhost");
     const pathname = url.pathname;
@@ -184,6 +188,68 @@ export function createV3Api(dependencies: { service: SimulationService; auth: Au
       }
 
       const currentUser = await auth.currentUser(cookie(req, AUTH_COOKIE));
+
+      if (req.method === "GET" && pathname === "/api/v3/training-assignees") {
+        requireCapability(currentUser, "ASSIGN_TRAINING");
+        if (!trainingAssignmentService) throw new HttpRequestError(503, "TRAINING_ASSIGNMENTS_UNAVAILABLE", "Phân công đào tạo tạm thời chưa sẵn sàng.");
+        sendJson(res, 200, { assignees: await trainingAssignmentService.listAssignees() });
+        return true;
+      }
+
+      const assignmentCancelMatch = pathname.match(/^\/api\/v3\/training-assignments\/([^/]+)\/cancel$/);
+      if (assignmentCancelMatch && req.method === "POST") {
+        requireCapability(currentUser, "ASSIGN_TRAINING");
+        if (!trainingAssignmentService) throw new HttpRequestError(503, "TRAINING_ASSIGNMENTS_UNAVAILABLE", "Phân công đào tạo tạm thời chưa sẵn sàng.");
+        sendJson(res, 200, { assignment: await trainingAssignmentService.cancel(decodeURIComponent(assignmentCancelMatch[1])) });
+        return true;
+      }
+
+      const managedAssignmentMatch = pathname.match(/^\/api\/v3\/training-assignments\/([^/]+)$/);
+      if (managedAssignmentMatch && req.method === "GET") {
+        requireCapability(currentUser, "ASSIGN_TRAINING");
+        if (!trainingAssignmentService) throw new HttpRequestError(503, "TRAINING_ASSIGNMENTS_UNAVAILABLE", "Phân công đào tạo tạm thời chưa sẵn sàng.");
+        sendJson(res, 200, { assignment: await trainingAssignmentService.getManaged(decodeURIComponent(managedAssignmentMatch[1])) });
+        return true;
+      }
+
+      if (pathname === "/api/v3/training-assignments" && (req.method === "GET" || req.method === "POST")) {
+        requireCapability(currentUser, "ASSIGN_TRAINING");
+        if (!trainingAssignmentService) throw new HttpRequestError(503, "TRAINING_ASSIGNMENTS_UNAVAILABLE", "Phân công đào tạo tạm thời chưa sẵn sàng.");
+        if (req.method === "GET") {
+          sendJson(res, 200, { assignments: await trainingAssignmentService.listManaged() });
+        } else {
+          sendJson(res, 201, { assignment: await trainingAssignmentService.create(currentUser.id, await readJsonBody(req)) });
+        }
+        return true;
+      }
+
+      const ownAssignmentStartMatch = pathname.match(/^\/api\/v3\/my-training-assignments\/([^/]+)\/items\/([^/]+)\/start$/);
+      if (ownAssignmentStartMatch && req.method === "POST") {
+        requireCapability(currentUser, "USE_OWN_TRAINING");
+        if (!trainingAssignmentService) throw new HttpRequestError(503, "TRAINING_ASSIGNMENTS_UNAVAILABLE", "Bài tập được giao tạm thời chưa sẵn sàng.");
+        const session = await trainingAssignmentService.startAssignedItem(
+          decodeURIComponent(ownAssignmentStartMatch[1]),
+          decodeURIComponent(ownAssignmentStartMatch[2]),
+          currentUser.id
+        );
+        sendJson(res, 201, { session: toPublicSession(session) });
+        return true;
+      }
+
+      const ownAssignmentMatch = pathname.match(/^\/api\/v3\/my-training-assignments\/([^/]+)$/);
+      if (ownAssignmentMatch && req.method === "GET") {
+        requireCapability(currentUser, "USE_OWN_TRAINING");
+        if (!trainingAssignmentService) throw new HttpRequestError(503, "TRAINING_ASSIGNMENTS_UNAVAILABLE", "Bài tập được giao tạm thời chưa sẵn sàng.");
+        sendJson(res, 200, { assignment: await trainingAssignmentService.getOwn(decodeURIComponent(ownAssignmentMatch[1]), currentUser.id) });
+        return true;
+      }
+
+      if (pathname === "/api/v3/my-training-assignments" && req.method === "GET") {
+        requireCapability(currentUser, "USE_OWN_TRAINING");
+        if (!trainingAssignmentService) throw new HttpRequestError(503, "TRAINING_ASSIGNMENTS_UNAVAILABLE", "Bài tập được giao tạm thời chưa sẵn sàng.");
+        sendJson(res, 200, { assignments: await trainingAssignmentService.listOwn(currentUser.id) });
+        return true;
+      }
 
       const trainingProgramActionMatch = pathname.match(/^\/api\/v3\/training-programs\/([^/]+)\/(publish|archive)$/);
       if (trainingProgramActionMatch && req.method === "POST") {
@@ -343,6 +409,13 @@ export function createV3Api(dependencies: { service: SimulationService; auth: Au
         const status = error.code === "TRAINING_PROGRAM_NOT_FOUND"
           ? 404
           : error.code === "INVALID_TRAINING_PROGRAM_INPUT" || error.code === "INVALID_TRAINING_CONTENT_REFERENCE"
+            ? 400
+            : 409;
+        sendJson(res, status, { error: { code: error.code, message: error.message } });
+      } else if (error instanceof TrainingAssignmentServiceError) {
+        const status = error.code === "TRAINING_ASSIGNMENT_NOT_FOUND" || error.code === "TRAINING_ASSIGNMENT_ITEM_NOT_FOUND"
+          ? 404
+          : error.code === "INVALID_TRAINING_ASSIGNMENT_INPUT" || error.code === "TRAINING_ASSIGNEE_NOT_ELIGIBLE" || error.code === "TRAINING_PROGRAM_NOT_ASSIGNABLE"
             ? 400
             : 409;
         sendJson(res, status, { error: { code: error.code, message: error.message } });

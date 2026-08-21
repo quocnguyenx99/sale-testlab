@@ -62,6 +62,8 @@ model User {
   authSessions AuthSession[]
   simulations  SimulationSession[]
   trainingProgramsCreated TrainingProgram[]
+  trainingAssignmentsReceived TrainingAssignment[] @relation("TrainingAssignmentAssignee")
+  trainingAssignmentsCreated  TrainingAssignment[] @relation("TrainingAssignmentAssigner")
 
   @@map("users")
 }
@@ -100,8 +102,14 @@ model SimulationSession {
   user               User               @relation(fields: [userId], references: [id], onDelete: Restrict)
   turns              ConversationTurn[]
   evaluations        SessionEvaluation[]
+  trainingAssignmentId String?            @map("training_assignment_id") @db.Char(36)
+  trainingProgramItemId String?            @map("training_program_item_id") @db.Char(36)
+  trainingAssignment TrainingAssignment?   @relation(fields: [trainingAssignmentId], references: [id], onDelete: Restrict, map: "sim_sessions_assignment_fkey")
+  trainingProgramItem TrainingProgramItem? @relation(fields: [trainingProgramItemId], references: [id], onDelete: Restrict, map: "sim_sessions_program_item_fkey")
 
   @@index([userId, createdAt])
+  @@index([trainingAssignmentId, status], map: "sim_sessions_assignment_status_idx")
+  @@index([trainingProgramItemId], map: "sim_sessions_program_item_idx")
   @@map("simulation_sessions")
 }
 
@@ -170,6 +178,7 @@ model TrainingProgram {
   updatedAt       DateTime              @updatedAt @map("updated_at")
   createdBy       User                  @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
   items           TrainingProgramItem[]
+  assignments     TrainingAssignment[]
 
   @@index([status])
   @@index([createdByUserId])
@@ -186,7 +195,30 @@ model TrainingProgramItem {
   createdAt  DateTime        @default(now()) @map("created_at")
   updatedAt  DateTime        @updatedAt @map("updated_at")
   program    TrainingProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
+  assignmentSessions SimulationSession[]
 
   @@unique([programId, sortOrder])
   @@map("training_program_items")
+}
+
+model TrainingAssignment {
+  id               String    @id @default(uuid()) @db.Char(36)
+  programId        String    @map("program_id") @db.Char(36)
+  assignedToUserId String    @map("assigned_to_user_id") @db.Char(36)
+  assignedByUserId String    @map("assigned_by_user_id") @db.Char(36)
+  dueAt            DateTime? @map("due_at")
+  cancelledAt      DateTime? @map("cancelled_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  program          TrainingProgram    @relation(fields: [programId], references: [id], onDelete: Restrict)
+  assignedTo       User               @relation("TrainingAssignmentAssignee", fields: [assignedToUserId], references: [id], onDelete: Restrict)
+  assignedBy       User               @relation("TrainingAssignmentAssigner", fields: [assignedByUserId], references: [id], onDelete: Restrict)
+  sessions         SimulationSession[]
+
+  @@index([programId])
+  @@index([assignedToUserId, createdAt], map: "assignments_assignee_created_idx")
+  @@index([assignedByUserId])
+  @@index([cancelledAt])
+  @@index([dueAt])
+  @@map("training_assignments")
 }
