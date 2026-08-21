@@ -6,6 +6,7 @@ import {
   LogOut,
   Menu,
   MessageSquareText,
+  BookOpenCheck,
   UserRound,
   X,
   type LucideIcon,
@@ -22,6 +23,7 @@ const navItems: ReadonlyArray<{ to: string; label: string; icon: LucideIcon; req
   { to: '/practice/new', label: 'Luyện tập', icon: MessageSquareText, requiredCapability: 'USE_OWN_TRAINING' },
   { to: '/history', label: 'Lịch sử', icon: History, requiredCapability: 'USE_OWN_TRAINING' },
   { to: '/progress', label: 'Tiến độ', icon: BarChart3, requiredCapability: 'USE_OWN_TRAINING' },
+  { to: '/training-programs', label: 'Chương trình đào tạo', icon: BookOpenCheck, requiredCapability: 'MANAGE_TRAINING_PROGRAMS' },
 ]
 
 export function AppLayout() {

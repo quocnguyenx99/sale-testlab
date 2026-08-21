@@ -43,6 +43,12 @@ enum CoachingStatus {
   FAILED
 }
 
+enum TrainingProgramStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
 model User {
   id           String              @id @default(uuid()) @db.Char(36)
   email        String              @unique @db.VarChar(255)
@@ -55,6 +61,7 @@ model User {
   lastLoginAt  DateTime?           @map("last_login_at")
   authSessions AuthSession[]
   simulations  SimulationSession[]
+  trainingProgramsCreated TrainingProgram[]
 
   @@map("users")
 }
@@ -151,4 +158,35 @@ model ConversationTurn {
   @@unique([sessionId, sequence])
   @@index([sessionId, createdAt])
   @@map("conversation_turns")
+}
+
+model TrainingProgram {
+  id              String                @id @default(uuid()) @db.Char(36)
+  name            String                @db.VarChar(160)
+  description     String?               @db.Text
+  status          TrainingProgramStatus @default(DRAFT)
+  createdByUserId String                @map("created_by_user_id") @db.Char(36)
+  createdAt       DateTime              @default(now()) @map("created_at")
+  updatedAt       DateTime              @updatedAt @map("updated_at")
+  createdBy       User                  @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  items           TrainingProgramItem[]
+
+  @@index([status])
+  @@index([createdByUserId])
+  @@map("training_programs")
+}
+
+model TrainingProgramItem {
+  id         String          @id @default(uuid()) @db.Char(36)
+  programId  String          @map("program_id") @db.Char(36)
+  personaId  String          @map("persona_id") @db.VarChar(160)
+  scenarioId String          @map("scenario_id") @db.VarChar(160)
+  mode       SimulationMode
+  sortOrder  Int             @map("sort_order")
+  createdAt  DateTime        @default(now()) @map("created_at")
+  updatedAt  DateTime        @updatedAt @map("updated_at")
+  program    TrainingProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
+
+  @@unique([programId, sortOrder])
+  @@map("training_program_items")
 }

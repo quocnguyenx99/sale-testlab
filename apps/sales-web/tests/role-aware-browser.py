@@ -8,7 +8,12 @@ ROLE_LABELS = {
     "MANAGER": "Quản lý",
     "ADMIN": "Quản trị viên",
 }
-EXPECTED_NAV = ["/dashboard", "/customers", "/practice/new", "/history", "/progress"]
+BASE_NAV = ["/dashboard", "/customers", "/practice/new", "/history", "/progress"]
+EXPECTED_NAV = {
+    "SALE": BASE_NAV,
+    "MANAGER": [*BASE_NAV, "/training-programs"],
+    "ADMIN": [*BASE_NAV, "/training-programs"],
+}
 PROGRESS = {
     "evaluatorVersion": "testlab-evaluator-v1",
     "summary": {
@@ -163,7 +168,8 @@ with sync_playwright() as playwright:
         page.locator("[data-testid='dashboard-progress-card']").wait_for()
 
         nav_paths = page.locator("aside nav a").evaluate_all("links => links.map(link => new URL(link.href).pathname)")
-        assert nav_paths == EXPECTED_NAV, (role, nav_paths)
+        assert nav_paths == EXPECTED_NAV[role], (role, nav_paths)
+        assert page.locator("a[href='/training-programs']").count() == (0 if role == "SALE" else 1)
         assert page.locator("a[href='/programs']").count() == 0
         assert page.locator("a[href='/assignments']").count() == 0
         assert page.locator("a[href='/users']").count() == 0

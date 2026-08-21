@@ -1,6 +1,25 @@
 export type PublicTrainingMode = "CUSTOMER_FIRST" | "SALE_FIRST";
 export type PublicSessionStatus = "RUNNING" | "COMPLETED";
 
+export interface PublicTrainingProgram {
+  id: string;
+  name: string;
+  description: string | null;
+  status: "DRAFT" | "PUBLISHED" | "ARCHIVED";
+  createdBy: { id: string; displayName: string };
+  createdAt: string;
+  updatedAt: string;
+  items: Array<{
+    id: string;
+    personaId: string;
+    personaLabel: string | null;
+    scenarioId: string;
+    scenarioLabel: string | null;
+    mode: PublicTrainingMode;
+    sortOrder: number;
+  }>;
+}
+
 export interface PublicProgress {
   evaluatorVersion: string;
   summary: {

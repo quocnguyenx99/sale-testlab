@@ -1,4 +1,4 @@
-import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { AppLayout } from '../layouts/AppLayout'
 import { AuthLayout } from '../layouts/AuthLayout'
 import { CustomersPage } from '../pages/CustomersPage'
@@ -8,11 +8,15 @@ import { LoginPage } from '../pages/LoginPage'
 import { NotFoundPage } from '../pages/NotFoundPage'
 import { PracticePage } from '../pages/PracticePage'
 import { ProgressPage } from '../pages/ProgressPage'
+import { TrainingProgramsPage } from '../pages/TrainingProgramsPage'
+import { TrainingProgramEditorPage } from '../pages/TrainingProgramEditorPage'
 import { SessionResultPage } from '../pages/SessionResultPage'
 import { SessionReplayPage } from '../pages/SessionReplayPage'
 import { SessionSetupPage } from '../pages/SessionSetupPage'
 import { useAuth } from './AuthContext'
-import { LoadingState } from '../components/ui/Feedback'
+import { ForbiddenState, LoadingState } from '../components/ui/Feedback'
+import { Button } from '../components/ui/Button'
+import { hasUiCapability, type UiCapability } from './authorizationPolicy'
 
 function RequireAuth() {
   const { user, loading } = useAuth()
@@ -27,6 +31,14 @@ function LoginGate() {
   return user ? <Navigate to="/dashboard" replace /> : <Outlet />
 }
 
+function RequireCapability({ capability }: { capability: UiCapability }) {
+  const { user } = useAuth()
+  const navigate = useNavigate()
+  return hasUiCapability(user?.role, capability)
+    ? <Outlet />
+    : <ForbiddenState action={<Button onClick={() => navigate('/dashboard')}>Về trang tổng quan</Button>} />
+}
+
 export function App() {
-  return <Routes><Route element={<LoginGate />}><Route element={<AuthLayout />}><Route path="/login" element={<LoginPage />} /></Route></Route><Route element={<RequireAuth />}><Route element={<AppLayout />}><Route path="/dashboard" element={<DashboardPage />} /><Route path="/customers" element={<CustomersPage />} /><Route path="/progress" element={<ProgressPage />} /><Route path="/history" element={<HistoryPage />} /><Route path="/history/:sessionId" element={<SessionReplayPage />} /><Route path="/practice/new" element={<SessionSetupPage />} /><Route path="/practice/:sessionId" element={<PracticePage />} /><Route path="/practice/:sessionId/result" element={<SessionResultPage />} /></Route></Route><Route path="/" element={<Navigate to="/dashboard" replace />} /><Route path="*" element={<NotFoundPage />} /></Routes>
+  return <Routes><Route element={<LoginGate />}><Route element={<AuthLayout />}><Route path="/login" element={<LoginPage />} /></Route></Route><Route element={<RequireAuth />}><Route element={<AppLayout />}><Route path="/dashboard" element={<DashboardPage />} /><Route path="/customers" element={<CustomersPage />} /><Route path="/progress" element={<ProgressPage />} /><Route path="/history" element={<HistoryPage />} /><Route path="/history/:sessionId" element={<SessionReplayPage />} /><Route path="/practice/new" element={<SessionSetupPage />} /><Route path="/practice/:sessionId" element={<PracticePage />} /><Route path="/practice/:sessionId/result" element={<SessionResultPage />} /><Route element={<RequireCapability capability="MANAGE_TRAINING_PROGRAMS" />}><Route path="/training-programs" element={<TrainingProgramsPage />} /><Route path="/training-programs/new" element={<TrainingProgramEditorPage />} /><Route path="/training-programs/:programId" element={<TrainingProgramEditorPage />} /></Route></Route></Route><Route path="/" element={<Navigate to="/dashboard" replace />} /><Route path="*" element={<NotFoundPage />} /></Routes>
 }

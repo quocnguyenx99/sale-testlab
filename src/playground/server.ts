@@ -77,6 +77,9 @@ import { CoachingService } from "./v3/coaching/coachingService";
 import { LocalAICoachingProvider } from "./v3/coaching/coachingProvider";
 import { DatabaseProgressRepository } from "./v3/progress/databaseProgressRepository";
 import { ProgressService } from "./v3/progress/progressService";
+import { DatabaseTrainingProgramRepository } from "./v3/trainingPrograms/databaseTrainingProgramRepository";
+import { TrainingProgramService } from "./v3/trainingPrograms/trainingProgramService";
+import { toPublicPersona } from "./v3/publicDtoMapper";
 import {
   rebuildRuntimeState,
   RuntimeRecoverySnapshot,
@@ -1445,12 +1448,32 @@ async function main(): Promise<void> {
   const v3ProgressService = new ProgressService({
     repository: new DatabaseProgressRepository(prisma)
   });
+  const v3TrainingProgramService = new TrainingProgramService({
+    repository: new DatabaseTrainingProgramRepository(prisma),
+    catalog: {
+      resolve: (personaId, scenarioId) => {
+        try {
+          const persona = toPublicPersona(v3SimulationService.getPersona(personaId));
+          if (persona.defaultScenario.id !== scenarioId) return null;
+          return {
+            personaId: persona.id,
+            personaLabel: persona.displayName,
+            scenarioId: persona.defaultScenario.id,
+            scenarioLabel: persona.defaultScenario.title
+          };
+        } catch {
+          return null;
+        }
+      }
+    }
+  });
   const handleV3Request = createV3Api({
     service: v3SimulationService,
     auth: v3AuthService,
     evaluationService: v3EvaluationService,
     coachingService: v3CoachingService,
-    progressService: v3ProgressService
+    progressService: v3ProgressService,
+    trainingProgramService: v3TrainingProgramService
   });
 
   const server = http.createServer(async (req, res) => {

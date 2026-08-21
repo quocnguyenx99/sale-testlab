@@ -12,7 +12,8 @@ export type {
   PublicSessionEvaluation,
   PublicSessionResult,
   PublicSessionStatus,
-  PublicTrainingMode
+  PublicTrainingMode,
+  PublicTrainingProgram
 } from "./publicContracts";
 export type { EnrichedPersonaSource } from "./simulationSession";
 import {
@@ -31,7 +32,8 @@ import { SessionHistoryQuery } from "./sessionRepository";
 import { EvaluationService, EvaluationServiceError } from "./evaluation/evaluationService";
 import { CoachingService, CoachingServiceError } from "./coaching/coachingService";
 import { ProgressService } from "./progress/progressService";
-import { AuthorizationError } from "./authorizationPolicy";
+import { AuthorizationError, requireCapability } from "./authorizationPolicy";
+import { TrainingProgramService, TrainingProgramServiceError } from "./trainingPrograms/trainingProgramService";
 
 const AUTH_COOKIE = "testlab_session";
 
@@ -154,8 +156,8 @@ function historyQuery(url: URL): SessionHistoryQuery {
   };
 }
 
-export function createV3Api(dependencies: { service: SimulationService; auth: AuthService; evaluationService?: EvaluationService; coachingService?: CoachingService; progressService?: ProgressService }) {
-  const { service, auth, evaluationService, coachingService, progressService } = dependencies;
+export function createV3Api(dependencies: { service: SimulationService; auth: AuthService; evaluationService?: EvaluationService; coachingService?: CoachingService; progressService?: ProgressService; trainingProgramService?: TrainingProgramService }) {
+  const { service, auth, evaluationService, coachingService, progressService, trainingProgramService } = dependencies;
   return async function handleV3Request(req: http.IncomingMessage, res: http.ServerResponse): Promise<boolean> {
     const url = new URL(req.url || "/", "http://localhost");
     const pathname = url.pathname;
@@ -182,6 +184,45 @@ export function createV3Api(dependencies: { service: SimulationService; auth: Au
       }
 
       const currentUser = await auth.currentUser(cookie(req, AUTH_COOKIE));
+
+      const trainingProgramActionMatch = pathname.match(/^\/api\/v3\/training-programs\/([^/]+)\/(publish|archive)$/);
+      if (trainingProgramActionMatch && req.method === "POST") {
+        requireCapability(currentUser, "MANAGE_TRAINING_PROGRAMS");
+        if (!trainingProgramService) throw new HttpRequestError(503, "TRAINING_PROGRAMS_UNAVAILABLE", "Chương trình đào tạo tạm thời chưa sẵn sàng.");
+        const programId = decodeURIComponent(trainingProgramActionMatch[1]);
+        const program = trainingProgramActionMatch[2] === "publish"
+          ? await trainingProgramService.publish(programId)
+          : await trainingProgramService.archive(programId);
+        sendJson(res, 200, { program });
+        return true;
+      }
+
+      const trainingProgramMatch = pathname.match(/^\/api\/v3\/training-programs\/([^/]+)$/);
+      if (trainingProgramMatch && (req.method === "GET" || req.method === "PATCH" || req.method === "DELETE")) {
+        requireCapability(currentUser, "MANAGE_TRAINING_PROGRAMS");
+        if (!trainingProgramService) throw new HttpRequestError(503, "TRAINING_PROGRAMS_UNAVAILABLE", "Chương trình đào tạo tạm thời chưa sẵn sàng.");
+        const programId = decodeURIComponent(trainingProgramMatch[1]);
+        if (req.method === "GET") {
+          sendJson(res, 200, { program: await trainingProgramService.get(programId) });
+        } else if (req.method === "PATCH") {
+          sendJson(res, 200, { program: await trainingProgramService.update(programId, await readJsonBody(req)) });
+        } else {
+          await trainingProgramService.deleteDraft(programId);
+          sendJson(res, 200, { ok: true });
+        }
+        return true;
+      }
+
+      if (pathname === "/api/v3/training-programs" && (req.method === "GET" || req.method === "POST")) {
+        requireCapability(currentUser, "MANAGE_TRAINING_PROGRAMS");
+        if (!trainingProgramService) throw new HttpRequestError(503, "TRAINING_PROGRAMS_UNAVAILABLE", "Chương trình đào tạo tạm thời chưa sẵn sàng.");
+        if (req.method === "GET") {
+          sendJson(res, 200, { programs: await trainingProgramService.list() });
+        } else {
+          sendJson(res, 201, { program: await trainingProgramService.create(currentUser.id, await readJsonBody(req)) });
+        }
+        return true;
+      }
 
       if (req.method === "GET" && pathname === "/api/v3/progress") {
         if (!progressService) throw new HttpRequestError(503, "PROGRESS_UNAVAILABLE", "Tiến độ luyện tập tạm thời chưa sẵn sàng.");
@@ -297,6 +338,13 @@ export function createV3Api(dependencies: { service: SimulationService; auth: Au
         sendJson(res, status, { error: { code: error.code, message: error.message } });
       } else if (error instanceof CoachingServiceError) {
         const status = error.code === "COACHING_SESSION_NOT_FOUND" ? 404 : error.code === "SESSION_NOT_COMPLETED" || error.code === "EVALUATION_REQUIRED" ? 409 : 503;
+        sendJson(res, status, { error: { code: error.code, message: error.message } });
+      } else if (error instanceof TrainingProgramServiceError) {
+        const status = error.code === "TRAINING_PROGRAM_NOT_FOUND"
+          ? 404
+          : error.code === "INVALID_TRAINING_PROGRAM_INPUT" || error.code === "INVALID_TRAINING_CONTENT_REFERENCE"
+            ? 400
+            : 409;
         sendJson(res, status, { error: { code: error.code, message: error.message } });
       } else {
         sendJson(res, 503, { error: { code: "SERVICE_UNAVAILABLE", message: "Dịch vụ tạm thời chưa sẵn sàng. Vui lòng thử lại." } });
