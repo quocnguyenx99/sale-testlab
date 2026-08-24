@@ -10,9 +10,9 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
           {sale ? 'Bạn' : 'Khách hàng AI'}
         </span>
         <div
-          className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed break-words shadow-subtle ${
+          className={`break-words rounded-xl px-4 py-2.5 text-[15px] leading-[22px] ${
             sale
-              ? 'rounded-tr-sm border border-brand-border/60 bg-brand-soft text-indigo-950'
+              ? 'rounded-tr-sm border border-brand-border bg-brand-soft text-ink'
               : 'rounded-tl-sm border border-border bg-surface-subtle text-ink'
           }`}
         >

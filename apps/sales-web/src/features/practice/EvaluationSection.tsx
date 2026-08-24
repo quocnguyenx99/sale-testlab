@@ -124,7 +124,7 @@ export function EvaluationSection({
   return (
     <Card className="mt-6 overflow-hidden">
       {/* Header Banner with Overall Score */}
-      <div className="border-b border-border bg-gradient-to-r from-brand-soft/40 via-surface to-surface p-6">
+      <div className="border-b border-border bg-brand-subtle p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <div className="inline-flex items-center gap-1.5 rounded-md border border-brand-border bg-brand-soft px-2.5 py-0.5 text-xs font-semibold text-brand">
@@ -154,13 +154,13 @@ export function EvaluationSection({
           <p className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
             Tiêu chí đánh giá
           </p>
-          <div className="space-y-2.5">
+          <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
             {evaluation.criteria.map((criterion) => {
               const isApplicable = criterion.applicability === 'APPLICABLE'
               return (
                 <div
                   key={criterion.key}
-                  className="rounded-xl border border-border bg-surface p-4 transition-colors hover:bg-surface-hover"
+                  className="bg-surface p-4 transition-colors hover:bg-surface-hover"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-bold text-ink">{criterion.label}</p>
