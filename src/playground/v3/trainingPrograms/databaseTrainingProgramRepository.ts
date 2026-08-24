@@ -33,7 +33,7 @@ export class DatabaseTrainingProgramRepository implements TrainingProgramReposit
         description: input.description,
         createdByUserId: input.createdByUserId,
         items: {
-          create: input.items.map((item, index) => ({ id: input.itemIds[index], ...item }))
+          create: input.items.map((item, index) => ({ id: input.itemIds[index], ...item, personaVersionId: item.personaVersionId || null, scenarioVersionId: item.scenarioVersionId || null }))
         }
       },
       include: includeProgram
@@ -51,7 +51,7 @@ export class DatabaseTrainingProgramRepository implements TrainingProgramReposit
       await transaction.trainingProgramItem.deleteMany({ where: { programId: id } });
       if (input.items.length > 0) {
         await transaction.trainingProgramItem.createMany({
-          data: input.items.map((item, index) => ({ id: input.itemIds[index], programId: id, ...item }))
+          data: input.items.map((item, index) => ({ id: input.itemIds[index], programId: id, ...item, personaVersionId: item.personaVersionId || null, scenarioVersionId: item.scenarioVersionId || null }))
         });
       }
       const program = await transaction.trainingProgram.findUnique({ where: { id }, include: includeProgram });
@@ -88,6 +88,8 @@ function toRecord(program: StoredProgram): TrainingProgramRecord {
       programId: item.programId,
       personaId: item.personaId,
       scenarioId: item.scenarioId,
+      personaVersionId: item.personaVersionId ?? "",
+      scenarioVersionId: item.scenarioVersionId ?? "",
       mode: item.mode,
       sortOrder: item.sortOrder,
       createdAt: item.createdAt.toISOString(),

@@ -134,12 +134,15 @@ export class TrainingAssignmentService {
         throw new TrainingAssignmentServiceError("TRAINING_ASSIGNMENT_COMPLETED", "Nội dung này đã hoàn thành.");
       }
       if (progress.activeSessionId) return this.dependencies.simulation.getSession(progress.activeSessionId, userId);
-      if (!this.dependencies.catalog.resolve(item.personaId, item.scenarioId)) {
+      const selection = await this.dependencies.catalog.resolve(item.personaId, item.scenarioId, item.personaVersionId, item.scenarioVersionId);
+      if (!selection) {
         throw new TrainingAssignmentServiceError("TRAINING_ASSIGNMENT_CONTENT_UNAVAILABLE", "Nội dung luyện tập hiện không còn khả dụng.");
       }
       return this.dependencies.simulation.createAssignedSession(item.personaId, item.mode, userId, {
         trainingAssignmentId: current.id,
-        trainingProgramItemId: item.id
+        trainingProgramItemId: item.id,
+        personaVersionId: item.personaVersionId,
+        scenarioVersionId: item.scenarioVersionId
       });
     });
   }
@@ -196,14 +199,17 @@ export class TrainingAssignmentService {
   }
 
   private publicItem(item: ReturnType<typeof deriveTrainingAssignment>["items"][number]) {
-    const selection = this.dependencies.catalog.resolve(item.personaId, item.scenarioId);
     return {
       id: item.id,
       sortOrder: item.sortOrder,
       personaId: item.personaId,
-      personaLabel: selection?.personaLabel ?? null,
+      personaLabel: item.personaLabel ?? null,
       scenarioId: item.scenarioId,
-      scenarioLabel: selection?.scenarioLabel ?? null,
+      scenarioLabel: item.scenarioLabel ?? null,
+      personaVersionId: item.personaVersionId || null,
+      personaVersion: item.personaVersion ?? null,
+      scenarioVersionId: item.scenarioVersionId || null,
+      scenarioVersion: item.scenarioVersion ?? null,
       mode: item.mode,
       state: item.state
     };

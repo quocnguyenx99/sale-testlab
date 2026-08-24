@@ -4,6 +4,8 @@ import type { SessionHistoryPage, SessionHistoryQuery, SessionRepository } from 
 import { SimulationService } from "../simulationService";
 import type { SimulationSession } from "../simulationSession";
 import type { TrainingProgramCatalog } from "../trainingPrograms/trainingProgramDomain";
+import type { RuntimeContentSelection } from "../trainingContent/trainingContentDomain";
+import type { RuntimeContentResolver } from "../trainingContent/runtimeContentResolver";
 import type { AssignmentProgramRecord, TrainingAssigneeRecord } from "./trainingAssignmentDomain";
 import { InMemoryTrainingAssignmentRepository } from "./inMemoryTrainingAssignmentRepository";
 import { TrainingAssignmentService, TrainingAssignmentServiceError } from "./trainingAssignmentService";
@@ -14,8 +16,8 @@ const program = (id: string, status: AssignmentProgramRecord["status"] = "PUBLIS
   description: "Safe program",
   status,
   items: [
-    { id: `${id}-item-1`, personaId: "persona-a", scenarioId: "persona-persona-a", mode: "SALE_FIRST", sortOrder: 1 },
-    { id: `${id}-item-2`, personaId: "persona-b", scenarioId: "persona-persona-b", mode: "SALE_FIRST", sortOrder: 2 }
+    { id: `${id}-item-1`, personaId: "persona-a", scenarioId: "persona-persona-a", personaVersionId: "persona-a-v1", scenarioVersionId: "persona-persona-a-v1", mode: "SALE_FIRST", sortOrder: 1 },
+    { id: `${id}-item-2`, personaId: "persona-b", scenarioId: "persona-persona-b", personaVersionId: "persona-b-v1", scenarioVersionId: "persona-persona-b-v1", mode: "SALE_FIRST", sortOrder: 2 }
   ]
 });
 
@@ -54,17 +56,31 @@ const linkedSessions: SessionRepository = {
   }
 };
 let idSequence = 0;
+const contentSelection = (personaId: string, version: number): RuntimeContentSelection => ({
+  personaId,
+  personaVersionId: `${personaId}-v${version}`,
+  scenarioId: `persona-${personaId}`,
+  scenarioVersionId: `persona-${personaId}-v${version}`,
+  personaSnapshot: { id: personaId, displayName: `Persona ${personaId} v${version}`, role: "Buyer", customerType: "Business", difficulty: "MEDIUM", summary: "Safe", interests: ["solution"], scenarioContext: "Safe" },
+  scenarioSnapshot: { id: `persona-${personaId}`, title: `Scenario v${version}`, description: "Safe", difficulty: "MEDIUM" },
+  personaRuntime: {} as RuntimeContentSelection["personaRuntime"],
+  scenarioRuntime: {} as RuntimeContentSelection["scenarioRuntime"]
+});
+const contentResolver = {
+  resolveCurrent: async (personaId: string) => contentSelection(personaId, 2),
+  resolvePinned: async (personaVersionId: string) => {
+    const personaId = personaVersionId.replace(/-v\d+$/, "");
+    const version = Number(personaVersionId.match(/-v(\d+)$/)?.[1] ?? 1);
+    return contentSelection(personaId, version);
+  },
+  listPublicCatalog: async () => [contentSelection("persona-a", 2), contentSelection("persona-b", 2)].map((selection) => ({
+    ...selection.personaSnapshot, versionId: selection.personaVersionId, version: 2,
+    scenarios: [{ ...selection.scenarioSnapshot, versionId: selection.scenarioVersionId, version: 2, trainingObjective: "Safe", isDefault: true }]
+  }))
+} as unknown as RuntimeContentResolver;
 const simulation = new SimulationService({
   sessions: linkedSessions,
-  personas: ["a", "b"].map((id) => ({
-    persona_id: `persona-${id}`,
-    display_name: `Persona ${id.toUpperCase()}`,
-    buyer_role: "Buyer",
-    organization_type: "Business",
-    product_interest_categories: ["solution"],
-    purchase_context: "Safe",
-    difficulty: "MEDIUM"
-  })),
+  contentResolver,
   orchestrator: {
     startCustomer: async () => { throw new Error("unused"); },
     handleSaleMessage: async () => { throw new Error("unused"); }
@@ -73,8 +89,8 @@ const simulation = new SimulationService({
   createId: () => `session-${++idSequence}`
 });
 const catalog: TrainingProgramCatalog = {
-  resolve: (personaId, scenarioId) => scenarioId === `persona-${personaId}`
-    ? { personaId, personaLabel: personaId, scenarioId, scenarioLabel: scenarioId }
+  resolve: (personaId, scenarioId, personaVersionId, scenarioVersionId) => scenarioId === `persona-${personaId}`
+    ? { personaId, personaLabel: personaId, scenarioId, scenarioLabel: scenarioId, personaVersionId: personaVersionId || `${personaId}-v2`, personaVersion: personaVersionId ? 1 : 2, scenarioVersionId: scenarioVersionId || `${scenarioId}-v2`, scenarioVersion: scenarioVersionId ? 1 : 2 }
     : null
 };
 const service = new TrainingAssignmentService({
@@ -113,6 +129,7 @@ async function main(): Promise<void> {
   const ordinary = await simulation.createSession("persona-a", "SALE_FIRST", "sale-a");
   assert.equal(ordinary.trainingAssignmentId, null);
   assert.equal(ordinary.trainingProgramItemId, null);
+  assert.equal(ordinary.personaVersionId, "persona-a-v2");
 
   const first = await service.startAssignedItem(created.id, "published-item-1", "sale-a");
   assert.equal(first.userId, "sale-a");
@@ -120,6 +137,8 @@ async function main(): Promise<void> {
   assert.equal(first.mode, "SALE_FIRST");
   assert.equal(first.trainingAssignmentId, created.id);
   assert.equal(first.trainingProgramItemId, "published-item-1");
+  assert.equal(first.personaVersionId, "persona-a-v1");
+  assert.equal(first.scenarioVersionId, "persona-persona-a-v1");
   assert.equal((await service.getOwn(created.id, "sale-a")).state, "IN_PROGRESS");
   assert.equal((await service.getOwn(created.id, "sale-a")).completedItems, 0);
   assert.equal((await service.startAssignedItem(created.id, "published-item-1", "sale-a")).id, first.id);

@@ -6,6 +6,8 @@ export type TrainingProgramStatus = typeof TRAINING_PROGRAM_STATUSES[number];
 export interface TrainingProgramItemInput {
   personaId: string;
   scenarioId: string;
+  personaVersionId?: string;
+  scenarioVersionId?: string;
   mode: SimulationMode;
   sortOrder: number;
 }
@@ -40,8 +42,12 @@ export interface TrainingProgramCatalogSelection {
   personaLabel: string;
   scenarioId: string;
   scenarioLabel: string;
+  personaVersionId?: string;
+  personaVersion?: number;
+  scenarioVersionId?: string;
+  scenarioVersion?: number;
 }
 
 export interface TrainingProgramCatalog {
-  resolve(personaId: string, scenarioId: string): TrainingProgramCatalogSelection | null;
+  resolve(personaId: string, scenarioId: string, personaVersionId?: string | null, scenarioVersionId?: string | null): TrainingProgramCatalogSelection | null | Promise<TrainingProgramCatalogSelection | null>;
 }

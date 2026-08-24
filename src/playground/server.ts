@@ -81,7 +81,9 @@ import { DatabaseTrainingProgramRepository } from "./v3/trainingPrograms/databas
 import { TrainingProgramService } from "./v3/trainingPrograms/trainingProgramService";
 import { DatabaseTrainingAssignmentRepository } from "./v3/trainingAssignments/databaseTrainingAssignmentRepository";
 import { TrainingAssignmentService } from "./v3/trainingAssignments/trainingAssignmentService";
-import { toPublicPersona } from "./v3/publicDtoMapper";
+import { DatabaseTrainingContentRepository } from "./v3/trainingContent/databaseTrainingContentRepository";
+import { RuntimeContentResolver, scenarioForRuntimeExecution } from "./v3/trainingContent/runtimeContentResolver";
+import { TrainingContentService } from "./v3/trainingContent/trainingContentService";
 import {
   rebuildRuntimeState,
   RuntimeRecoverySnapshot,
@@ -829,7 +831,7 @@ async function handleCustomerStart(bodyRaw: string, personas: RuntimePersonaReco
 }
 
 async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[]): Promise<Record<string, unknown>> {
-  const body = JSON.parse(bodyRaw) as { sessionId?: string; personaId?: string; message?: string; runtimeState?: RuntimeState };
+  const body = JSON.parse(bodyRaw) as { sessionId?: string; personaId?: string; message?: string; runtimeState?: RuntimeState; scenario?: ProductScenario };
   const message = (body.message || "").trim();
   if (!message) throw new Error("Missing message");
   const ep = enriched.find(p => p.persona_id === body.personaId);
@@ -857,7 +859,7 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[]):
     );
   const identitySource = deriveIdentitySource(ep, Boolean(existing?.identityProfile));
   const personaSalutationStyle = ep.salutation_style || "";
-  const scenarioContext = existing?.scenarioContext;
+  const scenarioContext = existing?.scenarioContext ?? body.scenario;
 
   const routeBefore = routeRuntimeState({
     latestSaleMessage: message,
@@ -1305,12 +1307,12 @@ async function handleChatEnriched(bodyRaw: string, enriched: EnrichedPersona[]):
   };
 }
 async function handleCustomerStartEnriched(bodyRaw: string, enriched: EnrichedPersona[]): Promise<Record<string, unknown>> {
-  const body = JSON.parse(bodyRaw) as { personaId?: string };
+  const body = JSON.parse(bodyRaw) as { personaId?: string; scenario?: ProductScenario };
   const ep = enriched.find(p => p.persona_id === body.personaId);
   if (!ep) throw new Error("Enriched persona not found");
   const sessionId = randomUUID();
 
-  const opening = buildCustomerOpeningEnriched(ep);
+  const opening = buildCustomerOpeningEnriched(ep, body.scenario);
   const openingText = opening.text;
   const state = opening.state;
   const scenarioContext = opening.scenario_context;
@@ -1417,20 +1419,26 @@ async function main(): Promise<void> {
   ];
 
   const v3SessionRepository = new DatabaseSessionRepository(prisma);
+  const v3TrainingContentRepository = new DatabaseTrainingContentRepository(prisma);
+  const v3RuntimeContentResolver = new RuntimeContentResolver(v3TrainingContentRepository);
+  const v3TrainingContentService = new TrainingContentService(v3TrainingContentRepository);
   const v3Orchestrator = new CompatibilitySimulationOrchestrator({
-    startCustomer: (personaId) => handleCustomerStartEnriched(JSON.stringify({ personaId }), sortedEnriched),
-    chat: ({ sessionId, personaId, message }) => handleChatEnriched(
-      JSON.stringify({ sessionId, personaId, message }),
-      sortedEnriched
+    startCustomer: (personaId, content) => handleCustomerStartEnriched(
+      JSON.stringify({ personaId, scenario: content ? scenarioForRuntimeExecution(content) : undefined }),
+      content ? [content.personaRuntime as EnrichedPersona] : sortedEnriched
+    ),
+    chat: ({ sessionId, personaId, message, content }) => handleChatEnriched(
+      JSON.stringify({ sessionId, personaId, message, scenario: content ? scenarioForRuntimeExecution(content) : undefined }),
+      content ? [content.personaRuntime as EnrichedPersona] : sortedEnriched
     ),
     hasSession: (sessionId) => sessions.has(sessionId),
-    restoreSession: (input) => restoreRuntimeSession(input, sortedEnriched),
+    restoreSession: (input) => restoreRuntimeSession(input, input.content ? [input.content.personaRuntime as EnrichedPersona] : sortedEnriched),
     discardSession: (sessionId) => { sessions.delete(sessionId); }
   });
   const v3SimulationService = new SimulationService({
     sessions: v3SessionRepository,
     orchestrator: v3Orchestrator,
-    personas: sortedEnriched
+    contentResolver: v3RuntimeContentResolver
   });
   const v3AuthService = new AuthService(
     new DatabaseAuthRepository(prisma),
@@ -1451,19 +1459,20 @@ async function main(): Promise<void> {
     repository: new DatabaseProgressRepository(prisma)
   });
   const trainingProgramCatalog = {
-      resolve: (personaId: string, scenarioId: string) => {
-        try {
-          const persona = toPublicPersona(v3SimulationService.getPersona(personaId));
-          if (persona.defaultScenario.id !== scenarioId) return null;
-          return {
-            personaId: persona.id,
-            personaLabel: persona.displayName,
-            scenarioId: persona.defaultScenario.id,
-            scenarioLabel: persona.defaultScenario.title
-          };
-        } catch {
-          return null;
-        }
+      resolve: async (personaId: string, scenarioId: string, personaVersionId?: string | null, scenarioVersionId?: string | null) => {
+        const selection = personaVersionId && scenarioVersionId
+          ? await v3RuntimeContentResolver.resolvePinned(personaVersionId, scenarioVersionId)
+          : await v3RuntimeContentResolver.resolveCurrent(personaId, scenarioId);
+        if (!selection || selection.personaId !== personaId || selection.scenarioId !== scenarioId) return null;
+        const personaVersion = await prisma.personaVersion.findUnique({ where: { id: selection.personaVersionId }, select: { version: true } });
+        const scenarioVersion = await prisma.scenarioVersion.findUnique({ where: { id: selection.scenarioVersionId }, select: { version: true } });
+        if (!personaVersion || !scenarioVersion) return null;
+        return {
+          personaId, personaLabel: selection.personaSnapshot.displayName,
+          scenarioId, scenarioLabel: selection.scenarioSnapshot.title,
+          personaVersionId: selection.personaVersionId, personaVersion: personaVersion.version,
+          scenarioVersionId: selection.scenarioVersionId, scenarioVersion: scenarioVersion.version
+        };
       }
   };
   const v3TrainingProgramService = new TrainingProgramService({
@@ -1482,7 +1491,8 @@ async function main(): Promise<void> {
     coachingService: v3CoachingService,
     progressService: v3ProgressService,
     trainingProgramService: v3TrainingProgramService,
-    trainingAssignmentService: v3TrainingAssignmentService
+    trainingAssignmentService: v3TrainingAssignmentService,
+    trainingContentService: v3TrainingContentService
   });
 
   const server = http.createServer(async (req, res) => {

@@ -10,6 +10,8 @@ import {
   ClipboardList,
   ListChecks,
   UserRound,
+  UsersRound,
+  PanelsTopLeft,
   X,
   type LucideIcon,
 } from 'lucide-react'
@@ -30,6 +32,8 @@ const navItems: ReadonlyArray<NavItem> = [
   { to: '/progress', label: 'Tiến độ', icon: BarChart3, requiredCapability: 'USE_OWN_TRAINING' },
   { to: '/training-programs', label: 'Chương trình đào tạo', icon: BookOpenCheck, requiredCapability: 'MANAGE_TRAINING_PROGRAMS' },
   { to: '/training-assignments', label: 'Phân công đào tạo', icon: ClipboardList, requiredCapability: 'ASSIGN_TRAINING' },
+  { to: '/manage/personas', label: 'Quản lý Persona', icon: UsersRound, requiredCapability: 'MANAGE_PERSONAS' },
+  { to: '/manage/scenarios', label: 'Quản lý tình huống', icon: PanelsTopLeft, requiredCapability: 'MANAGE_SCENARIOS' },
   { to: '/my-training-assignments', label: 'Bài tập được giao', icon: ListChecks, roles: ['SALE'] },
 ]
 

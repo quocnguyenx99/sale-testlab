@@ -49,6 +49,22 @@ enum TrainingProgramStatus {
   ARCHIVED
 }
 
+enum TrainingContentOrigin {
+  LEGACY_IMPORT
+  MANAGED
+}
+
+enum TrainingContentVersionStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum TrainingContentDifficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
 model User {
   id           String              @id @default(uuid()) @db.Char(36)
   email        String              @unique @db.VarChar(255)
@@ -64,6 +80,10 @@ model User {
   trainingProgramsCreated TrainingProgram[]
   trainingAssignmentsReceived TrainingAssignment[] @relation("TrainingAssignmentAssignee")
   trainingAssignmentsCreated  TrainingAssignment[] @relation("TrainingAssignmentAssigner")
+  personasCreated Persona[]
+  personaVersionsCreated PersonaVersion[]
+  scenariosCreated Scenario[]
+  scenarioVersionsCreated ScenarioVersion[]
 
   @@map("users")
 }
@@ -90,6 +110,9 @@ model SimulationSession {
   status            SimulationStatus
   personaSnapshot   Json               @map("persona_snapshot")
   scenarioSnapshot  Json               @map("scenario_snapshot")
+  personaVersionId  String?            @map("persona_version_id") @db.Char(36)
+  scenarioVersionId String?            @map("scenario_version_id") @db.Char(36)
+  contentSnapshot   Json?              @map("content_snapshot")
   runtimeSessionId  String             @map("runtime_session_id") @db.Char(36)
   runtimeSnapshot   Json?              @map("runtime_snapshot")
   runtimeInsight    Json?              @map("runtime_insight")
@@ -106,10 +129,14 @@ model SimulationSession {
   trainingProgramItemId String?            @map("training_program_item_id") @db.Char(36)
   trainingAssignment TrainingAssignment?   @relation(fields: [trainingAssignmentId], references: [id], onDelete: Restrict, map: "sim_sessions_assignment_fkey")
   trainingProgramItem TrainingProgramItem? @relation(fields: [trainingProgramItemId], references: [id], onDelete: Restrict, map: "sim_sessions_program_item_fkey")
+  personaVersion PersonaVersion? @relation(fields: [personaVersionId], references: [id], onDelete: Restrict, map: "sim_sessions_persona_version_fkey")
+  scenarioVersion ScenarioVersion? @relation(fields: [scenarioVersionId], references: [id], onDelete: Restrict, map: "sim_sessions_scenario_version_fkey")
 
   @@index([userId, createdAt])
   @@index([trainingAssignmentId, status], map: "sim_sessions_assignment_status_idx")
   @@index([trainingProgramItemId], map: "sim_sessions_program_item_idx")
+  @@index([personaVersionId], map: "sim_sessions_persona_version_idx")
+  @@index([scenarioVersionId], map: "sim_sessions_scenario_version_idx")
   @@map("simulation_sessions")
 }
 
@@ -190,15 +217,141 @@ model TrainingProgramItem {
   programId  String          @map("program_id") @db.Char(36)
   personaId  String          @map("persona_id") @db.VarChar(160)
   scenarioId String          @map("scenario_id") @db.VarChar(160)
+  personaVersionId String?   @map("persona_version_id") @db.Char(36)
+  scenarioVersionId String?  @map("scenario_version_id") @db.Char(36)
   mode       SimulationMode
   sortOrder  Int             @map("sort_order")
   createdAt  DateTime        @default(now()) @map("created_at")
   updatedAt  DateTime        @updatedAt @map("updated_at")
   program    TrainingProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
   assignmentSessions SimulationSession[]
+  personaVersion PersonaVersion? @relation(fields: [personaVersionId], references: [id], onDelete: Restrict, map: "program_items_persona_version_fkey")
+  scenarioVersion ScenarioVersion? @relation(fields: [scenarioVersionId], references: [id], onDelete: Restrict, map: "program_items_scenario_version_fkey")
 
   @@unique([programId, sortOrder])
+  @@index([personaVersionId], map: "program_items_persona_version_idx")
+  @@index([scenarioVersionId], map: "program_items_scenario_version_idx")
   @@map("training_program_items")
+}
+
+model Persona {
+  id              String                @id @db.VarChar(160)
+  origin          TrainingContentOrigin
+  nextVersion     Int                   @default(1) @map("next_version")
+  archivedAt      DateTime?             @map("archived_at")
+  createdByUserId String?               @map("created_by_user_id") @db.Char(36)
+  createdAt       DateTime              @default(now()) @map("created_at")
+  updatedAt       DateTime              @updatedAt @map("updated_at")
+  createdBy       User?                 @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  versions        PersonaVersion[]
+  scenarios       PersonaScenario[]
+
+  @@index([archivedAt, updatedAt])
+  @@index([createdByUserId])
+  @@map("personas")
+}
+
+model PersonaVersion {
+  id                   String                       @id @default(uuid()) @db.Char(36)
+  personaId            String                       @map("persona_id") @db.VarChar(160)
+  version              Int
+  status               TrainingContentVersionStatus
+  draftSlot            Int?                         @map("draft_slot")
+  displayName          String                       @map("display_name") @db.VarChar(160)
+  buyerRole            String                       @map("buyer_role") @db.VarChar(160)
+  organizationType     String                       @map("organization_type") @db.VarChar(160)
+  difficulty           TrainingContentDifficulty
+  summary              String                       @db.Text
+  productInterests     Json                         @map("product_interests")
+  purchaseContext      String                       @map("purchase_context") @db.Text
+  behaviorTraits       Json                         @map("behavior_traits")
+  commonObjections     Json                         @map("common_objections")
+  likelyQuestions      Json                         @map("likely_questions")
+  trainingFocus        Json                         @map("training_focus")
+  runtimeConfig        Json                         @map("runtime_config")
+  contentHash          String                       @map("content_hash") @db.Char(64)
+  importKey            String?                      @unique @map("import_key") @db.VarChar(255)
+  publishedAt          DateTime?                    @map("published_at")
+  createdByUserId      String?                      @map("created_by_user_id") @db.Char(36)
+  createdAt            DateTime                     @default(now()) @map("created_at")
+  updatedAt            DateTime                     @updatedAt @map("updated_at")
+  persona              Persona                      @relation(fields: [personaId], references: [id], onDelete: Restrict)
+  createdBy            User?                        @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  programItems         TrainingProgramItem[]
+  sessions             SimulationSession[]
+
+  @@unique([personaId, version])
+  @@unique([personaId, draftSlot])
+  @@index([personaId, status, version])
+  @@index([createdByUserId])
+  @@map("persona_versions")
+}
+
+model Scenario {
+  id              String                @id @db.VarChar(160)
+  origin          TrainingContentOrigin
+  nextVersion     Int                   @default(1) @map("next_version")
+  archivedAt      DateTime?             @map("archived_at")
+  createdByUserId String?               @map("created_by_user_id") @db.Char(36)
+  createdAt       DateTime              @default(now()) @map("created_at")
+  updatedAt       DateTime              @updatedAt @map("updated_at")
+  createdBy       User?                 @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  versions        ScenarioVersion[]
+  personas        PersonaScenario[]
+
+  @@index([archivedAt, updatedAt])
+  @@index([createdByUserId])
+  @@map("scenarios")
+}
+
+model ScenarioVersion {
+  id                String                       @id @default(uuid()) @db.Char(36)
+  scenarioId        String                       @map("scenario_id") @db.VarChar(160)
+  version           Int
+  status            TrainingContentVersionStatus
+  draftSlot         Int?                         @map("draft_slot")
+  title             String                       @db.VarChar(160)
+  description       String                       @db.Text
+  difficulty        TrainingContentDifficulty
+  category          String                       @db.VarChar(160)
+  customerNeed      String                       @map("customer_need") @db.Text
+  priorities        Json
+  trainingObjective String                       @map("training_objective") @db.Text
+  tags              Json
+  openingExamples   Json                         @map("opening_examples")
+  runtimeConfig     Json                         @map("runtime_config")
+  contentHash       String                       @map("content_hash") @db.Char(64)
+  importKey         String?                      @unique @map("import_key") @db.VarChar(255)
+  publishedAt       DateTime?                    @map("published_at")
+  createdByUserId   String?                      @map("created_by_user_id") @db.Char(36)
+  createdAt         DateTime                     @default(now()) @map("created_at")
+  updatedAt         DateTime                     @updatedAt @map("updated_at")
+  scenario          Scenario                     @relation(fields: [scenarioId], references: [id], onDelete: Restrict)
+  createdBy         User?                        @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  programItems      TrainingProgramItem[]
+  sessions          SimulationSession[]
+
+  @@unique([scenarioId, version])
+  @@unique([scenarioId, draftSlot])
+  @@index([scenarioId, status, version])
+  @@index([createdByUserId])
+  @@map("scenario_versions")
+}
+
+model PersonaScenario {
+  personaId String   @map("persona_id") @db.VarChar(160)
+  scenarioId String  @map("scenario_id") @db.VarChar(160)
+  isDefault Boolean  @default(false) @map("is_default")
+  sortOrder Int      @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  persona Persona    @relation(fields: [personaId], references: [id], onDelete: Restrict)
+  scenario Scenario  @relation(fields: [scenarioId], references: [id], onDelete: Restrict)
+
+  @@id([personaId, scenarioId])
+  @@unique([personaId, sortOrder])
+  @@index([scenarioId])
+  @@map("persona_scenarios")
 }
 
 model TrainingAssignment {

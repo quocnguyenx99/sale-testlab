@@ -63,7 +63,11 @@
     "test:v3-db": "tsx src/playground/v3/database.integration.test.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
-    "db:bootstrap": "tsx src/playground/v3/bootstrapUser.ts"
+    "db:bootstrap": "tsx src/playground/v3/bootstrapUser.ts",
+    "phase11:content:dry-run": "tsx src/playground/v3/trainingContent/importTrainingContent.ts",
+    "phase11:content:apply": "tsx src/playground/v3/trainingContent/importTrainingContent.ts --apply",
+    "test:v3-training-content": "tsx src/playground/v3/trainingContent/trainingContent.database.test.ts",
+    "test:v3-training-content-parity": "tsx src/playground/v3/trainingContent/trainingContent.parity.test.ts"
   },
   "keywords": [],
   "author": "",

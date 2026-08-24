@@ -16,6 +16,12 @@ export interface AssignmentProgramItemRecord {
   id: string;
   personaId: string;
   scenarioId: string;
+  personaVersionId?: string;
+  personaVersion?: number | null;
+  personaLabel?: string | null;
+  scenarioVersionId?: string;
+  scenarioVersion?: number | null;
+  scenarioLabel?: string | null;
   mode: SimulationMode;
   sortOrder: number;
 }
@@ -55,6 +61,12 @@ export interface DerivedAssignmentItem {
   id: string;
   personaId: string;
   scenarioId: string;
+  personaVersionId?: string;
+  personaVersion?: number | null;
+  personaLabel?: string | null;
+  scenarioVersionId?: string;
+  scenarioVersion?: number | null;
+  scenarioLabel?: string | null;
   mode: SimulationMode;
   sortOrder: number;
   state: TrainingAssignmentItemState;

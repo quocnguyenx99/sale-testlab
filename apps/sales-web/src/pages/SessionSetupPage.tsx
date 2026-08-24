@@ -7,6 +7,7 @@ import { Avatar } from '../components/ui/Avatar'
 import { DifficultyBadge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
+import { Select } from '../components/ui/FormControls'
 import { ErrorState, LoadingState } from '../components/ui/Feedback'
 import { trainingService } from '../services/trainingService'
 import type { PublicPersona, TrainingMode } from '../types/training'
@@ -35,6 +36,7 @@ export function SessionSetupPage() {
   const personaId = params.get('personaId') ?? ''
   const [persona, setPersona] = useState<PublicPersona | null>(null)
   const [mode, setMode] = useState<TrainingMode>('CUSTOMER_FIRST')
+  const [scenarioId, setScenarioId] = useState('')
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState('')
 
@@ -45,7 +47,7 @@ export function SessionSetupPage() {
     }
     trainingService
       .getPersona(personaId)
-      .then(setPersona)
+      .then((value) => { setPersona(value); setScenarioId((value.scenarios?.find((item) => item.isDefault) ?? value.defaultScenario).id) })
       .catch((reason: unknown) =>
         setError(reason instanceof Error ? reason.message : 'Không thể tải thông tin khách hàng.')
       )
@@ -56,7 +58,7 @@ export function SessionSetupPage() {
     setStarting(true)
     setError('')
     try {
-      const session = await startSession(persona.id, mode)
+      const session = await startSession(persona.id, mode, scenarioId || persona.defaultScenario.id)
       navigate(`/practice/${session.id}`)
     } catch (reason) {
       setError(
@@ -82,7 +84,7 @@ export function SessionSetupPage() {
     )
   }
 
-  const scenario = persona.defaultScenario
+  const scenario = persona.scenarios?.find((item) => item.id === scenarioId) ?? persona.defaultScenario
 
   return (
     <>
@@ -152,6 +154,15 @@ export function SessionSetupPage() {
                 <h3 className="text-base font-bold text-ink">{scenario.title}</h3>
               </div>
             </div>
+
+            {(persona.scenarios?.length ?? 0) > 1 && (
+              <label className="mt-4 grid gap-2 text-xs font-semibold text-ink-secondary">
+                Chọn tình huống
+                <Select aria-label="Chọn tình huống" value={scenario.id} onChange={(event) => setScenarioId(event.target.value)}>
+                  {persona.scenarios?.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+                </Select>
+              </label>
+            )}
 
             <p className="mt-3 text-sm leading-relaxed text-ink-secondary">
               {scenario.description}

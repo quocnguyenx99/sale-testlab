@@ -64,6 +64,9 @@ export interface SimulationSession {
   personaId: string;
   personaSnapshot: SimulationPersonaSnapshot;
   scenarioSnapshot: SimulationScenarioSnapshot;
+  personaVersionId?: string | null;
+  scenarioVersionId?: string | null;
+  contentSnapshot?: import("./trainingContent/trainingContentDomain").RuntimeContentSelection | null;
   mode: SimulationMode;
   status: SimulationStatus;
   createdAt: string;

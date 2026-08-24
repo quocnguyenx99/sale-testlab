@@ -4,6 +4,7 @@ import {
   SimulationScenarioSnapshot
 } from "./simulationSession";
 import { RuntimeRecoverySnapshot } from "./runtimeRecovery";
+import type { RuntimeContentSelection } from "./trainingContent/trainingContentDomain";
 
 type RuntimePayload = Record<string, unknown>;
 
@@ -22,17 +23,18 @@ export interface RuntimeHydrationInput {
   personaId: string;
   messages: SimulationMessage[];
   snapshot: RuntimeRecoverySnapshot | null;
+  content?: RuntimeContentSelection | null;
 }
 
 export interface SimulationOrchestrator {
-  startCustomer(personaId: string): Promise<OrchestrationResult>;
-  handleSaleMessage(input: { runtimeSessionId: string; personaId: string; message: string }): Promise<OrchestrationResult>;
+  startCustomer(personaId: string, content?: RuntimeContentSelection | null): Promise<OrchestrationResult>;
+  handleSaleMessage(input: { runtimeSessionId: string; personaId: string; message: string; content?: RuntimeContentSelection | null }): Promise<OrchestrationResult>;
   ensureRuntime?(input: RuntimeHydrationInput, force?: boolean): Promise<void>;
 }
 
 export interface CompatibilityOrchestratorCallbacks {
-  startCustomer: (personaId: string) => Promise<RuntimePayload>;
-  chat: (input: { sessionId: string; personaId: string; message: string }) => Promise<RuntimePayload>;
+  startCustomer: (personaId: string, content?: RuntimeContentSelection | null) => Promise<RuntimePayload>;
+  chat: (input: { sessionId: string; personaId: string; message: string; content?: RuntimeContentSelection | null }) => Promise<RuntimePayload>;
   hasSession?: (sessionId: string) => boolean;
   restoreSession?: (input: RuntimeHydrationInput) => void;
   discardSession?: (sessionId: string) => void;
@@ -113,15 +115,16 @@ function toResult(payload: RuntimePayload): OrchestrationResult {
 export class CompatibilitySimulationOrchestrator implements SimulationOrchestrator {
   constructor(private readonly callbacks: CompatibilityOrchestratorCallbacks) {}
 
-  async startCustomer(personaId: string): Promise<OrchestrationResult> {
-    return toResult(await this.callbacks.startCustomer(personaId));
+  async startCustomer(personaId: string, content?: RuntimeContentSelection | null): Promise<OrchestrationResult> {
+    return toResult(await this.callbacks.startCustomer(personaId, content));
   }
 
-  async handleSaleMessage(input: { runtimeSessionId: string; personaId: string; message: string }): Promise<OrchestrationResult> {
+  async handleSaleMessage(input: { runtimeSessionId: string; personaId: string; message: string; content?: RuntimeContentSelection | null }): Promise<OrchestrationResult> {
     const result = toResult(await this.callbacks.chat({
       sessionId: input.runtimeSessionId,
       personaId: input.personaId,
-      message: input.message
+      message: input.message,
+      content: input.content
     }));
     if (result.runtimeSessionId !== input.runtimeSessionId) throw new Error("Runtime session linkage mismatch");
     return result;

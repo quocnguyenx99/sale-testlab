@@ -14,7 +14,7 @@ const assignmentInclude = {
       description: true,
       status: true,
       items: {
-        select: { id: true, personaId: true, scenarioId: true, mode: true, sortOrder: true },
+        select: { id: true, personaId: true, scenarioId: true, personaVersionId: true, scenarioVersionId: true, personaVersion: { select: { version: true, displayName: true } }, scenarioVersion: { select: { version: true, title: true } }, mode: true, sortOrder: true },
         orderBy: [{ sortOrder: "asc" as const }, { id: "asc" as const }]
       }
     }
@@ -78,12 +78,18 @@ export class DatabaseTrainingAssignmentRepository implements TrainingAssignmentR
         description: true,
         status: true,
         items: {
-          select: { id: true, personaId: true, scenarioId: true, mode: true, sortOrder: true },
+          select: { id: true, personaId: true, scenarioId: true, personaVersionId: true, scenarioVersionId: true, personaVersion: { select: { version: true, displayName: true } }, scenarioVersion: { select: { version: true, title: true } }, mode: true, sortOrder: true },
           orderBy: [{ sortOrder: "asc" }, { id: "asc" }]
         }
       }
     });
-    return program ? { ...program, items: program.items.map((item) => ({ ...item })) } : null;
+    return program ? { ...program, items: program.items.map((item) => ({
+      id: item.id, personaId: item.personaId, scenarioId: item.scenarioId,
+      personaVersionId: item.personaVersionId ?? "", personaVersion: item.personaVersion?.version ?? null,
+      personaLabel: item.personaVersion?.displayName ?? null,
+      scenarioVersionId: item.scenarioVersionId ?? "", scenarioVersion: item.scenarioVersion?.version ?? null,
+      scenarioLabel: item.scenarioVersion?.title ?? null, mode: item.mode, sortOrder: item.sortOrder
+    })) } : null;
   }
 
   async findUserById(id: string): Promise<TrainingAssigneeRecord | null> {
@@ -144,7 +150,13 @@ function toRecord(assignment: StoredAssignment): TrainingAssignmentRecord {
       name: assignment.program.name,
       description: assignment.program.description,
       status: assignment.program.status,
-      items: assignment.program.items.map((item): AssignmentProgramItemRecord => ({ ...item }))
+      items: assignment.program.items.map((item): AssignmentProgramItemRecord => ({
+        id: item.id, personaId: item.personaId, scenarioId: item.scenarioId,
+        personaVersionId: item.personaVersionId ?? "", personaVersion: item.personaVersion?.version ?? null,
+        personaLabel: item.personaVersion?.displayName ?? null,
+        scenarioVersionId: item.scenarioVersionId ?? "", scenarioVersion: item.scenarioVersion?.version ?? null,
+        scenarioLabel: item.scenarioVersion?.title ?? null, mode: item.mode, sortOrder: item.sortOrder
+      }))
     },
     assignedTo: { ...assignment.assignedTo },
     assignedBy: { ...assignment.assignedBy },

@@ -74,8 +74,8 @@ export const trainingService = {
     const suffix = params.size ? `?${params.toString()}` : ''
     return request<HistoryPage>(`/api/v3/sessions${suffix}`)
   },
-  async createSession(personaId: string, mode: TrainingMode): Promise<TrainingSession> {
-    const data = await request<{ session: TrainingSession }>('/api/v3/sessions', { method: 'POST', body: JSON.stringify({ personaId, mode }) })
+  async createSession(personaId: string, mode: TrainingMode, scenarioId?: string): Promise<TrainingSession> {
+    const data = await request<{ session: TrainingSession }>('/api/v3/sessions', { method: 'POST', body: JSON.stringify({ personaId, scenarioId, mode }) })
     return decorateSession(data.session)
   },
   async getSession(sessionId: string): Promise<TrainingSession> {

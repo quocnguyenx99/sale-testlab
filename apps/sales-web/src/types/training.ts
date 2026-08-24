@@ -13,6 +13,9 @@ export interface PublicPersona {
   interests: string[]
   scenarioContext: string
   defaultScenario: TrainingScenario
+  versionId?: string
+  version?: number
+  scenarios?: TrainingScenario[]
   color: string
 }
 
@@ -21,6 +24,10 @@ export interface TrainingScenario {
   title: string
   description: string
   difficulty: Difficulty
+  versionId?: string
+  version?: number
+  trainingObjective?: string
+  isDefault?: boolean
 }
 
 export interface TrainingSession {

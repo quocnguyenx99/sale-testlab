@@ -19,6 +19,7 @@ import {
   SimulationScenarioSnapshot,
   SimulationSession
 } from "./simulationSession";
+import type { PublicPersonaOption } from "./trainingContent/trainingContentDomain";
 
 export function toPublicScenario(scenario: SimulationScenarioSnapshot): PublicScenario {
   return {
@@ -45,6 +46,23 @@ export function toPublicPersona(persona: SimulationPersonaSnapshot): PublicPerso
       title: `Tư vấn ${interest}`,
       description: persona.scenarioContext || `Khám phá nhu cầu của ${persona.role}.`,
       difficulty: persona.difficulty
+    }
+  };
+}
+
+export function toPublicPersonaOption(persona: PublicPersonaOption): PublicPersona {
+  const fallback = persona.scenarios.find((item) => item.isDefault) ?? persona.scenarios[0];
+  const scenarios = persona.scenarios.map((scenario) => ({
+    id: scenario.id, title: scenario.title, description: scenario.description, difficulty: scenario.difficulty,
+    versionId: scenario.versionId, version: scenario.version, trainingObjective: scenario.trainingObjective, isDefault: scenario.isDefault
+  }));
+  return {
+    id: persona.id, displayName: persona.displayName, role: persona.role, customerType: persona.customerType,
+    difficulty: persona.difficulty, summary: persona.summary, interests: persona.interests,
+    scenarioContext: persona.scenarioContext, versionId: persona.versionId, version: persona.version,
+    scenarios,
+    defaultScenario: fallback ? scenarios.find((item) => item.id === fallback.id)! : {
+      id: `persona-${persona.id}`, title: "Tình huống luyện tập", description: persona.scenarioContext, difficulty: persona.difficulty
     }
   };
 }

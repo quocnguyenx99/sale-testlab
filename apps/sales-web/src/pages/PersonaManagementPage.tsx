@@ -1,0 +1,49 @@
+import { Archive, Plus, Save, Send, Trash2 } from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { PageHeader } from '../components/common/PageHeader'
+import { Badge } from '../components/ui/Badge'
+import { Button } from '../components/ui/Button'
+import { Card } from '../components/ui/Card'
+import { ErrorState, LoadingState } from '../components/ui/Feedback'
+import { Input, Select } from '../components/ui/FormControls'
+import { trainingContentService } from '../services/trainingContentService'
+import type { ManagedPersonaDetail, ManagedPersonaSummary, ManagedScenarioSummary, PersonaFields } from '../types/trainingContent'
+
+const emptyPersona: PersonaFields = { displayName: '', buyerRole: '', organizationType: '', difficulty: 'MEDIUM', summary: '', productInterests: [], purchaseContext: '', behaviorTraits: [], commonObjections: [], likelyQuestions: [], trainingFocus: [] }
+const split = (value: string) => value.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean)
+
+export function PersonaManagementPage() {
+  const [items, setItems] = useState<ManagedPersonaSummary[] | null>(null); const [error, setError] = useState('')
+  useEffect(() => { trainingContentService.personas().then(setItems).catch((e: unknown) => setError(e instanceof Error ? e.message : 'Không thể tải Persona.')) }, [])
+  if (!items && !error) return <LoadingState label="Đang tải Persona..." />
+  if (!items) return <ErrorState title="Không thể tải Persona" description={error} />
+  return <div className="space-y-6"><PageHeader eyebrow="Training content" title="Quản lý Persona" description="Nội dung đã xuất bản là bất biến; mọi chỉnh sửa được thực hiện qua phiên bản mới." action={<Link to="/manage/personas/new"><Button icon={<Plus className="h-4 w-4" />}>Tạo Persona</Button></Link>} />
+    <div className="grid gap-4 lg:grid-cols-2">{items.map((item) => <Link key={item.id} to={`/manage/personas/${encodeURIComponent(item.id)}`}><Card className="h-full p-5 hover:border-brand"><div className="flex items-start justify-between gap-3"><div><h2 className="font-bold text-ink">{item.displayName}</h2><p className="mt-1 text-xs text-ink-muted">{item.id}</p></div><Badge>{item.archivedAt ? 'ARCHIVED' : item.draft ? `DRAFT v${item.draft.version}` : `PUBLISHED v${item.latestPublished?.version ?? '-'}`}</Badge></div><p className="mt-4 text-sm text-ink-secondary">{item.linkedScenarioCount} tình huống liên kết</p>{!item.hasUsableScenario && <p className="mt-2 text-xs font-semibold text-amber-700">Chưa có tình huống đã xuất bản khả dụng.</p>}</Card></Link>)}</div>
+  </div>
+}
+
+export function PersonaEditorPage() {
+  const { personaId, versionId } = useParams(); const navigate = useNavigate(); const isNew = !personaId
+  const [detail, setDetail] = useState<ManagedPersonaDetail | null>(null); const [fields, setFields] = useState<PersonaFields>(emptyPersona)
+  const [scenarios, setScenarios] = useState<ManagedScenarioSummary[]>([]); const [selected, setSelected] = useState<string[]>([]); const [defaultId, setDefaultId] = useState('')
+  const [loading, setLoading] = useState(!isNew); const [saving, setSaving] = useState(false); const [error, setError] = useState('')
+  const apply = (value: ManagedPersonaDetail) => { setDetail(value); setFields(value.currentVersion); setSelected(value.scenarioLinks.map((link) => link.scenarioId)); setDefaultId(value.scenarioLinks.find((link) => link.isDefault)?.scenarioId ?? '') }
+  useEffect(() => { trainingContentService.scenarios().then(setScenarios).catch(() => undefined); if (personaId) trainingContentService.persona(personaId, versionId).then(apply).catch((e: unknown) => setError(e instanceof Error ? e.message : 'Không thể tải Persona.')).finally(() => setLoading(false)) }, [personaId, versionId])
+  const editable = isNew || detail?.currentVersion.status === 'DRAFT'
+  const update = <K extends keyof PersonaFields>(key: K, value: PersonaFields[K]) => setFields((current) => ({ ...current, [key]: value }))
+  const run = async (operation: () => Promise<ManagedPersonaDetail | void>) => { setSaving(true); setError(''); try { const result = await operation(); if (result) apply(result) } catch (e) { setError(e instanceof Error ? e.message : 'Không thể lưu Persona.') } finally { setSaving(false) } }
+  const save = () => run(async () => { if (isNew) { const created = await trainingContentService.createPersona(fields); navigate(`/manage/personas/${encodeURIComponent(created.id)}`, { replace: true }); return created } return trainingContentService.updatePersona(detail!.id, detail!.currentVersion.id, fields, detail!.currentVersion.updatedAt) })
+  if (loading) return <LoadingState label="Đang tải Persona..." />
+  return <div className="mx-auto max-w-5xl space-y-6"><PageHeader eyebrow="Persona" title={isNew ? 'Tạo Persona' : detail?.displayName ?? 'Persona'} description="Chỉ các trường nội dung được phép quản lý và hiển thị trong giao diện này." action={detail && <Badge>{detail.archivedAt ? 'ARCHIVED' : `${detail.currentVersion.status} · v${detail.currentVersion.version}`}</Badge>} />
+    {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+    <Card className="grid gap-4 p-5 md:grid-cols-2"><Field label="Tên hiển thị"><Input value={fields.displayName} disabled={!editable} onChange={(e) => update('displayName', e.target.value)} /></Field><Field label="Vai trò người mua"><Input value={fields.buyerRole} disabled={!editable} onChange={(e) => update('buyerRole', e.target.value)} /></Field><Field label="Loại tổ chức"><Input value={fields.organizationType} disabled={!editable} onChange={(e) => update('organizationType', e.target.value)} /></Field><Field label="Độ khó"><Select value={fields.difficulty} disabled={!editable} onChange={(e) => update('difficulty', e.target.value as PersonaFields['difficulty'])}><option>EASY</option><option>MEDIUM</option><option>HARD</option></Select></Field><Area label="Tóm tắt" value={fields.summary} disabled={!editable} onChange={(v) => update('summary', v)} /><Area label="Bối cảnh mua hàng" value={fields.purchaseContext} disabled={!editable} onChange={(v) => update('purchaseContext', v)} />{(['productInterests','behaviorTraits','commonObjections','likelyQuestions','trainingFocus'] as const).map((key) => <Area key={key} label={labels[key]} value={fields[key].join('\n')} disabled={!editable} onChange={(v) => update(key, split(v))} />)}</Card>
+    <div className="flex flex-wrap gap-2">{editable && <Button disabled={saving} icon={<Save className="h-4 w-4" />} onClick={() => void save()}>Lưu bản nháp</Button>}{detail?.currentVersion.status === 'DRAFT' && <Button disabled={saving} icon={<Send className="h-4 w-4" />} onClick={() => void run(() => trainingContentService.publishPersona(detail.id, detail.currentVersion.id, detail.currentVersion.updatedAt))}>Xuất bản</Button>}{detail?.latestPublished && !detail.draft && !detail.archivedAt && <Button variant="secondary" onClick={() => void run(() => trainingContentService.newPersonaVersion(detail.id))}>Tạo phiên bản mới</Button>}{detail?.draft && <Button variant="ghost" icon={<Trash2 className="h-4 w-4" />} onClick={() => void run(async () => { await trainingContentService.deletePersonaDraft(detail.id, detail.currentVersion.id); navigate('/manage/personas') })}>Xóa bản nháp</Button>}{detail?.latestPublished && !detail.draft && !detail.archivedAt && <Button variant="ghost" icon={<Archive className="h-4 w-4" />} onClick={() => void run(async () => { await trainingContentService.archivePersona(detail.id); navigate('/manage/personas') })}>Lưu trữ</Button>}</div>
+    {detail && <Card className="p-5"><h2 className="font-bold text-ink">Tình huống liên kết</h2><div className="mt-4 grid gap-2 md:grid-cols-2">{scenarios.filter((item) => !item.archivedAt && item.latestPublished).map((item) => <label key={item.id} className="flex items-center gap-3 rounded-lg border border-border p-3"><input type="checkbox" checked={selected.includes(item.id)} onChange={(e) => { const next = e.target.checked ? [...selected, item.id] : selected.filter((id) => id !== item.id); setSelected(next); if (!next.includes(defaultId)) setDefaultId(next[0] ?? '') }} /><span className="flex-1 text-sm">{item.title}</span>{selected.includes(item.id) && <input aria-label={`Mặc định ${item.title}`} type="radio" checked={defaultId === item.id} onChange={() => setDefaultId(item.id)} />}</label>)}</div><Button className="mt-4" variant="secondary" disabled={selected.length > 0 && !defaultId} onClick={() => void run(() => trainingContentService.linkScenarios(detail.id, selected.map((scenarioId) => ({ scenarioId, isDefault: scenarioId === defaultId }))))}>Lưu liên kết</Button></Card>}
+    {detail && <Card className="p-5"><h2 className="font-bold text-ink">Lịch sử phiên bản</h2><div className="mt-3 flex flex-wrap gap-2">{detail.versions.map((version) => <Link key={version.id} to={`/manage/personas/${encodeURIComponent(detail.id)}/versions/${version.id}`}><Badge>v{version.version} · {version.status}</Badge></Link>)}</div></Card>}
+  </div>
+}
+
+const labels = { productInterests: 'Sản phẩm quan tâm', behaviorTraits: 'Đặc điểm hành vi', commonObjections: 'Phản đối thường gặp', likelyQuestions: 'Câu hỏi thường gặp', trainingFocus: 'Trọng tâm đào tạo' }
+function Field({ label, children }: { label: string; children: ReactNode }) { return <label className="grid gap-2 text-sm font-semibold text-ink">{label}{children}</label> }
+function Area({ label, value, disabled, onChange }: { label: string; value: string; disabled: boolean; onChange: (value: string) => void }) { return <Field label={label}><textarea rows={4} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} className="rounded-lg border border-border bg-surface px-3 py-2 text-sm disabled:bg-surface-subtle" /></Field> }

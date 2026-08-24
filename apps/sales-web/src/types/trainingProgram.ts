@@ -8,6 +8,10 @@ export interface TrainingProgramItem {
   personaLabel: string | null
   scenarioId: string
   scenarioLabel: string | null
+  personaVersionId: string | null
+  personaVersion: number | null
+  scenarioVersionId: string | null
+  scenarioVersion: number | null
   mode: TrainingMode
   sortOrder: number
 }
@@ -26,5 +30,5 @@ export interface TrainingProgram {
 export interface TrainingProgramWriteInput {
   name: string
   description: string | null
-  items: Array<Pick<TrainingProgramItem, 'personaId' | 'scenarioId' | 'mode' | 'sortOrder'>>
+  items: Array<Pick<TrainingProgramItem, 'personaId' | 'scenarioId' | 'mode' | 'sortOrder'> & Partial<Pick<TrainingProgramItem, 'personaVersionId' | 'scenarioVersionId'>>>
 }

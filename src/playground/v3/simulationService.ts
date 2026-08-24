@@ -10,6 +10,8 @@ import {
   SimulationScenarioSnapshot,
   SimulationSession
 } from "./simulationSession";
+import type { RuntimeContentSelection } from "./trainingContent/trainingContentDomain";
+import type { RuntimeContentResolver } from "./trainingContent/runtimeContentResolver";
 
 export type SimulationErrorCode =
   | "PERSONA_NOT_FOUND"
@@ -37,12 +39,15 @@ export interface SendMessageResult {
 export interface AssignedSessionContext {
   trainingAssignmentId: string;
   trainingProgramItemId: string;
+  personaVersionId?: string;
+  scenarioVersionId?: string;
 }
 
 interface SimulationServiceDependencies {
   sessions: SessionRepository;
   orchestrator: SimulationOrchestrator;
-  personas: EnrichedPersonaSource[];
+  personas?: EnrichedPersonaSource[];
+  contentResolver?: RuntimeContentResolver;
   now?: () => Date;
   createId?: () => string;
 }
@@ -98,16 +103,21 @@ export class SimulationService {
   private readonly turnLocks = new Map<string, Promise<void>>();
 
   constructor(private readonly dependencies: SimulationServiceDependencies) {
-    this.personasById = new Map(dependencies.personas.map((persona) => [persona.persona_id, personaSnapshot(persona)]));
+    this.personasById = new Map((dependencies.personas ?? []).map((persona) => [persona.persona_id, personaSnapshot(persona)]));
     this.now = dependencies.now ?? (() => new Date());
     this.createId = dependencies.createId ?? randomUUID;
   }
 
-  listPersonas(): SimulationPersonaSnapshot[] {
+  async listPersonas(): Promise<SimulationPersonaSnapshot[]> {
+    if (this.dependencies.contentResolver) return (await this.dependencies.contentResolver.listPublicCatalog()).map((item) => ({ id: item.id, displayName: item.displayName, role: item.role, customerType: item.customerType, difficulty: item.difficulty, summary: item.summary, interests: item.interests, scenarioContext: item.scenarioContext }));
     return Array.from(this.personasById.values());
   }
 
-  getPersona(personaId: string): SimulationPersonaSnapshot {
+  async getPersona(personaId: string): Promise<SimulationPersonaSnapshot> {
+    if (this.dependencies.contentResolver) {
+      const item = (await this.dependencies.contentResolver.listPublicCatalog()).find((candidate) => candidate.id === personaId);
+      if (item) return { id: item.id, displayName: item.displayName, role: item.role, customerType: item.customerType, difficulty: item.difficulty, summary: item.summary, interests: item.interests, scenarioContext: item.scenarioContext };
+    }
     const persona = this.personasById.get(personaId);
     if (!persona) throw new SimulationServiceError("PERSONA_NOT_FOUND", "Không tìm thấy khách hàng AI.");
     return persona;
@@ -128,8 +138,8 @@ export class SimulationService {
     return this.dependencies.sessions.findHistoryByUserId(userId, query);
   }
 
-  async createSession(personaId: string, mode: unknown, userId = "phase3-compatibility"): Promise<SimulationSession> {
-    return this.createSessionWithContext(personaId, mode, userId, null);
+  async createSession(personaId: string, mode: unknown, userId = "phase3-compatibility", scenarioId?: string | null): Promise<SimulationSession> {
+    return this.createSessionWithContext(personaId, mode, userId, null, scenarioId ?? null);
   }
 
   async createAssignedSession(
@@ -141,29 +151,37 @@ export class SimulationService {
     if (!context.trainingAssignmentId.trim() || !context.trainingProgramItemId.trim()) {
       throw new SimulationServiceError("SESSION_NOT_FOUND", "Không tìm thấy nội dung được phân công.");
     }
-    return this.createSessionWithContext(personaId, mode, userId, context);
+    return this.createSessionWithContext(personaId, mode, userId, context, null);
   }
 
   private async createSessionWithContext(
     personaId: string,
     mode: unknown,
     userId: string,
-    assignmentContext: AssignedSessionContext | null
+    assignmentContext: AssignedSessionContext | null,
+    scenarioId: string | null
   ): Promise<SimulationSession> {
-    const persona = this.getPersona(personaId);
+    let content: RuntimeContentSelection | null = null;
+    if (this.dependencies.contentResolver) {
+      content = assignmentContext?.personaVersionId && assignmentContext.scenarioVersionId
+        ? await this.dependencies.contentResolver.resolvePinned(assignmentContext.personaVersionId, assignmentContext.scenarioVersionId)
+        : await this.dependencies.contentResolver.resolveCurrent(personaId, scenarioId);
+      if (!content || content.personaId !== personaId) throw new SimulationServiceError("PERSONA_NOT_FOUND", "Không tìm thấy nội dung luyện tập khả dụng.");
+    }
+    const persona = content?.personaSnapshot ?? await this.getPersona(personaId);
     if (mode !== "CUSTOMER_FIRST" && mode !== "SALE_FIRST") {
       throw new SimulationServiceError("INVALID_MODE", "Chế độ luyện tập không hợp lệ.");
     }
     const snapshot = persona;
     let id = this.createId();
     let runtimeSessionId = id;
-    let scenario = defaultScenario(snapshot);
+    let scenario = content?.scenarioSnapshot ?? defaultScenario(snapshot);
     let messages: SimulationMessage[] = [];
     let runtimeInsight: SimulationSession["runtimeInsight"] = null;
     let runtimeSnapshot: SimulationSession["runtimeSnapshot"] = null;
 
     if (mode === "CUSTOMER_FIRST") {
-      const opening = await this.callRuntime(() => this.dependencies.orchestrator.startCustomer(personaId));
+      const opening = await this.callRuntime(() => this.dependencies.orchestrator.startCustomer(personaId, content));
       id = opening.runtimeSessionId;
       runtimeSessionId = opening.runtimeSessionId;
       scenario = opening.scenario ? { ...opening.scenario, difficulty: snapshot.difficulty } : scenario;
@@ -179,6 +197,9 @@ export class SimulationService {
       personaId,
       personaSnapshot: snapshot,
       scenarioSnapshot: scenario,
+      personaVersionId: content?.personaVersionId ?? null,
+      scenarioVersionId: content?.scenarioVersionId ?? null,
+      contentSnapshot: content,
       mode,
       status: "RUNNING",
       createdAt: this.now().toISOString(),
@@ -197,7 +218,8 @@ export class SimulationService {
         runtimeSessionId: session.runtimeSessionId,
         personaId: session.personaId,
         messages: [],
-        snapshot: null
+        snapshot: null,
+        content: session.contentSnapshot
       }, true);
       throw error;
     }
@@ -206,13 +228,19 @@ export class SimulationService {
 
   async getSession(sessionId: string, userId?: string): Promise<SimulationSession> {
     const session = await this.getPersistedSession(sessionId, userId);
+    if (session.status === "RUNNING" && !session.contentSnapshot && session.personaVersionId && session.scenarioVersionId && this.dependencies.contentResolver) {
+      session.contentSnapshot = await this.dependencies.contentResolver.resolvePinned(session.personaVersionId, session.scenarioVersionId);
+      if (!session.contentSnapshot) throw new SimulationServiceError("RUNTIME_UNAVAILABLE", "Không thể khôi phục nội dung phiên Runtime.");
+      await this.dependencies.sessions.save(session);
+    }
     if (session.status === "RUNNING" && session.runtimeSnapshot) {
       try {
         await this.dependencies.orchestrator.ensureRuntime?.({
           runtimeSessionId: session.runtimeSessionId,
           personaId: session.personaId,
           messages: session.messages,
-          snapshot: session.runtimeSnapshot
+          snapshot: session.runtimeSnapshot,
+          content: session.contentSnapshot
         });
       } catch {
         throw new SimulationServiceError("RUNTIME_UNAVAILABLE", "Không thể khôi phục phiên Runtime. Vui lòng thử lại.");
@@ -242,7 +270,8 @@ export class SimulationService {
     const runtime = await this.callRuntime(() => this.dependencies.orchestrator.handleSaleMessage({
       runtimeSessionId: session.runtimeSessionId,
       personaId: session.personaId,
-      message
+      message,
+      content: session.contentSnapshot
     }));
     if (runtime.runtimeSessionId !== session.runtimeSessionId) {
       throw new SimulationServiceError("RUNTIME_UNAVAILABLE", "Khách hàng AI chưa thể phản hồi. Vui lòng thử lại.");
@@ -266,7 +295,8 @@ export class SimulationService {
         runtimeSessionId: session.runtimeSessionId,
         personaId: session.personaId,
         messages: session.messages,
-        snapshot: session.runtimeSnapshot
+        snapshot: session.runtimeSnapshot,
+        content: session.contentSnapshot
       }, true);
       throw error;
     }

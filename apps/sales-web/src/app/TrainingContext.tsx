@@ -6,7 +6,7 @@ import type { ChatMessage, TrainingMode, TrainingSession } from '../types/traini
 interface TrainingContextValue {
   session: TrainingSession | null
   messages: ChatMessage[]
-  startSession: (personaId: string, mode: TrainingMode) => Promise<TrainingSession>
+  startSession: (personaId: string, mode: TrainingMode, scenarioId?: string) => Promise<TrainingSession>
   loadSession: (sessionId: string) => Promise<TrainingSession>
   sendMessage: (sessionId: string, content: string) => Promise<void>
   stopSession: (sessionId: string) => Promise<TrainingSession>
@@ -18,8 +18,8 @@ export function TrainingProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<TrainingSession | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
 
-  const startSession = useCallback(async (personaId: string, mode: TrainingMode) => {
-    const next = await trainingService.createSession(personaId, mode)
+  const startSession = useCallback(async (personaId: string, mode: TrainingMode, scenarioId?: string) => {
+    const next = await trainingService.createSession(personaId, mode, scenarioId)
     setSession(next)
     setMessages(next.messages)
     return next

@@ -40,7 +40,7 @@ export class TrainingProgramService {
   }
 
   async list(): Promise<PublicTrainingProgram[]> {
-    return (await this.dependencies.repository.listPrograms()).map((program) => this.toPublic(program));
+    return Promise.all((await this.dependencies.repository.listPrograms()).map((program) => this.toPublic(program)));
   }
 
   async get(idInput: unknown): Promise<PublicTrainingProgram> {
@@ -49,7 +49,7 @@ export class TrainingProgramService {
 
   async create(createdByUserId: string, input: unknown): Promise<PublicTrainingProgram> {
     const normalized = this.normalizeInput(input);
-    this.validateReferences(normalized.items);
+    await this.validateReferences(normalized.items);
     const program = await this.dependencies.repository.createProgram({
       ...normalized,
       id: this.createId(),
@@ -65,7 +65,7 @@ export class TrainingProgramService {
       const current = await this.requireProgram(id);
       if (current.status !== "DRAFT") throw immutable();
       const normalized = this.normalizeInput(input);
-      this.validateReferences(normalized.items);
+      await this.validateReferences(normalized.items);
       const updated = await this.dependencies.repository.updateDraftProgram(id, current.updatedAt, {
         ...normalized,
         itemIds: normalized.items.map(() => this.createId())
@@ -83,7 +83,7 @@ export class TrainingProgramService {
       if (current.items.length === 0) {
         throw new TrainingProgramServiceError("TRAINING_PROGRAM_EMPTY", "Chương trình cần ít nhất một nội dung luyện tập trước khi xuất bản.");
       }
-      this.validateReferences(current.items);
+      await this.validateReferences(current.items);
       const published = await this.dependencies.repository.transitionProgram(id, "DRAFT", "PUBLISHED", current.updatedAt);
       if (!published) throw conflict();
       return this.toPublic(published);
@@ -133,20 +133,25 @@ export class TrainingProgramService {
         throw invalid("Thứ tự nội dung luyện tập không hợp lệ hoặc bị trùng.");
       }
       orders.add(sortOrder as number);
-      return { personaId, scenarioId, mode: mode as SimulationMode, sortOrder: sortOrder as number };
+      const personaVersionId = typeof item.personaVersionId === "string" ? item.personaVersionId.trim() : "";
+      const scenarioVersionId = typeof item.scenarioVersionId === "string" ? item.scenarioVersionId.trim() : "";
+      return { personaId, scenarioId, personaVersionId, scenarioVersionId, mode: mode as SimulationMode, sortOrder: sortOrder as number };
     });
     items.sort((a, b) => a.sortOrder - b.sortOrder || a.personaId.localeCompare(b.personaId));
     return { name, description: description || null, items: items.map((item, index) => ({ ...item, sortOrder: index + 1 })) };
   }
 
-  private validateReferences(items: Array<Pick<TrainingProgramItemInput, "personaId" | "scenarioId">>): void {
+  private async validateReferences(items: Array<Pick<TrainingProgramItemInput, "personaId" | "scenarioId" | "personaVersionId" | "scenarioVersionId">>): Promise<void> {
     for (const item of items) {
-      if (!this.dependencies.catalog.resolve(item.personaId, item.scenarioId)) {
+      const selection = await this.dependencies.catalog.resolve(item.personaId, item.scenarioId, item.personaVersionId || null, item.scenarioVersionId || null);
+      if (!selection) {
         throw new TrainingProgramServiceError(
           "INVALID_TRAINING_CONTENT_REFERENCE",
           "Persona hoặc tình huống luyện tập không tồn tại hay không tương thích."
         );
       }
+      item.personaVersionId = selection.personaVersionId || item.personaVersionId || "";
+      item.scenarioVersionId = selection.scenarioVersionId || item.scenarioVersionId || "";
     }
   }
 
@@ -163,7 +168,7 @@ export class TrainingProgramService {
     return id;
   }
 
-  private toPublic(program: TrainingProgramRecord): PublicTrainingProgram {
+  private async toPublic(program: TrainingProgramRecord): Promise<PublicTrainingProgram> {
     return {
       id: program.id,
       name: program.name,
@@ -172,18 +177,22 @@ export class TrainingProgramService {
       createdBy: { id: program.createdBy.id, displayName: program.createdBy.displayName },
       createdAt: program.createdAt,
       updatedAt: program.updatedAt,
-      items: program.items.map((item) => {
-        const selection = this.dependencies.catalog.resolve(item.personaId, item.scenarioId);
+      items: await Promise.all(program.items.map(async (item) => {
+        const selection = await this.dependencies.catalog.resolve(item.personaId, item.scenarioId, item.personaVersionId || null, item.scenarioVersionId || null);
         return {
           id: item.id,
           personaId: item.personaId,
           personaLabel: selection?.personaLabel ?? null,
           scenarioId: item.scenarioId,
           scenarioLabel: selection?.scenarioLabel ?? null,
+          personaVersionId: item.personaVersionId || selection?.personaVersionId || null,
+          personaVersion: selection?.personaVersion ?? null,
+          scenarioVersionId: item.scenarioVersionId || selection?.scenarioVersionId || null,
+          scenarioVersion: selection?.scenarioVersion ?? null,
           mode: item.mode,
           sortOrder: item.sortOrder
         };
-      })
+      }))
     };
   }
 

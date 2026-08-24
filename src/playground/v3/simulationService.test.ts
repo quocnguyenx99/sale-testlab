@@ -2,6 +2,9 @@ import { strict as assert } from "assert";
 import { InMemorySessionRepository } from "./inMemorySessionRepository";
 import { OrchestrationResult, SimulationOrchestrator } from "./simulationOrchestrator";
 import { SimulationService, SimulationServiceError } from "./simulationService";
+import { compilePersonaRuntimeConfig, compileScenarioRuntimeConfig } from "./trainingContent/trainingContentCompiler";
+import type { RuntimeContentSelection } from "./trainingContent/trainingContentDomain";
+import type { RuntimeContentResolver } from "./trainingContent/runtimeContentResolver";
 
 const persona = {
   persona_id: "persona-001",
@@ -40,16 +43,19 @@ class StubOrchestrator implements SimulationOrchestrator {
   lastRuntimeSessionId = "";
   fail = false;
   mismatch = false;
+  lastContent: RuntimeContentSelection | null = null;
 
-  async startCustomer(): Promise<OrchestrationResult> {
+  async startCustomer(_personaId?: string, content?: RuntimeContentSelection | null): Promise<OrchestrationResult> {
     this.startCalls += 1;
+    this.lastContent = content ?? null;
     if (this.fail) throw new Error("internal runtime failure");
     return result("runtime-customer-001", "Lời mở đầu từ runtime");
   }
 
-  async handleSaleMessage(input: { runtimeSessionId: string }): Promise<OrchestrationResult> {
+  async handleSaleMessage(input: { runtimeSessionId: string; content?: RuntimeContentSelection | null }): Promise<OrchestrationResult> {
     this.chatCalls += 1;
     this.lastRuntimeSessionId = input.runtimeSessionId;
+    this.lastContent = input.content ?? null;
     if (this.fail) throw new Error("internal runtime failure");
     return result(this.mismatch ? "wrong-runtime-session" : input.runtimeSessionId, "Final guarded customer response");
   }
@@ -135,6 +141,76 @@ async function main(): Promise<void> {
   await expectCode(() => service.createSession(persona.persona_id, "INVALID"), "INVALID_MODE");
   await expectCode(() => service.getSession("unknown"), "SESSION_NOT_FOUND");
   await expectCode(() => service.sendMessage(saleFirst.id, " "), "MESSAGE_REQUIRED");
+
+  const managedPersonaFields = {
+    displayName: "Managed Persona v1", buyerRole: "Buyer", organizationType: "Business",
+    difficulty: "MEDIUM" as const, summary: "Safe managed summary", productInterests: ["Printer"],
+    purchaseContext: "Office purchase", behaviorTraits: ["Careful"], commonObjections: ["Price"],
+    likelyQuestions: ["Warranty?"], trainingFocus: ["Discovery"]
+  };
+  const managedScenarioFields = {
+    title: "Managed Scenario v1", description: "Safe scenario", difficulty: "MEDIUM" as const,
+    category: "Printer", customerNeed: "Reliable printing", priorities: ["Warranty"],
+    trainingObjective: "Discover requirements", tags: ["printer"], openingExamples: ["I need a printer"]
+  };
+  const managedSelectionV1: RuntimeContentSelection = {
+    personaId: "managed-persona", personaVersionId: "persona-version-v1",
+    scenarioId: "managed-scenario", scenarioVersionId: "scenario-version-v1",
+    personaSnapshot: {
+      id: "managed-persona", displayName: "Managed Persona v1", role: "Buyer", customerType: "Business",
+      difficulty: "MEDIUM", summary: "Safe managed summary", interests: ["Printer"], scenarioContext: "Office purchase"
+    },
+    scenarioSnapshot: { id: "managed-scenario", title: "Managed Scenario v1", description: "Safe scenario", difficulty: "MEDIUM" },
+    personaRuntime: compilePersonaRuntimeConfig("managed-persona", managedPersonaFields),
+    scenarioRuntime: compileScenarioRuntimeConfig("managed-scenario", managedScenarioFields)
+  };
+  const managedSelectionV2: RuntimeContentSelection = {
+    ...managedSelectionV1,
+    personaVersionId: "persona-version-v2",
+    scenarioVersionId: "scenario-version-v2",
+    personaSnapshot: { ...managedSelectionV1.personaSnapshot, displayName: "Managed Persona v2" },
+    scenarioSnapshot: { ...managedSelectionV1.scenarioSnapshot, title: "Managed Scenario v2" }
+  };
+  let currentSelection = managedSelectionV1;
+  const managedResolver = {
+    resolveCurrent: async () => currentSelection,
+    resolvePinned: async (personaVersionId: string, scenarioVersionId: string) =>
+      personaVersionId === managedSelectionV1.personaVersionId && scenarioVersionId === managedSelectionV1.scenarioVersionId
+        ? managedSelectionV1
+        : managedSelectionV2,
+    listPublicCatalog: async () => [{
+      ...currentSelection.personaSnapshot,
+      versionId: currentSelection.personaVersionId,
+      version: currentSelection === managedSelectionV1 ? 1 : 2,
+      scenarios: [{ ...currentSelection.scenarioSnapshot, versionId: currentSelection.scenarioVersionId, version: currentSelection === managedSelectionV1 ? 1 : 2, trainingObjective: "Discover requirements", isDefault: true }]
+    }]
+  } as unknown as RuntimeContentResolver;
+  const managedRepository = new InMemorySessionRepository();
+  const managedOrchestrator = new StubOrchestrator();
+  const managedService = new SimulationService({
+    sessions: managedRepository, orchestrator: managedOrchestrator, contentResolver: managedResolver,
+    createId: () => `managed-${++id}`, now: () => new Date(Date.UTC(2026, 7, 11, 10, 0, second++))
+  });
+  const managedSessionV1 = await managedService.createSession("managed-persona", "SALE_FIRST", "managed-sale", "managed-scenario");
+  assert.equal(managedSessionV1.personaVersionId, "persona-version-v1");
+  assert.equal(managedSessionV1.scenarioVersionId, "scenario-version-v1");
+  assert.deepEqual(managedSessionV1.contentSnapshot, managedSelectionV1);
+
+  currentSelection = managedSelectionV2;
+  const recoveredService = new SimulationService({
+    sessions: managedRepository, orchestrator: managedOrchestrator, contentResolver: managedResolver,
+    createId: () => `recovered-${++id}`
+  });
+  await recoveredService.sendMessage(managedSessionV1.id, "Continue pinned session", undefined, "managed-sale");
+  assert.equal(managedOrchestrator.lastContent?.personaVersionId, "persona-version-v1", "Session snapshot must remain Runtime execution authority after newer versions publish");
+
+  const assignedPinned = await recoveredService.createAssignedSession("managed-persona", "SALE_FIRST", "managed-sale", {
+    trainingAssignmentId: "assignment-v1", trainingProgramItemId: "item-v1",
+    personaVersionId: "persona-version-v1", scenarioVersionId: "scenario-version-v1"
+  });
+  assert.equal(assignedPinned.personaVersionId, "persona-version-v1");
+  assert.equal(assignedPinned.scenarioVersionId, "scenario-version-v1");
+  assert.equal(assignedPinned.personaSnapshot.displayName, "Managed Persona v1");
 
   console.log("V3 SimulationService session consistency tests: PASS");
 }

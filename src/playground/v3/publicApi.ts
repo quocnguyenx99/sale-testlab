@@ -22,6 +22,7 @@ export type { EnrichedPersonaSource } from "./simulationSession";
 import {
   toPublicChatMessage,
   toPublicPersona,
+  toPublicPersonaOption,
   toPublicRecentSession,
   toPublicRuntimeInsight,
   toPublicSession,
@@ -38,6 +39,7 @@ import { ProgressService } from "./progress/progressService";
 import { AuthorizationError, requireCapability } from "./authorizationPolicy";
 import { TrainingProgramService, TrainingProgramServiceError } from "./trainingPrograms/trainingProgramService";
 import { TrainingAssignmentService, TrainingAssignmentServiceError } from "./trainingAssignments/trainingAssignmentService";
+import { TrainingContentService, TrainingContentServiceError } from "./trainingContent/trainingContentService";
 
 const AUTH_COOKIE = "testlab_session";
 
@@ -160,8 +162,8 @@ function historyQuery(url: URL): SessionHistoryQuery {
   };
 }
 
-export function createV3Api(dependencies: { service: SimulationService; auth: AuthService; evaluationService?: EvaluationService; coachingService?: CoachingService; progressService?: ProgressService; trainingProgramService?: TrainingProgramService; trainingAssignmentService?: TrainingAssignmentService }) {
-  const { service, auth, evaluationService, coachingService, progressService, trainingProgramService, trainingAssignmentService } = dependencies;
+export function createV3Api(dependencies: { service: SimulationService; auth: AuthService; evaluationService?: EvaluationService; coachingService?: CoachingService; progressService?: ProgressService; trainingProgramService?: TrainingProgramService; trainingAssignmentService?: TrainingAssignmentService; trainingContentService?: TrainingContentService }) {
+  const { service, auth, evaluationService, coachingService, progressService, trainingProgramService, trainingAssignmentService, trainingContentService } = dependencies;
   return async function handleV3Request(req: http.IncomingMessage, res: http.ServerResponse): Promise<boolean> {
     const url = new URL(req.url || "/", "http://localhost");
     const pathname = url.pathname;
@@ -188,6 +190,60 @@ export function createV3Api(dependencies: { service: SimulationService; auth: Au
       }
 
       const currentUser = await auth.currentUser(cookie(req, AUTH_COOKIE));
+
+      if (pathname === "/api/v3/manage/personas" && (req.method === "GET" || req.method === "POST")) {
+        requireCapability(currentUser, "MANAGE_PERSONAS");
+        if (!trainingContentService) throw new HttpRequestError(503, "TRAINING_CONTENT_UNAVAILABLE", "Nội dung đào tạo tạm thời chưa sẵn sàng.");
+        if (req.method === "GET") sendJson(res, 200, { personas: await trainingContentService.listPersonas() });
+        else sendJson(res, 201, { persona: await trainingContentService.createPersona(currentUser.id, await readJsonBody(req)) });
+        return true;
+      }
+
+      if (pathname === "/api/v3/manage/scenarios" && (req.method === "GET" || req.method === "POST")) {
+        requireCapability(currentUser, "MANAGE_SCENARIOS");
+        if (!trainingContentService) throw new HttpRequestError(503, "TRAINING_CONTENT_UNAVAILABLE", "Nội dung đào tạo tạm thời chưa sẵn sàng.");
+        if (req.method === "GET") sendJson(res, 200, { scenarios: await trainingContentService.listScenarios() });
+        else sendJson(res, 201, { scenario: await trainingContentService.createScenario(currentUser.id, await readJsonBody(req)) });
+        return true;
+      }
+
+      const personaVersionPublish = pathname.match(/^\/api\/v3\/manage\/personas\/([^/]+)\/versions\/([^/]+)\/publish$/);
+      const personaVersion = pathname.match(/^\/api\/v3\/manage\/personas\/([^/]+)\/versions\/([^/]+)$/);
+      const personaVersions = pathname.match(/^\/api\/v3\/manage\/personas\/([^/]+)\/versions$/);
+      const personaArchive = pathname.match(/^\/api\/v3\/manage\/personas\/([^/]+)\/archive$/);
+      const personaLinks = pathname.match(/^\/api\/v3\/manage\/personas\/([^/]+)\/scenarios$/);
+      const managedPersona = pathname.match(/^\/api\/v3\/manage\/personas\/([^/]+)$/);
+      if (personaVersionPublish || personaVersion || personaVersions || personaArchive || personaLinks || managedPersona) {
+        requireCapability(currentUser, "MANAGE_PERSONAS");
+        if (!trainingContentService) throw new HttpRequestError(503, "TRAINING_CONTENT_UNAVAILABLE", "Nội dung đào tạo tạm thời chưa sẵn sàng.");
+        if (personaVersionPublish && req.method === "POST") sendJson(res, 200, { persona: await trainingContentService.publishPersona(decodeURIComponent(personaVersionPublish[1]), decodeURIComponent(personaVersionPublish[2]), await readJsonBody(req)) });
+        else if (personaVersion && req.method === "PUT") sendJson(res, 200, { persona: await trainingContentService.updatePersona(decodeURIComponent(personaVersion[1]), decodeURIComponent(personaVersion[2]), await readJsonBody(req)) });
+        else if (personaVersion && req.method === "DELETE") { await trainingContentService.deletePersonaDraft(decodeURIComponent(personaVersion[1]), decodeURIComponent(personaVersion[2])); sendJson(res, 200, { ok: true }); }
+        else if (personaVersions && req.method === "POST") sendJson(res, 201, { persona: await trainingContentService.createPersonaVersion(currentUser.id, decodeURIComponent(personaVersions[1])) });
+        else if (personaArchive && req.method === "POST") { await trainingContentService.archivePersona(decodeURIComponent(personaArchive[1])); sendJson(res, 200, { ok: true }); }
+        else if (personaLinks && req.method === "PUT") sendJson(res, 200, { persona: await trainingContentService.replaceLinks(decodeURIComponent(personaLinks[1]), await readJsonBody(req)) });
+        else if (managedPersona && req.method === "GET") sendJson(res, 200, { persona: await trainingContentService.getPersona(decodeURIComponent(managedPersona[1]), url.searchParams.get("versionId")) });
+        else throw new HttpRequestError(404, "NOT_FOUND", "API không tồn tại.");
+        return true;
+      }
+
+      const scenarioVersionPublish = pathname.match(/^\/api\/v3\/manage\/scenarios\/([^/]+)\/versions\/([^/]+)\/publish$/);
+      const scenarioVersion = pathname.match(/^\/api\/v3\/manage\/scenarios\/([^/]+)\/versions\/([^/]+)$/);
+      const scenarioVersions = pathname.match(/^\/api\/v3\/manage\/scenarios\/([^/]+)\/versions$/);
+      const scenarioArchive = pathname.match(/^\/api\/v3\/manage\/scenarios\/([^/]+)\/archive$/);
+      const managedScenario = pathname.match(/^\/api\/v3\/manage\/scenarios\/([^/]+)$/);
+      if (scenarioVersionPublish || scenarioVersion || scenarioVersions || scenarioArchive || managedScenario) {
+        requireCapability(currentUser, "MANAGE_SCENARIOS");
+        if (!trainingContentService) throw new HttpRequestError(503, "TRAINING_CONTENT_UNAVAILABLE", "Nội dung đào tạo tạm thời chưa sẵn sàng.");
+        if (scenarioVersionPublish && req.method === "POST") sendJson(res, 200, { scenario: await trainingContentService.publishScenario(decodeURIComponent(scenarioVersionPublish[1]), decodeURIComponent(scenarioVersionPublish[2]), await readJsonBody(req)) });
+        else if (scenarioVersion && req.method === "PUT") sendJson(res, 200, { scenario: await trainingContentService.updateScenario(decodeURIComponent(scenarioVersion[1]), decodeURIComponent(scenarioVersion[2]), await readJsonBody(req)) });
+        else if (scenarioVersion && req.method === "DELETE") { await trainingContentService.deleteScenarioDraft(decodeURIComponent(scenarioVersion[1]), decodeURIComponent(scenarioVersion[2])); sendJson(res, 200, { ok: true }); }
+        else if (scenarioVersions && req.method === "POST") sendJson(res, 201, { scenario: await trainingContentService.createScenarioVersion(currentUser.id, decodeURIComponent(scenarioVersions[1])) });
+        else if (scenarioArchive && req.method === "POST") { await trainingContentService.archiveScenario(decodeURIComponent(scenarioArchive[1])); sendJson(res, 200, { ok: true }); }
+        else if (managedScenario && req.method === "GET") sendJson(res, 200, { scenario: await trainingContentService.getScenario(decodeURIComponent(managedScenario[1]), url.searchParams.get("versionId")) });
+        else throw new HttpRequestError(404, "NOT_FOUND", "API không tồn tại.");
+        return true;
+      }
 
       if (req.method === "GET" && pathname === "/api/v3/training-assignees") {
         requireCapability(currentUser, "ASSIGN_TRAINING");
@@ -326,20 +382,29 @@ export function createV3Api(dependencies: { service: SimulationService; auth: Au
       }
 
       if (req.method === "GET" && pathname === "/api/v3/personas") {
-        sendJson(res, 200, { personas: service.listPersonas().map(toPublicPersona) });
+        const personas = trainingContentService
+          ? (await trainingContentService.listPublic()).map(toPublicPersonaOption)
+          : (await service.listPersonas()).map(toPublicPersona);
+        sendJson(res, 200, { personas });
         return true;
       }
 
       const personaMatch = pathname.match(/^\/api\/v3\/personas\/([^/]+)$/);
       if (req.method === "GET" && personaMatch) {
-        sendJson(res, 200, { persona: toPublicPersona(service.getPersona(decodeURIComponent(personaMatch[1]))) });
+        const personaId = decodeURIComponent(personaMatch[1]);
+        if (trainingContentService) {
+          const persona = (await trainingContentService.listPublic()).find((item) => item.id === personaId);
+          if (!persona) throw new SimulationServiceError("PERSONA_NOT_FOUND", "Không tìm thấy khách hàng AI.");
+          sendJson(res, 200, { persona: toPublicPersonaOption(persona) });
+        } else sendJson(res, 200, { persona: toPublicPersona(await service.getPersona(personaId)) });
         return true;
       }
 
       if (req.method === "POST" && pathname === "/api/v3/sessions") {
         const body = await readJsonBody(req);
         const personaId = typeof body.personaId === "string" ? body.personaId.trim() : "";
-        const session = await service.createSession(personaId, body.mode, currentUser.id);
+        const scenarioId = typeof body.scenarioId === "string" ? body.scenarioId.trim() : null;
+        const session = await service.createSession(personaId, body.mode, currentUser.id, scenarioId);
         sendJson(res, 201, { session: toPublicSession(session) });
         return true;
       }
@@ -410,6 +475,11 @@ export function createV3Api(dependencies: { service: SimulationService; auth: Au
           ? 404
           : error.code === "INVALID_TRAINING_PROGRAM_INPUT" || error.code === "INVALID_TRAINING_CONTENT_REFERENCE"
             ? 400
+            : 409;
+        sendJson(res, status, { error: { code: error.code, message: error.message } });
+      } else if (error instanceof TrainingContentServiceError) {
+        const status = error.code === "CONTENT_NOT_FOUND" ? 404
+          : error.code === "INVALID_CONTENT_INPUT" || error.code === "INVALID_CONTENT_LINKS" ? 400
             : 409;
         sendJson(res, status, { error: { code: error.code, message: error.message } });
       } else if (error instanceof TrainingAssignmentServiceError) {

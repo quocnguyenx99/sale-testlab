@@ -68,7 +68,7 @@ function scoreScenario(scenario: ProductScenario, persona: OpeningPersona): numb
   return score;
 }
 
-function findScenario(persona: OpeningPersona): ProductScenario {
+export function findScenario(persona: OpeningPersona): ProductScenario {
   let best = FALLBACK_SCENARIO;
   let bestScore = 0;
 
@@ -203,7 +203,7 @@ function renderOpening(text: string, identity: ReturnType<typeof buildIdentityPr
     .replaceAll("{product}", product);
 }
 
-export function buildCustomerOpeningEnriched(persona: OpeningPersona): {
+export function buildCustomerOpeningEnriched(persona: OpeningPersona, selectedScenario?: ProductScenario): {
   text: string;
   state: RuntimeState;
   scenario_context: ProductScenario;
@@ -215,7 +215,7 @@ export function buildCustomerOpeningEnriched(persona: OpeningPersona): {
   selected_catalog_price_available: boolean;
   selected_catalog_stock_status_present: boolean;
 } {
-  const scenario = findScenario(persona);
+  const scenario = selectedScenario ?? findScenario(persona);
   const seed = stableHash(`${persona.persona_id || "unknown_persona"}:${scenario.scenario_id}`);
   const identity = buildIdentityProfileFromPersona(persona, undefined, false);
   const voiceGroup = inferVoiceGroup(persona);

@@ -101,6 +101,48 @@ async function main(): Promise<void> {
   referenceAvailable = false;
   await expectCode(expiringReferenceService.publish(expiredReferenceDraft.id), "INVALID_TRAINING_CONTENT_REFERENCE");
 
+  let latestVersion = 1;
+  let currentContentAvailable = true;
+  const versionedProgramService = new TrainingProgramService({
+    repository: new InMemoryTrainingProgramRepository({ manager: "Manager" }),
+    catalog: {
+      resolve: (personaId, scenarioId, personaVersionId, scenarioVersionId) => {
+        if (personaId !== "versioned-persona" || scenarioId !== "versioned-scenario") return null;
+        const requestedVersion = personaVersionId && scenarioVersionId
+          ? Number(personaVersionId.slice(-1))
+          : currentContentAvailable ? latestVersion : 0;
+        if (!requestedVersion || personaVersionId && scenarioVersionId && personaVersionId !== `persona-v${requestedVersion}`) return null;
+        return {
+          personaId, personaLabel: `Persona v${requestedVersion}`, scenarioId, scenarioLabel: `Scenario v${requestedVersion}`,
+          personaVersionId: `persona-v${requestedVersion}`, personaVersion: requestedVersion,
+          scenarioVersionId: `scenario-v${requestedVersion}`, scenarioVersion: requestedVersion
+        };
+      }
+    },
+    createId: () => `versioned-${++sequence}`
+  });
+  const v1Draft = await versionedProgramService.create("manager", {
+    name: "Pinned v1", description: null,
+    items: [{ personaId: "versioned-persona", scenarioId: "versioned-scenario", mode: "SALE_FIRST", sortOrder: 1 }]
+  });
+  assert.equal(v1Draft.items[0].personaVersionId, "persona-v1");
+  assert.equal(v1Draft.items[0].scenarioVersionId, "scenario-v1");
+  const v1Published = await versionedProgramService.publish(v1Draft.id);
+  latestVersion = 2;
+  assert.equal((await versionedProgramService.get(v1Published.id)).items[0].personaVersionId, "persona-v1", "Published Program must not auto-repin");
+  const v2Draft = await versionedProgramService.create("manager", {
+    name: "Latest v2", description: null,
+    items: [{ personaId: "versioned-persona", scenarioId: "versioned-scenario", mode: "SALE_FIRST", sortOrder: 1 }]
+  });
+  assert.equal(v2Draft.items[0].personaVersionId, "persona-v2");
+  assert.equal(v2Draft.items[0].scenarioVersionId, "scenario-v2");
+  currentContentAvailable = false;
+  assert.equal((await versionedProgramService.get(v1Published.id)).items[0].personaVersionId, "persona-v1", "Archived content must remain readable through an existing pin");
+  await expectCode(versionedProgramService.create("manager", {
+    name: "Archived unavailable", description: null,
+    items: [{ personaId: "versioned-persona", scenarioId: "versioned-scenario", mode: "SALE_FIRST", sortOrder: 1 }]
+  }), "INVALID_TRAINING_CONTENT_REFERENCE");
+
   assert.deepEqual((await service.list()).map((program) => program.id), [draft.id]);
   assert(!JSON.stringify(archived).match(/prompt|memory|runtimeSnapshot|tokenHash|passwordHash/i));
   console.log("Phase 10B TrainingProgram domain/service tests: PASS");

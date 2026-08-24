@@ -17,6 +17,8 @@ interface DraftItem {
   key: string
   personaId: string
   scenarioId: string
+  personaVersionId?: string
+  scenarioVersionId?: string
   mode: TrainingMode
 }
 
@@ -54,14 +56,14 @@ export function TrainingProgramEditorPage() {
     setProgram(next)
     setName(next.name)
     setDescription(next.description ?? '')
-    setItems(next.items.map((item) => ({ key: item.id, personaId: item.personaId, scenarioId: item.scenarioId, mode: item.mode })))
+    setItems(next.items.map((item) => ({ key: item.id, personaId: item.personaId, scenarioId: item.scenarioId, personaVersionId: item.personaVersionId ?? undefined, scenarioVersionId: item.scenarioVersionId ?? undefined, mode: item.mode })))
   }
 
   function addItem() {
     const persona = personas[0]
     if (!persona) return
     setItems((current) => [...current, {
-      key: crypto.randomUUID(), personaId: persona.id, scenarioId: persona.defaultScenario.id, mode: 'SALE_FIRST',
+      key: crypto.randomUUID(), personaId: persona.id, scenarioId: persona.defaultScenario.id, personaVersionId: persona.versionId, scenarioVersionId: persona.defaultScenario.versionId, mode: 'SALE_FIRST',
     }])
   }
 
@@ -71,7 +73,13 @@ export function TrainingProgramEditorPage() {
 
   function selectPersona(index: number, personaId: string) {
     const persona = personaById.get(personaId)
-    if (persona) updateItem(index, { personaId, scenarioId: persona.defaultScenario.id })
+    if (persona) updateItem(index, { personaId, scenarioId: persona.defaultScenario.id, personaVersionId: persona.versionId, scenarioVersionId: persona.defaultScenario.versionId })
+  }
+
+  function selectScenario(index: number, scenarioId: string) {
+    const persona = personaById.get(items[index].personaId)
+    const scenario = persona?.scenarios?.find((candidate) => candidate.id === scenarioId)
+    if (scenario) updateItem(index, { scenarioId, scenarioVersionId: scenario.versionId })
   }
 
   function move(index: number, direction: -1 | 1) {
@@ -92,7 +100,7 @@ export function TrainingProgramEditorPage() {
       name,
       description: description.trim() || null,
       items: items.map((item, index) => ({
-        personaId: item.personaId, scenarioId: item.scenarioId, mode: item.mode, sortOrder: index + 1,
+        personaId: item.personaId, scenarioId: item.scenarioId, personaVersionId: item.personaVersionId, scenarioVersionId: item.scenarioVersionId, mode: item.mode, sortOrder: index + 1,
       })),
     }
     try {
@@ -182,6 +190,12 @@ export function TrainingProgramEditorPage() {
             </div>
           ) : items.map((item, index) => {
             const persona = personaById.get(item.personaId)
+            const scenario = persona?.scenarios?.find((candidate) => candidate.id === item.scenarioId) ?? persona?.defaultScenario
+            const persistedItem = program?.items[index]
+            const hasNewerSelection = Boolean(
+              editable && item.personaVersionId && item.scenarioVersionId &&
+              (item.personaVersionId !== persona?.versionId || item.scenarioVersionId !== scenario?.versionId)
+            )
             return (
               <div key={item.key} className="rounded-xl border border-border bg-surface-subtle/35 p-4">
                 <div className="flex items-center justify-between gap-3">
@@ -196,12 +210,14 @@ export function TrainingProgramEditorPage() {
                   <label className="grid gap-1.5 text-xs font-semibold text-ink-secondary">
                     Persona
                     {editable ? <Select aria-label={`Persona nội dung ${index + 1}`} value={item.personaId} onChange={(event) => selectPersona(index, event.target.value)}>
-                      {personas.map((option) => <option key={option.id} value={option.id}>{option.displayName}</option>)}
-                    </Select> : <p className="rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink">{persona?.displayName ?? item.personaId}</p>}
+                      {personas.map((option) => <option key={option.id} value={option.id}>{option.id === item.personaId && item.personaVersionId !== option.versionId ? `${persistedItem?.personaLabel ?? option.displayName} · v${persistedItem?.personaVersion ?? 1} · Đã ghim` : `${option.displayName} · v${option.version ?? 1}`}</option>)}
+                    </Select> : <p className="rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink">{persistedItem?.personaLabel ?? persona?.displayName ?? item.personaId} · v{persistedItem?.personaVersion ?? 1} · Đã ghim</p>}
                   </label>
                   <label className="grid gap-1.5 text-xs font-semibold text-ink-secondary">
                     Tình huống
-                    <p className="min-h-10 rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink">{persona?.defaultScenario.title ?? item.scenarioId}</p>
+                    {editable ? <Select aria-label={`Tình huống nội dung ${index + 1}`} value={item.scenarioId} onChange={(event) => selectScenario(index, event.target.value)}>
+                      {(persona?.scenarios ?? [persona?.defaultScenario].filter(Boolean)).map((option) => option && <option key={option.id} value={option.id}>{option.id === item.scenarioId && item.scenarioVersionId !== option.versionId ? `${persistedItem?.scenarioLabel ?? option.title} · v${persistedItem?.scenarioVersion ?? 1} · Đã ghim` : `${option.title} · v${option.version ?? 1}`}</option>)}
+                    </Select> : <p className="min-h-10 rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink">{persistedItem?.scenarioLabel ?? scenario?.title ?? item.scenarioId} · v{persistedItem?.scenarioVersion ?? 1} · Đã ghim</p>}
                   </label>
                   <label className="grid gap-1.5 text-xs font-semibold text-ink-secondary">
                     Chế độ
@@ -211,6 +227,7 @@ export function TrainingProgramEditorPage() {
                     </Select> : <p className="rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink">{item.mode === 'SALE_FIRST' ? 'Bạn mở lời' : 'Khách hàng mở lời'}</p>}
                   </label>
                 </div>
+                {hasNewerSelection && <Button className="mt-3" size="sm" variant="secondary" onClick={() => selectPersona(index, item.personaId)}>Dùng phiên bản mới nhất</Button>}
               </div>
             )
           })}

@@ -11,8 +11,8 @@ ROLE_LABELS = {
 BASE_NAV = ["/dashboard", "/customers", "/practice/new", "/history", "/progress"]
 EXPECTED_NAV = {
     "SALE": [*BASE_NAV, "/my-training-assignments"],
-    "MANAGER": [*BASE_NAV, "/training-programs", "/training-assignments"],
-    "ADMIN": [*BASE_NAV, "/training-programs", "/training-assignments"],
+    "MANAGER": [*BASE_NAV, "/training-programs", "/training-assignments", "/manage/personas", "/manage/scenarios"],
+    "ADMIN": [*BASE_NAV, "/training-programs", "/training-assignments", "/manage/personas", "/manage/scenarios"],
 }
 PROGRESS = {
     "evaluatorVersion": "testlab-evaluator-v1",

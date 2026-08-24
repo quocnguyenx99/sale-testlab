@@ -30,6 +30,10 @@ export interface PublicManagedTrainingAssignment {
     personaLabel: string | null;
     scenarioId: string;
     scenarioLabel: string | null;
+    personaVersionId: string | null;
+    personaVersion: number | null;
+    scenarioVersionId: string | null;
+    scenarioVersion: number | null;
     mode: PublicTrainingMode;
     state: PublicTrainingAssignmentItemState;
   }>;
@@ -53,6 +57,10 @@ export interface PublicTrainingProgram {
     personaLabel: string | null;
     scenarioId: string;
     scenarioLabel: string | null;
+    personaVersionId: string | null;
+    personaVersion: number | null;
+    scenarioVersionId: string | null;
+    scenarioVersion: number | null;
     mode: PublicTrainingMode;
     sortOrder: number;
   }>;
@@ -157,6 +165,10 @@ export interface PublicScenario {
   title: string;
   description: string;
   difficulty: "EASY" | "MEDIUM" | "HARD";
+  versionId?: string;
+  version?: number;
+  trainingObjective?: string;
+  isDefault?: boolean;
 }
 
 export interface PublicPersona {
@@ -169,6 +181,9 @@ export interface PublicPersona {
   interests: string[];
   scenarioContext: string;
   defaultScenario: PublicScenario;
+  versionId?: string;
+  version?: number;
+  scenarios?: PublicScenario[];
 }
 
 export interface PublicChatMessage {
