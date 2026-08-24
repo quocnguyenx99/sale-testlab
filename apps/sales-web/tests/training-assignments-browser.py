@@ -217,7 +217,7 @@ with sync_playwright() as playwright:
     manager_requests = []
     install_api(manager, "MANAGER", manager_requests)
     login(manager, "MANAGER")
-    manager.get_by_role("link", name="Phân công đào tạo").click()
+    manager.get_by_role("link", name="Phân công", exact=True).click()
     manager.get_by_role("heading", name="Chưa có phân công đào tạo").wait_for()
     manager.get_by_role("button", name="Tạo phân công đầu tiên").click()
     manager.get_by_label("Nhân viên SALE").select_option(USERS["SALE"]["id"])
@@ -234,7 +234,21 @@ with sync_playwright() as playwright:
     manager.get_by_label("Hủy phân công Program B").click()
     manager.get_by_text("Đã hủy", exact=True).wait_for()
     manager.set_viewport_size({"width": 390, "height": 844})
-    assert manager.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    overflow = manager.evaluate("""() => ({
+        viewport: window.innerWidth,
+        document: document.documentElement.scrollWidth,
+        offenders: [...document.querySelectorAll('*')]
+            .filter((element) => element.getBoundingClientRect().right > window.innerWidth + 1)
+            .slice(0, 8)
+            .map((element) => ({
+                tag: element.tagName,
+                text: element.textContent?.trim(),
+                aria: element.getAttribute('aria-label'),
+                rect: element.getBoundingClientRect().toJSON(),
+                className: String(element.className)
+            }))
+    })""")
+    assert overflow["document"] <= overflow["viewport"], overflow
     assert_no_new_ai(manager_requests)
     manager.close()
 
@@ -242,7 +256,7 @@ with sync_playwright() as playwright:
     sale_requests = []
     install_api(sale, "SALE", sale_requests)
     login(sale, "SALE")
-    assert sale.get_by_role("link", name="Phân công đào tạo").count() == 0
+    assert sale.get_by_role("link", name="Phân công", exact=True).count() == 0
     sale.get_by_role("link", name="Bài tập được giao").click()
     sale.get_by_text("Program A", exact=True).wait_for()
     sale.get_by_role("button", name="Xem bài tập").first.click()
@@ -274,7 +288,7 @@ with sync_playwright() as playwright:
     login(admin, "ADMIN")
     assert admin.get_by_role("link", name="Bài tập được giao").count() == 0
     admin.locator("header button").click()
-    admin.locator("aside").nth(1).get_by_role("link", name="Phân công đào tạo").click()
+    admin.locator("aside").nth(1).get_by_role("link", name="Phân công", exact=True).click()
     admin.get_by_role("button", name="Phân công chương trình").click()
     admin.get_by_label("Nhân viên SALE").select_option(USERS["SALE_B"]["id"])
     admin.get_by_label("Chương trình đã xuất bản").select_option("program-b")

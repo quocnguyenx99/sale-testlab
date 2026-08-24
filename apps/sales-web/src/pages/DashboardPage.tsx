@@ -248,7 +248,7 @@ export function DashboardPage() {
       />
 
       {/* Primary Practice CTA */}
-      <Card className="border border-brand-border/60 bg-gradient-to-br from-brand-soft/40 via-surface to-surface p-6 sm:p-7">
+      <Card className="border-brand-border bg-brand-subtle p-6 sm:p-7">
         <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-center">
           <div className="max-w-2xl">
             <div className="inline-flex items-center gap-1.5 rounded-md border border-brand-border bg-brand-soft px-2.5 py-0.5 text-xs font-semibold text-brand">

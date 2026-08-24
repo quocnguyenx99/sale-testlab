@@ -238,6 +238,10 @@ with sync_playwright() as playwright:
     assert dialog.evaluate("node => node.contains(document.activeElement)")
     dialog_page.keyboard.press("Escape")
     dialog.wait_for(state="detached")
+    dialog_page.wait_for_function(
+        "element => element === document.activeElement",
+        arg=dialog_trigger.element_handle(),
+    )
     assert dialog_trigger.evaluate("node => node === document.activeElement")
     assert dialog_page.evaluate("document.body.style.overflow") == ""
     assert_safe_requests(dialog_requests)

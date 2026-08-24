@@ -5,7 +5,7 @@ External products are principles, not pixel-copy sources. Existing TestLab behav
 | TestLab area | Zalo principle | Haravan principle | Corporate EDU principle | V3 implementation rule |
 | --- | --- | --- | --- | --- |
 | Brand | decisive familiar blue | consistent operational accent | credible institutional tone | `#0068FF` primary; no indigo/purple gradient |
-| Typography | high Vietnamese readability | compact labels and tables | calm long-form learning copy | Be Vietnam Pro Variable; 12px metadata minimum |
+| Typography | high Vietnamese readability | compact labels and tables | calm long-form learning copy | Inter Variable with Vietnamese subset; 12px metadata minimum |
 | App shell | mobile clarity | grouped operational navigation | learner context persists | 248px / 72px / drawer at canonical breakpoints |
 | Primary navigation | direct destinations | task-based groups | learning before administration | Dashboard standalone; training, tracking, management groups |
 | Mobile navigation | obvious drawer action | compact workspace | maintain learning context | max 288px drawer; no bottom nav; full keyboard contract |

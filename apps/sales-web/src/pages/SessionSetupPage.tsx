@@ -102,9 +102,9 @@ export function SessionSetupPage() {
         description="Kiểm tra bối cảnh và chọn cách bắt đầu trước khi bước vào hội thoại."
       />
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_1.35fr]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(280px,0.82fr)_minmax(0,1.35fr)]">
         {/* Left Column: Selected Persona Summary */}
-        <Card className="p-6 h-fit">
+        <Card className="h-fit p-6 lg:sticky lg:top-20">
           <div className="flex items-center justify-between">
             <p className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
               Khách hàng đã chọn
@@ -211,7 +211,7 @@ export function SessionSetupPage() {
                       <Icon className="h-4 w-4" />
                     </div>
                     <p className="font-bold text-sm text-ink">{title}</p>
-                    <p className="mt-0.5 text-xs font-bold text-brand">{label}</p>
+                    <p className="mt-0.5 text-xs font-semibold text-brand">{label}</p>
                     <p className="mt-1.5 text-xs leading-relaxed text-ink-secondary">
                       {description}
                     </p>
