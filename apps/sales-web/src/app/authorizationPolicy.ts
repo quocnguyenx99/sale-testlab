@@ -8,6 +8,7 @@ export const UI_CAPABILITIES = [
   'ASSIGN_TRAINING',
   'MANAGE_PERSONAS',
   'MANAGE_SCENARIOS',
+  'VIEW_LEADERBOARD',
   'MANAGE_USERS',
   'MANAGE_SYSTEM',
 ] as const
@@ -17,13 +18,14 @@ export type UiCapability = (typeof UI_CAPABILITIES)[number]
 const capabilities = (...values: UiCapability[]): readonly UiCapability[] => Object.freeze(values)
 
 export const ROLE_UI_CAPABILITIES: Readonly<Record<UserRole, readonly UiCapability[]>> = Object.freeze({
-  SALE: capabilities('USE_OWN_TRAINING'),
+  SALE: capabilities('USE_OWN_TRAINING', 'VIEW_LEADERBOARD'),
   MANAGER: capabilities(
     'USE_OWN_TRAINING',
     'MANAGE_TRAINING_PROGRAMS',
     'ASSIGN_TRAINING',
     'MANAGE_PERSONAS',
     'MANAGE_SCENARIOS',
+    'VIEW_LEADERBOARD',
   ),
   ADMIN: UI_CAPABILITIES,
 })

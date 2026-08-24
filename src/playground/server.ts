@@ -84,6 +84,8 @@ import { TrainingAssignmentService } from "./v3/trainingAssignments/trainingAssi
 import { DatabaseTrainingContentRepository } from "./v3/trainingContent/databaseTrainingContentRepository";
 import { RuntimeContentResolver, scenarioForRuntimeExecution } from "./v3/trainingContent/runtimeContentResolver";
 import { TrainingContentService } from "./v3/trainingContent/trainingContentService";
+import { DatabaseGamificationRepository } from "./v3/gamification/databaseGamificationRepository";
+import { GamificationService } from "./v3/gamification/gamificationService";
 import {
   rebuildRuntimeState,
   RuntimeRecoverySnapshot,
@@ -1458,6 +1460,7 @@ async function main(): Promise<void> {
   const v3ProgressService = new ProgressService({
     repository: new DatabaseProgressRepository(prisma)
   });
+  const v3GamificationService = new GamificationService(new DatabaseGamificationRepository(prisma));
   const trainingProgramCatalog = {
       resolve: async (personaId: string, scenarioId: string, personaVersionId?: string | null, scenarioVersionId?: string | null) => {
         const selection = personaVersionId && scenarioVersionId
@@ -1492,7 +1495,8 @@ async function main(): Promise<void> {
     progressService: v3ProgressService,
     trainingProgramService: v3TrainingProgramService,
     trainingAssignmentService: v3TrainingAssignmentService,
-    trainingContentService: v3TrainingContentService
+    trainingContentService: v3TrainingContentService,
+    gamificationService: v3GamificationService
   });
 
   const server = http.createServer(async (req, res) => {

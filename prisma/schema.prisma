@@ -65,6 +65,17 @@ enum TrainingContentDifficulty {
   HARD
 }
 
+enum GamificationEventType {
+  SESSION_XP
+  ASSIGNMENT_XP
+}
+
+enum GamificationCreditStatus {
+  AWARDED
+  REPEAT_CONTENT
+  DAILY_CAP
+}
+
 model User {
   id           String              @id @default(uuid()) @db.Char(36)
   email        String              @unique @db.VarChar(255)
@@ -84,6 +95,7 @@ model User {
   personaVersionsCreated PersonaVersion[]
   scenariosCreated Scenario[]
   scenarioVersionsCreated ScenarioVersion[]
+  gamificationEvents GamificationEvent[]
 
   @@map("users")
 }
@@ -131,6 +143,7 @@ model SimulationSession {
   trainingProgramItem TrainingProgramItem? @relation(fields: [trainingProgramItemId], references: [id], onDelete: Restrict, map: "sim_sessions_program_item_fkey")
   personaVersion PersonaVersion? @relation(fields: [personaVersionId], references: [id], onDelete: Restrict, map: "sim_sessions_persona_version_fkey")
   scenarioVersion ScenarioVersion? @relation(fields: [scenarioVersionId], references: [id], onDelete: Restrict, map: "sim_sessions_scenario_version_fkey")
+  gamificationEvents GamificationEvent[]
 
   @@index([userId, createdAt])
   @@index([trainingAssignmentId, status], map: "sim_sessions_assignment_status_idx")
@@ -155,6 +168,7 @@ model SessionEvaluation {
   updatedAt        DateTime           @updatedAt @map("updated_at")
   session          SimulationSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   coachingFeedback SessionCoachingFeedback[]
+  gamificationEvents GamificationEvent[]
 
   @@unique([sessionId, evaluatorVersion])
   @@index([status, overallScore])
@@ -367,6 +381,7 @@ model TrainingAssignment {
   assignedTo       User               @relation("TrainingAssignmentAssignee", fields: [assignedToUserId], references: [id], onDelete: Restrict)
   assignedBy       User               @relation("TrainingAssignmentAssigner", fields: [assignedByUserId], references: [id], onDelete: Restrict)
   sessions         SimulationSession[]
+  gamificationEvents GamificationEvent[]
 
   @@index([programId])
   @@index([assignedToUserId, createdAt], map: "assignments_assignee_created_idx")
@@ -374,4 +389,33 @@ model TrainingAssignment {
   @@index([cancelledAt])
   @@index([dueAt])
   @@map("training_assignments")
+}
+
+model GamificationEvent {
+  id                   String                      @id @default(uuid()) @db.Char(36)
+  userId               String                      @map("user_id") @db.Char(36)
+  eventType            GamificationEventType       @map("event_type")
+  creditStatus         GamificationCreditStatus    @map("credit_status")
+  ruleVersion          String                      @map("rule_version") @db.VarChar(80)
+  points               Int
+  occurredAt           DateTime                    @map("occurred_at")
+  activityDate         DateTime                    @map("activity_date") @db.Date
+  contentKeyHash       String?                     @map("content_key_hash") @db.Char(64)
+  sourceSessionId      String?                     @map("source_session_id") @db.Char(36)
+  sourceEvaluationId   String?                     @unique(map: "gamification_events_source_evaluation_key") @map("source_evaluation_id") @db.Char(36)
+  sourceAssignmentId   String?                     @map("source_assignment_id") @db.Char(36)
+  createdAt            DateTime                    @default(now()) @map("created_at")
+  user                 User                        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  sourceSession        SimulationSession?          @relation(fields: [sourceSessionId], references: [id], onDelete: Restrict)
+  sourceEvaluation     SessionEvaluation?          @relation(fields: [sourceEvaluationId], references: [id], onDelete: Restrict)
+  sourceAssignment     TrainingAssignment?         @relation(fields: [sourceAssignmentId], references: [id], onDelete: Restrict)
+
+  @@unique([eventType, sourceSessionId], map: "gamification_events_session_type_key")
+  @@unique([eventType, sourceAssignmentId], map: "gamification_events_assignment_type_key")
+  @@index([userId, occurredAt], map: "gamification_events_user_occurred_idx")
+  @@index([occurredAt, userId], map: "gamification_events_occurred_user_idx")
+  @@index([userId, activityDate, eventType, creditStatus], map: "gamification_events_daily_award_idx")
+  @@index([userId, activityDate, contentKeyHash], map: "gamification_events_content_day_idx")
+  @@index([ruleVersion, eventType], map: "gamification_events_rule_type_idx")
+  @@map("gamification_events")
 }

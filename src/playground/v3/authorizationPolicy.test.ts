@@ -13,13 +13,14 @@ import { InMemorySessionRepository } from "./inMemorySessionRepository";
 import { SimulationService, SimulationServiceError } from "./simulationService";
 
 const expected: Readonly<Record<UserRole, readonly AuthorizationCapability[]>> = {
-  SALE: ["USE_OWN_TRAINING"],
+  SALE: ["USE_OWN_TRAINING", "VIEW_LEADERBOARD"],
   MANAGER: [
     "USE_OWN_TRAINING",
     "MANAGE_TRAINING_PROGRAMS",
     "ASSIGN_TRAINING",
     "MANAGE_PERSONAS",
-    "MANAGE_SCENARIOS"
+    "MANAGE_SCENARIOS",
+    "VIEW_LEADERBOARD"
   ],
   ADMIN: AUTHORIZATION_CAPABILITIES
 };

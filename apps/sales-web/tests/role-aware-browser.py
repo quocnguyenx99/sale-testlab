@@ -8,7 +8,7 @@ ROLE_LABELS = {
     "MANAGER": "Quản lý",
     "ADMIN": "Quản trị viên",
 }
-BASE_NAV = ["/dashboard", "/customers", "/practice/new", "/history", "/progress"]
+BASE_NAV = ["/dashboard", "/customers", "/practice/new", "/history", "/progress", "/leaderboard"]
 EXPECTED_NAV = {
     "SALE": [*BASE_NAV, "/my-training-assignments"],
     "MANAGER": [*BASE_NAV, "/training-programs", "/training-assignments", "/manage/personas", "/manage/scenarios"],
@@ -34,6 +34,30 @@ PROGRESS = {
     "skills": [],
     "highlights": {"strongestSkillKey": None, "needsAttentionSkillKey": None},
     "recentEvaluatedSessions": [],
+}
+GAMIFICATION = {
+    "ruleVersion": "testlab-gamification-v1",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "totalXp": 320,
+    "level": 2,
+    "currentLevelXp": 70,
+    "xpToNextLevel": 180,
+    "currentStreakDays": 2,
+    "bestStreakDays": 5,
+    "currentMonth": {"xp": 70, "rank": 2, "creditedSessions": 2},
+    "recentActivities": [],
+}
+LEADERBOARD = {
+    "period": {"type": "CURRENT_MONTH", "startAt": "2026-07-31T17:00:00.000Z", "endAt": "2026-08-31T17:00:00.000Z", "timezone": "Asia/Ho_Chi_Minh"},
+    "rows": [
+        {"rank": 1, "displayName": "Sale Fixture A", "level": 3, "currentMonthXp": 120, "creditedSessions": 3, "isCurrentUser": False},
+        {"rank": 2, "displayName": "Phase 10A-4 Sale", "level": 2, "currentMonthXp": 70, "creditedSessions": 2, "isCurrentUser": True},
+    ],
+    "totalParticipants": 2,
+    "totalPages": 1,
+    "currentUser": {"rank": 2, "displayName": "Phase 10A-4 Sale", "level": 2, "currentMonthXp": 70, "creditedSessions": 2, "isCurrentUser": True},
+    "page": 1,
+    "pageSize": 25,
 }
 PERSONA = {
     "id": "phase10a5-persona",
@@ -129,6 +153,14 @@ def install_api(page, state, requests):
             return fulfill(route, {"sessions": [], "items": [], "page": 1, "pageSize": 10, "total": 0, "totalPages": 0})
         if url.endswith("/api/v3/progress"):
             return fulfill(route, {"progress": PROGRESS})
+        if url.endswith("/api/v3/gamification/me"):
+            return fulfill(route, {"gamification": GAMIFICATION})
+        if "/api/v3/leaderboard" in url:
+            leaderboard = dict(LEADERBOARD)
+            if state["role"] != "SALE":
+                leaderboard["currentUser"] = None
+                leaderboard["rows"] = [{**row, "isCurrentUser": False} for row in LEADERBOARD["rows"]]
+            return fulfill(route, {"leaderboard": leaderboard})
         return fulfill(route, {"error": {"code": "NOT_FOUND", "message": "Not found"}}, 404)
 
     page.route("**/api/v3/**", api)

@@ -10,6 +10,7 @@ import {
   Sparkles,
   TrendingDown,
   TrendingUp,
+  Trophy,
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -21,7 +22,9 @@ import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { EmptyState, LoadingState } from '../components/ui/Feedback'
 import { trainingService } from '../services/trainingService'
+import { gamificationService } from '../services/gamificationService'
 import type { ProgressAnalytics, PublicPersona, RecentSession } from '../types/training'
+import type { PersonalGamification } from '../types/gamification'
 import { formatProgressScore, labelProgressTrend } from '../utils/progressPresentation'
 import { labelMode, labelOutcome, labelTrainingStatus } from '../utils/trainingLabels'
 
@@ -168,6 +171,14 @@ function ProgressMetric({ label, value }: { label: string; value: string }) {
   )
 }
 
+function DashboardGamificationCard({ userRole, data, loading, unavailable }: { userRole: string | undefined; data: PersonalGamification | null; loading: boolean; unavailable: boolean }) {
+  const navigate = useNavigate()
+  if (userRole !== 'SALE') return <Card data-testid="dashboard-gamification-card" className="mt-6 flex flex-col justify-between gap-4 p-5 sm:flex-row sm:items-center sm:p-6"><div><h2 className="text-base font-bold text-ink">Bảng xếp hạng tháng</h2><p className="mt-1 text-sm text-ink-secondary">Theo dõi thành tích luyện tập an toàn của đội ngũ SALE.</p></div><Button variant="secondary" icon={<Trophy className="h-4 w-4" />} onClick={() => navigate('/leaderboard')}>Bảng xếp hạng</Button></Card>
+  if (loading) return <Card data-testid="dashboard-gamification-card" className="mt-6 p-5 sm:p-6"><div className="flex items-center gap-3 text-sm text-ink-secondary"><Trophy className="h-5 w-5 animate-pulse text-brand" />Đang tải XP và xếp hạng...</div></Card>
+  if (unavailable || !data) return <Card data-testid="dashboard-gamification-card" className="mt-6 flex flex-col justify-between gap-4 p-5 sm:flex-row sm:items-center sm:p-6"><div><h2 className="text-base font-bold text-ink">Gamification</h2><p className="mt-1 text-sm text-ink-secondary">Chưa thể tải XP cá nhân lúc này.</p></div><Button variant="secondary" onClick={() => navigate('/leaderboard')}>Bảng xếp hạng</Button></Card>
+  return <Card data-testid="dashboard-gamification-card" className="mt-6 p-5 sm:p-6"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><h2 className="flex items-center gap-2 text-base font-bold text-ink"><Trophy className="h-5 w-5 text-amber-600" />Thành tích luyện tập</h2><p className="mt-1 text-xs text-ink-secondary">XP là điểm hoạt động; chất lượng kỹ năng vẫn được theo dõi tại Tiến độ.</p></div><Button size="sm" variant="secondary" onClick={() => navigate('/leaderboard')}>Bảng xếp hạng<ArrowRight className="h-3.5 w-3.5" /></Button></div><div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4"><ProgressMetric label="Level" value={String(data.level)} /><ProgressMetric label="Tổng XP" value={String(data.totalXp)} /><ProgressMetric label="Hạng tháng" value={data.currentMonth.rank ? `#${data.currentMonth.rank}` : '—'} /><ProgressMetric label="Chuỗi ngày" value={`${data.currentStreakDays}`} /></div><div className="mt-4 h-2 overflow-hidden rounded-full bg-surface-subtle"><div className="h-full rounded-full bg-brand" style={{ width: `${Math.min(100, data.currentLevelXp / 2.5)}%` }} /></div><p className="mt-2 text-xs text-ink-muted">Còn {data.xpToNextLevel} XP để lên Level {data.level + 1}.</p></Card>
+}
+
 export function DashboardPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
@@ -178,6 +189,9 @@ export function DashboardPage() {
   const [progress, setProgress] = useState<ProgressAnalytics | null>(null)
   const [progressLoading, setProgressLoading] = useState(true)
   const [progressUnavailable, setProgressUnavailable] = useState(false)
+  const [gamification, setGamification] = useState<PersonalGamification | null>(null)
+  const [gamificationLoading, setGamificationLoading] = useState(true)
+  const [gamificationUnavailable, setGamificationUnavailable] = useState(false)
 
   useEffect(() => {
     Promise.all([trainingService.getRecommendedPersonas(), trainingService.getRecentSessions()])
@@ -212,6 +226,15 @@ export function DashboardPage() {
   }, [])
 
   useEffect(() => loadProgress(), [loadProgress])
+
+  useEffect(() => {
+    if (user?.role !== 'SALE') { setGamificationLoading(false); return }
+    let active = true
+    setGamificationLoading(true)
+    setGamificationUnavailable(false)
+    gamificationService.getPersonal().then((value) => { if (active) setGamification(value) }).catch(() => { if (active) setGamificationUnavailable(true) }).finally(() => { if (active) setGamificationLoading(false) })
+    return () => { active = false }
+  }, [user?.role])
 
   const activeCount = sessions.filter((session) => session.status === 'RUNNING').length
   const completedCount = sessions.filter((session) => session.status === 'COMPLETED').length
@@ -259,6 +282,7 @@ export function DashboardPage() {
         unavailable={progressUnavailable}
         onRetry={loadProgress}
       />
+      <DashboardGamificationCard userRole={user?.role} data={gamification} loading={gamificationLoading} unavailable={gamificationUnavailable} />
 
       {loading ? (
         <div className="mt-8">

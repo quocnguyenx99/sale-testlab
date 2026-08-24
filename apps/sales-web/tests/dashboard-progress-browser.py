@@ -29,6 +29,7 @@ def run_case(browser, response, expected_text, progress_status=200):
         if url.endswith("/api/v3/personas"): return fulfill(route, {"personas": [PERSONA]})
         if "/api/v3/sessions" in url: return fulfill(route, {"items": [SESSION], "sessions": [SESSION], "page": 1, "pageSize": 10, "total": 1, "totalPages": 1})
         if url.endswith("/api/v3/progress"): return fulfill(route, response, progress_status)
+        if url.endswith("/api/v3/gamification/me"): return fulfill(route, {"gamification": {"ruleVersion": "testlab-gamification-v1", "timezone": "Asia/Ho_Chi_Minh", "totalXp": 0, "level": 1, "currentLevelXp": 0, "xpToNextLevel": 250, "currentStreakDays": 0, "bestStreakDays": 0, "currentMonth": {"xp": 0, "rank": None, "creditedSessions": 0}, "recentActivities": []}})
         return fulfill(route, {"error": {"code": "NOT_FOUND", "message": "Not found"}}, 404)
 
     page.route("**/api/v3/**", api)

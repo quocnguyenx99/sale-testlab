@@ -20,13 +20,14 @@ assert.equal(hasUiCapability('OWNER', 'USE_OWN_TRAINING'), false)
 assert.equal(hasUiCapability('ADMIN', 'UNKNOWN_CAPABILITY'), false)
 
 const expectedCapabilities: Readonly<Record<UserRole, readonly string[]>> = {
-  SALE: ['USE_OWN_TRAINING'],
+  SALE: ['USE_OWN_TRAINING', 'VIEW_LEADERBOARD'],
   MANAGER: [
     'USE_OWN_TRAINING',
     'MANAGE_TRAINING_PROGRAMS',
     'ASSIGN_TRAINING',
     'MANAGE_PERSONAS',
     'MANAGE_SCENARIOS',
+    'VIEW_LEADERBOARD',
   ],
   ADMIN: UI_CAPABILITIES,
 }

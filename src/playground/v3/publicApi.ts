@@ -16,7 +16,11 @@ export type {
   PublicTrainingProgram,
   PublicManagedTrainingAssignment,
   PublicOwnTrainingAssignment,
-  PublicTrainingAssignee
+  PublicTrainingAssignee,
+  PublicGamificationActivity,
+  PublicPersonalGamification,
+  PublicLeaderboardRow,
+  PublicLeaderboard
 } from "./publicContracts";
 export type { EnrichedPersonaSource } from "./simulationSession";
 import {
@@ -40,6 +44,7 @@ import { AuthorizationError, requireCapability } from "./authorizationPolicy";
 import { TrainingProgramService, TrainingProgramServiceError } from "./trainingPrograms/trainingProgramService";
 import { TrainingAssignmentService, TrainingAssignmentServiceError } from "./trainingAssignments/trainingAssignmentService";
 import { TrainingContentService, TrainingContentServiceError } from "./trainingContent/trainingContentService";
+import { GamificationService, GamificationServiceError } from "./gamification/gamificationService";
 
 const AUTH_COOKIE = "testlab_session";
 
@@ -162,8 +167,8 @@ function historyQuery(url: URL): SessionHistoryQuery {
   };
 }
 
-export function createV3Api(dependencies: { service: SimulationService; auth: AuthService; evaluationService?: EvaluationService; coachingService?: CoachingService; progressService?: ProgressService; trainingProgramService?: TrainingProgramService; trainingAssignmentService?: TrainingAssignmentService; trainingContentService?: TrainingContentService }) {
-  const { service, auth, evaluationService, coachingService, progressService, trainingProgramService, trainingAssignmentService, trainingContentService } = dependencies;
+export function createV3Api(dependencies: { service: SimulationService; auth: AuthService; evaluationService?: EvaluationService; coachingService?: CoachingService; progressService?: ProgressService; trainingProgramService?: TrainingProgramService; trainingAssignmentService?: TrainingAssignmentService; trainingContentService?: TrainingContentService; gamificationService?: GamificationService }) {
+  const { service, auth, evaluationService, coachingService, progressService, trainingProgramService, trainingAssignmentService, trainingContentService, gamificationService } = dependencies;
   return async function handleV3Request(req: http.IncomingMessage, res: http.ServerResponse): Promise<boolean> {
     const url = new URL(req.url || "/", "http://localhost");
     const pathname = url.pathname;
@@ -190,6 +195,19 @@ export function createV3Api(dependencies: { service: SimulationService; auth: Au
       }
 
       const currentUser = await auth.currentUser(cookie(req, AUTH_COOKIE));
+
+      if (req.method === "GET" && pathname === "/api/v3/gamification/me") {
+        if (!gamificationService) throw new HttpRequestError(503, "GAMIFICATION_UNAVAILABLE", "Gamification tạm thời chưa sẵn sàng.");
+        sendJson(res, 200, { gamification: await gamificationService.getPersonal(currentUser) });
+        return true;
+      }
+
+      if (req.method === "GET" && pathname === "/api/v3/leaderboard") {
+        requireCapability(currentUser, "VIEW_LEADERBOARD");
+        if (!gamificationService) throw new HttpRequestError(503, "GAMIFICATION_UNAVAILABLE", "Bảng xếp hạng tạm thời chưa sẵn sàng.");
+        sendJson(res, 200, { leaderboard: await gamificationService.getLeaderboard(currentUser.id, url.searchParams.get("page"), url.searchParams.get("pageSize")) });
+        return true;
+      }
 
       if (pathname === "/api/v3/manage/personas" && (req.method === "GET" || req.method === "POST")) {
         requireCapability(currentUser, "MANAGE_PERSONAS");
@@ -377,6 +395,9 @@ export function createV3Api(dependencies: { service: SimulationService; auth: Au
         const evaluation = req.method === "GET"
           ? await evaluationService.get(sessionId, currentUser.id)
           : await evaluationService.evaluate(sessionId, currentUser.id);
+        if (req.method === "POST" && evaluation?.status === "COMPLETED" && gamificationService) {
+          await safelyReconcile(() => gamificationService.reconcileSession(sessionId));
+        }
         sendJson(res, 200, { state: evaluation?.status ?? "NOT_EVALUATED", evaluation: evaluation ? toPublicSessionEvaluation(evaluation) : null });
         return true;
       }
@@ -436,6 +457,9 @@ export function createV3Api(dependencies: { service: SimulationService; auth: Au
           currentUser.id
         );
         if (!result.session.runtimeInsight) throw new Error("Runtime insight missing after message");
+        if (result.session.status === "COMPLETED" && gamificationService) {
+          await safelyReconcile(() => gamificationService.reconcileAssignmentForSession(result.session.id));
+        }
         sendJson(res, 200, {
           saleMessage: toPublicChatMessage(result.saleMessage),
           customerMessage: toPublicChatMessage(result.customerMessage),
@@ -449,6 +473,7 @@ export function createV3Api(dependencies: { service: SimulationService; auth: Au
       if (req.method === "POST" && stopMatch) {
         const session = await service.stopSession(decodeURIComponent(stopMatch[1]), currentUser.id);
         if (!session.result) throw new Error("Session result missing after stop");
+        if (gamificationService) await safelyReconcile(() => gamificationService.reconcileAssignmentForSession(session.id));
         sendJson(res, 200, { session: toPublicSession(session), result: toPublicSessionResult(session.result) });
         return true;
       }
@@ -489,10 +514,18 @@ export function createV3Api(dependencies: { service: SimulationService; auth: Au
             ? 400
             : 409;
         sendJson(res, status, { error: { code: error.code, message: error.message } });
+      } else if (error instanceof GamificationServiceError) {
+        const status = error.code === "GAMIFICATION_FORBIDDEN" ? 403 : 400;
+        sendJson(res, status, { error: { code: error.code, message: error.message } });
       } else {
         sendJson(res, 503, { error: { code: "SERVICE_UNAVAILABLE", message: "Dịch vụ tạm thời chưa sẵn sàng. Vui lòng thử lại." } });
       }
       return true;
     }
   };
+}
+
+async function safelyReconcile(operation: () => Promise<unknown>): Promise<void> {
+  try { await operation(); }
+  catch { console.error("[gamification] reconciliation pending"); }
 }

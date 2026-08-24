@@ -12,6 +12,7 @@ import {
   UserRound,
   UsersRound,
   PanelsTopLeft,
+  Trophy,
   X,
   type LucideIcon,
 } from 'lucide-react'
@@ -30,6 +31,7 @@ const navItems: ReadonlyArray<NavItem> = [
   { to: '/practice/new', label: 'Luyện tập', icon: MessageSquareText, requiredCapability: 'USE_OWN_TRAINING' },
   { to: '/history', label: 'Lịch sử', icon: History, requiredCapability: 'USE_OWN_TRAINING' },
   { to: '/progress', label: 'Tiến độ', icon: BarChart3, requiredCapability: 'USE_OWN_TRAINING' },
+  { to: '/leaderboard', label: 'Bảng xếp hạng', icon: Trophy, requiredCapability: 'VIEW_LEADERBOARD' },
   { to: '/training-programs', label: 'Chương trình đào tạo', icon: BookOpenCheck, requiredCapability: 'MANAGE_TRAINING_PROGRAMS' },
   { to: '/training-assignments', label: 'Phân công đào tạo', icon: ClipboardList, requiredCapability: 'ASSIGN_TRAINING' },
   { to: '/manage/personas', label: 'Quản lý Persona', icon: UsersRound, requiredCapability: 'MANAGE_PERSONAS' },

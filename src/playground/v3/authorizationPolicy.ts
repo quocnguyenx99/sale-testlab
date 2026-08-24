@@ -6,6 +6,7 @@ export const AUTHORIZATION_CAPABILITIES = Object.freeze([
   "ASSIGN_TRAINING",
   "MANAGE_PERSONAS",
   "MANAGE_SCENARIOS",
+  "VIEW_LEADERBOARD",
   "MANAGE_USERS",
   "MANAGE_SYSTEM"
 ] as const);
@@ -16,14 +17,16 @@ const capabilities = (...values: AuthorizationCapability[]): readonly Authorizat
 
 export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly AuthorizationCapability[]>> = Object.freeze({
   SALE: capabilities(
-    "USE_OWN_TRAINING"
+    "USE_OWN_TRAINING",
+    "VIEW_LEADERBOARD"
   ),
   MANAGER: capabilities(
     "USE_OWN_TRAINING",
     "MANAGE_TRAINING_PROGRAMS",
     "ASSIGN_TRAINING",
     "MANAGE_PERSONAS",
-    "MANAGE_SCENARIOS"
+    "MANAGE_SCENARIOS",
+    "VIEW_LEADERBOARD"
   ),
   ADMIN: AUTHORIZATION_CAPABILITIES
 });

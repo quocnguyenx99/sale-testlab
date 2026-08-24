@@ -3,6 +3,45 @@ export type PublicSessionStatus = "RUNNING" | "COMPLETED";
 export type PublicTrainingAssignmentState = "ASSIGNED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
 export type PublicTrainingAssignmentItemState = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
 
+export interface PublicGamificationActivity {
+  type: "SESSION_XP" | "ASSIGNMENT_XP";
+  creditStatus: "AWARDED" | "REPEAT_CONTENT" | "DAILY_CAP";
+  points: number;
+  occurredAt: string;
+}
+
+export interface PublicPersonalGamification {
+  ruleVersion: string;
+  timezone: string;
+  totalXp: number;
+  level: number;
+  currentLevelXp: number;
+  xpToNextLevel: number;
+  currentStreakDays: number;
+  bestStreakDays: number;
+  currentMonth: { xp: number; rank: number | null; creditedSessions: number };
+  recentActivities: PublicGamificationActivity[];
+}
+
+export interface PublicLeaderboardRow {
+  rank: number;
+  displayName: string;
+  level: number;
+  currentMonthXp: number;
+  creditedSessions: number;
+  isCurrentUser: boolean;
+}
+
+export interface PublicLeaderboard {
+  period: { type: "CURRENT_MONTH"; startAt: string; endAt: string; timezone: string };
+  rows: PublicLeaderboardRow[];
+  totalParticipants: number;
+  totalPages: number;
+  currentUser: PublicLeaderboardRow | null;
+  page: number;
+  pageSize: number;
+}
+
 export interface PublicTrainingAssignee {
   id: string;
   displayName: string;
