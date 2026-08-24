@@ -64,7 +64,7 @@ Semantic colors communicate actual state, never decoration. Pair every color sig
 
 ## 4. Typography
 
-Use only **Be Vietnam Pro Variable**, self-hosted through `@fontsource-variable/be-vietnam-pro`. Runtime font CDN requests are forbidden.
+Use only **Be Vietnam Pro**, self-hosted through Fontsource. The preferred variable package is `@fontsource-variable/be-vietnam-pro`; when that package is unavailable in the canonical npm registry, use the official `@fontsource/be-vietnam-pro` package and import only the required 400/500/600/700 normal weights. Runtime font CDN requests and manually committed font binaries are forbidden.
 
 | Role | Size / line | Weight | Notes |
 | --- | --- | --- | --- |

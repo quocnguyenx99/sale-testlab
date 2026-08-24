@@ -434,7 +434,7 @@ function SessionItem({
 
         {/* Date & Actions */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-1">
-          <p className="flex items-center gap-1 text-[11px] text-ink-muted">
+          <p className="flex items-center gap-1 text-xs text-ink-muted">
             <CalendarDays className="h-3 w-3" />
             {formatActivity(session.updatedAt)}
           </p>

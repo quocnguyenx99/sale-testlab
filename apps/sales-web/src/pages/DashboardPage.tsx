@@ -368,7 +368,7 @@ export function DashboardPage() {
                         <div className="flex items-center gap-3">
                           <Avatar
                             initials={session.persona.displayName.slice(0, 2).toUpperCase()}
-                            color="#4F46E5"
+                            color="#0068FF"
                             size="sm"
                           />
                           <div className="min-w-0">

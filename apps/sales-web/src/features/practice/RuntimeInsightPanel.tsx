@@ -26,7 +26,7 @@ export function RuntimeInsightPanel({ insight }: { insight: RuntimeInsight }) {
         </p>
         {insight.activeProduct ? (
           <div className="mt-2.5 rounded-lg border border-border bg-surface px-3 py-2">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
+            <p className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
               Sản phẩm quan tâm
             </p>
             <p className="mt-0.5 text-xs font-bold text-ink">{insight.activeProduct.model}</p>
@@ -119,7 +119,7 @@ export function RuntimeInsightPanel({ insight }: { insight: RuntimeInsight }) {
         </div>
       </dl>
 
-      <p className="text-[11px] leading-relaxed text-ink-muted">
+      <p className="text-xs leading-relaxed text-ink-muted">
         Thông tin này phản ánh tiến trình hội thoại hiện tại, không phải điểm đánh giá hoặc gợi ý
         coaching.
       </p>

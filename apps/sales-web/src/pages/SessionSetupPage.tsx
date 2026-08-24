@@ -211,7 +211,7 @@ export function SessionSetupPage() {
                       <Icon className="h-4 w-4" />
                     </div>
                     <p className="font-bold text-sm text-ink">{title}</p>
-                    <p className="mt-0.5 text-[10px] font-bold text-brand">{label}</p>
+                    <p className="mt-0.5 text-xs font-bold text-brand">{label}</p>
                     <p className="mt-1.5 text-xs leading-relaxed text-ink-secondary">
                       {description}
                     </p>

@@ -435,7 +435,7 @@ export function ProgressPage() {
 
               <dl className="mt-4 grid grid-cols-2 gap-3 border-y border-border py-3">
                 <div>
-                  <dt className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+                  <dt className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
                     Trung bình
                   </dt>
                   <dd className="mt-1 text-lg font-bold text-ink tabular-nums">
@@ -443,7 +443,7 @@ export function ProgressPage() {
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+                  <dt className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
                     Gần đây
                   </dt>
                   <dd className="mt-1 text-lg font-bold text-ink tabular-nums">
@@ -488,7 +488,7 @@ export function ProgressPage() {
             {/* Desktop Table */}
             <Card className="hidden overflow-hidden md:block">
               <table className="w-full text-left text-xs">
-                <thead className="border-b border-border bg-surface-subtle/50 text-[11px] uppercase tracking-wider text-ink-muted">
+                <thead className="border-b border-border bg-surface-subtle/50 text-xs uppercase tracking-wider text-ink-muted">
                   <tr>
                     <th className="px-5 py-3.5 font-semibold">Khách hàng</th>
                     <th className="px-5 py-3.5 font-semibold">Thời điểm đánh giá</th>
@@ -540,7 +540,7 @@ export function ProgressPage() {
                       <h3 className="text-sm font-bold text-ink">
                         {session.persona.displayName}
                       </h3>
-                      <p className="mt-0.5 flex items-center gap-1 text-[11px] text-ink-muted">
+                      <p className="mt-0.5 flex items-center gap-1 text-xs text-ink-muted">
                         <CalendarDays className="h-3 w-3" />
                         {formatProgressDate(session.evaluatedAt)}
                       </p>

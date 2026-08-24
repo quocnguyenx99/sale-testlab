@@ -2,7 +2,7 @@ import { ChevronDown, Search } from 'lucide-react'
 import type { InputHTMLAttributes, SelectHTMLAttributes } from 'react'
 
 const base =
-  'w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-muted transition duration-150 hover:border-border-strong focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15 disabled:bg-surface-subtle disabled:opacity-60'
+  'min-h-10 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm leading-5 text-ink placeholder:text-ink-muted transition-[border-color,box-shadow,background-color] duration-150 hover:border-border-strong focus:border-brand focus:outline-none focus:ring-2 focus:ring-focus/20 disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:opacity-60'
 
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
   return <input className={`${base} ${props.className ?? ''}`} {...props} />

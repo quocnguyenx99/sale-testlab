@@ -176,7 +176,7 @@ export function EvaluationSection({
                     {criterion.summary}
                   </p>
                   {criterion.evidenceTurnSequences && criterion.evidenceTurnSequences.length > 0 && (
-                    <p className="mt-2 text-[11px] text-ink-muted">
+                    <p className="mt-2 text-xs text-ink-muted">
                       Lượt trao đổi liên quan:{' '}
                       <span className="font-semibold text-ink-secondary">
                         {criterion.evidenceTurnSequences.map((seq) => `#${seq}`).join(', ')}

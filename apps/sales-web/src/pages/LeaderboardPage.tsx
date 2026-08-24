@@ -44,8 +44,8 @@ export function LeaderboardPage() {
           {data.rows.map((row) => <Card key={`${row.rank}-${row.displayName}`} className={`p-4 sm:p-5 ${row.isCurrentUser ? 'border-brand-border bg-brand-soft/30' : ''}`}>
             <div className="flex items-center gap-3 sm:gap-5">
               <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl font-bold ${row.rank <= 3 ? 'bg-amber-50 text-amber-700' : 'bg-surface-subtle text-ink-secondary'}`}>{row.rank <= 3 ? <Medal className="h-5 w-5" /> : `#${row.rank}`}</div>
-              <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h2 className="truncate text-sm font-bold text-ink">{row.displayName}</h2>{row.isCurrentUser && <span className="rounded-full bg-brand px-2 py-0.5 text-[10px] font-bold text-white">Bạn</span>}</div><p className="mt-1 text-xs text-ink-muted">Level {row.level} · {row.creditedSessions} phiên được ghi nhận</p></div>
-              <div className="shrink-0 text-right"><p className="text-lg font-bold tabular-nums text-ink">{row.currentMonthXp}</p><p className="text-[10px] font-semibold uppercase tracking-wider text-ink-muted">XP tháng</p></div>
+              <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h2 className="truncate text-sm font-bold text-ink">{row.displayName}</h2>{row.isCurrentUser && <span className="rounded-md bg-brand px-2 py-0.5 text-xs font-bold text-white">Bạn</span>}</div><p className="mt-1 text-xs text-ink-muted">Level {row.level} · {row.creditedSessions} phiên được ghi nhận</p></div>
+              <div className="shrink-0 text-right"><p className="text-lg font-bold tabular-nums text-ink">{row.currentMonthXp}</p><p className="text-xs font-semibold uppercase tracking-wider text-ink-muted">XP tháng</p></div>
             </div>
           </Card>)}
         </div>

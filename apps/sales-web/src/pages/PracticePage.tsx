@@ -243,7 +243,7 @@ export function PracticePage() {
               <p className="truncate text-xs text-ink-secondary">
                 <span className="font-semibold text-ink">Tình huống:</span> {scenario.title}
               </p>
-              <span className="shrink-0 text-[10px] font-bold text-brand uppercase">
+              <span className="shrink-0 text-xs font-bold text-brand uppercase">
                 {labelMode(mode)}
               </span>
             </div>
@@ -324,7 +324,7 @@ export function PracticePage() {
                   <Send className="h-4 w-4" />
                 </Button>
               </div>
-              <p className="mt-1.5 hidden text-center text-[10px] text-ink-muted sm:block">
+              <p className="mt-1.5 hidden text-center text-xs text-ink-muted sm:block">
                 Enter để gửi · Shift + Enter để xuống dòng
               </p>
             </div>

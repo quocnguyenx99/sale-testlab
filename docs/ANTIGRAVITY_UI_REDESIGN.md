@@ -221,7 +221,7 @@ Avoid a giant component package or abstractions without current callers.
 
 ### UI-V3-2 — Foundation and App Shell
 
-- Add Be Vietnam Pro Variable.
+- Add Be Vietnam Pro from Fontsource. Prefer the variable package; use only required official static weights if the variable package is unavailable in npm.
 - Implement canonical tokens through Tailwind and CSS variables.
 - Refactor shell/navigation, Login foundation, shared states, and justified primitives.
 - Validate role navigation, responsiveness, accessibility, console/network boundaries.
