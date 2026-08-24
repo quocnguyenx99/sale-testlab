@@ -1,671 +1,298 @@
-# AI SALES TESTLAB V3 — ANTIGRAVITY UI REDESIGN BRIEF
+# TESTLAB UI REDESIGN V3 IMPLEMENTATION BLUEPRINT
 
-## 1. Project
+**Status:** approved execution blueprint
 
-Project:
+**Branch:** `feat/testlab-ui-redesign-v3`
 
-AI Sales TestLab V3
+**Stable functional branch:** `feat/testlab-v3` (read-only)
+**Canonical design authority:** `docs/DESIGN.md`
 
-Repository:
+## 1. Objective
 
-D:/Workspace/sale-testlab-data-pipeline
+Replace the previous generic indigo/card-heavy presentation with a cohesive TestLab product system while preserving every functional, privacy, authorization, and AI boundary.
 
-Frontend:
+Visual direction:
 
-apps/sales-web
+> Zalo communication clarity + Haravan operational UX + corporate EDU hierarchy + TestLab AI training identity.
 
-Current stack:
+This is a progressive frontend migration, not a framework rewrite. React, Vite, Tailwind 3, the existing router, contexts, services, and DTOs remain in place.
 
-- React
-- Vite
-- TypeScript
-- TailwindCSS
-- Lucide icons
-- Existing authenticated V3 backend API
+## 2. Reference principles
 
-This task is a UI/UX redesign.
+### Zalo
 
-It is NOT a backend rewrite.
+- Blue is decisive and familiar, not decorative.
+- Conversation is readable, direct, and visually dominant.
+- Mobile interaction is compact with obvious touch targets.
+- Status and action language is short and concrete.
 
----
+### Haravan
 
-## 2. Main Objective
+- Navigation groups mirror operational tasks.
+- Management screens optimize scanning, filtering, and repeated work.
+- Controls are compact, predictable, and enterprise-appropriate.
+- Lists and tables carry information without excessive card decoration.
 
-Redesign the entire Sales TestLab frontend so it feels:
+### Corporate EDU/LMS
 
-- modern
-- professional
-- clean
-- easy to understand
-- suitable for internal sales training
-- visually consistent
-- responsive
-- comfortable for daily use
+- Learning context and next action appear before analytics detail.
+- Improvement language is constructive, not punitive.
+- Progress, assignment, and completion states are explicit.
+- Role boundaries remain understandable without exposing policy internals.
 
-The UI should feel like a polished internal SaaS training product,
-not a developer playground.
+### TestLab-specific
 
-Priority:
+- Training conversation wins space over context panels.
+- Evaluation remains the scoring authority; Coach remains advice.
+- AI generation is always explicit, never triggered by page render.
+- Vietnamese typography and long-form feedback must remain comfortable.
 
-1. Usability
-2. Visual hierarchy
-3. Consistency
-4. Readability
-5. Responsive behavior
-6. Professional appearance
+## 3. Real-browser audit basis
 
----
+The approved audit captured 27/27 route families at:
 
-## 3. Critical Boundary
+- desktop `1440×900`;
+- tablet `1024×768`;
+- mobile `390×844`;
+- SALE, MANAGER, ADMIN, public, loading, empty, error, and focused data states where deterministic fixtures allowed.
 
-Frontend redesign scope:
+Temporary evidence lives in `output/playwright/ui-redesign-v3/audit/screenshots/`. Canonical documents do not depend on those files being committed.
 
-apps/sales-web
+### Findings carried into implementation
 
-DO NOT modify backend behavior unless separately approved.
+- Old `#4F46E5` indigo dominates brand, focus, selected navigation, and CTA states.
+- Desktop navigation is an ungrouped flat list; Dashboard is not visually separated from training work.
+- 1024px switches to the same mobile header instead of a useful collapsed rail.
+- Sidebar has no user-controlled collapse and child routes do not consistently describe parent activity.
+- Metadata reaches 11px in user identity, below the V3 minimum.
+- Card + border + shadow patterns repeat across content and flatten hierarchy.
+- Login shows a remember-login control without a verified product contract.
+- Mobile content generally stacks safely, but shell context and navigation are too sparse.
+- Management pages leave large empty canvases without a strong operational structure.
+- Shared Modal lacks the full focus-trap/restoration/scroll-lock contract.
 
-DO NOT modify:
+Full evidence is indexed in `docs/ui-redesign-v3/audit/`.
 
-- Runtime behavior
-- Customer AI
-- Evaluator logic
-- AI Coach logic
-- Progress analytics formulas
-- Prisma schema
-- migrations
-- authentication semantics
-- ownership logic
-- API contracts
-- /api/v3 behavior
+## 4. Role and route matrix
 
-If frontend appears to need a backend change:
+### Public
 
-STOP
+- `/login`: anonymous only.
+- unmatched routes: branded 404 without private data.
 
-and report the missing backend capability.
+### SALE
 
-Do not change backend automatically.
+- `/dashboard`, `/customers`, `/practice/new`, `/practice/:sessionId`, `/practice/:sessionId/result`.
+- `/my-training-assignments` and detail.
+- `/history` and replay.
+- `/progress`, `/leaderboard`.
 
----
+### MANAGER
 
-## 4. Existing Features Must Continue Working
+- Personal training routes already granted by `USE_OWN_TRAINING`.
+- `/training-programs`, `/training-assignments` and allowed descendants.
+- `/manage/personas`, `/manage/scenarios` and version/editor descendants.
+- `/leaderboard`.
 
-The redesign must preserve all current working flows.
+### ADMIN
 
-Including:
+- Same visible product functionality as permitted by current capabilities.
+- No new User Management or System navigation until a real route and approved product slice exist.
 
-- Login
-- Dashboard
-- Persona / AI Customer Library
-- New Practice setup
-- Customer-first mode
-- Sale-first mode
-- Training chat
-- Stop session
-- Result
-- Evaluation
-- AI Coach
-- History
-- Replay
-- Progress Analytics
-- Dashboard Progress summary
-- Authentication
-- Logout
+All visibility is computed from `authorizationPolicy.ts` through the existing navigation policy. Visual grouping does not create authorization.
 
-Audit the router/source to confirm exact current routes before changes.
+## 5. Target information architecture
 
-Do not remove working functionality for visual simplicity.
+Dashboard is the first standalone item. The rest is grouped:
 
----
+- **Luyện tập** — Khách hàng AI, Luyện tập, Bài tập được giao.
+- **Theo dõi** — Lịch sử, Tiến độ, Bảng xếp hạng.
+- **Quản lý đào tạo** — Chương trình, Phân công.
+- **Quản lý nội dung** — Persona, Tình huống.
 
-## 5. Current Product Roles
+Groups with no visible child are omitted. SALE sees personal work first. MANAGER/ADMIN retain personal practice and gain only currently authorized management groups.
 
-Current role domain:
+## 6. Responsive shell strategy
 
-SALE
-MANAGER
-ADMIN
+### Desktop `>=1280px`
 
-The redesign must not invent new authorization behavior.
+- 248px expanded sidebar by default.
+- User can collapse to 72px; preference is local-only.
+- 56px compact topbar and 32px content gutter.
 
-Backend remains authorization authority.
+### Tablet `1024–1279px`
 
-Role-aware management UI belongs to the RBAC roadmap and should not be
-invented during this redesign unless already implemented in source.
+- Fixed 72px collapsed rail.
+- Accessible tooltip for each icon.
+- 24px content gutter.
 
----
+### Mobile `<1024px`
 
-## 6. UX Philosophy
+- 56px topbar and navigation drawer up to 288px.
+- Focus trap, Escape, scroll lock, focus restoration, and close-after-navigation.
+- 16px content gutter; no bottom navigation.
 
-The application should guide the user through:
+Shell implementation must leave room for the later Training Room rule: conversation first, context collapsible or drawer-based.
 
-Dashboard
+## 7. Page targets
 
-→ choose training/customer
+### Login
 
-→ configure training
+Foundation slice applies brand, typography, useful product context, authentic form controls, and responsive composition. Authentication behavior is unchanged. Remove unimplemented remember-login UI.
 
-→ practice conversation
+### Dashboard — UI-V3-3
 
-→ finish session
+Rebuild information hierarchy around next practice, assigned work, progress preview, recent sessions, and leaderboard preview. Reduce independent cards and keep one primary action.
 
-→ see result
+### Customers + Practice setup — UI-V3-3
 
-→ evaluate performance
+Improve persona discovery, filtering, selection, and setup clarity. Preserve current persona/scenario DTOs and session creation behavior.
 
-→ receive AI Coach feedback
+### My assignments — UI-V3-3
 
-→ review progress/history
+Emphasize due/completion context and next actionable assignment without changing training assignment rules.
 
-The user should always understand:
+### Training Room — UI-V3-4
 
-- where they are
-- what they should do next
-- what state the session is in
-- how to return to previous work
-- what action is primary
+Give the transcript and composer visual priority. Desktop context may be visible at wide widths; tablet collapses context; mobile uses a drawer. Do not expose Runtime-private state.
 
-Avoid information overload.
+### Result + Evaluation + Coach — UI-V3-4
 
----
+Create a learning sequence rather than an equal-card wall. Scores remain Evaluation-owned; Coach phrasing remains clearly advisory and evidence-grounded.
 
-## 7. Design System
+### History + Replay — UI-V3-5
 
-Before redesigning individual pages, define a small reusable design system.
+Use responsive data lists, clearer filters/status, and a read-only replay hierarchy. No automatic AI calls.
 
-Audit existing Tailwind setup first.
+### Progress + Leaderboard — UI-V3-5
 
-Define/reuse:
+Use metric strips and scan-friendly analytics. Preserve backend formulas, tie handling, privacy scopes, and low-data semantics.
 
-- colors
-- typography
-- spacing
-- radius
-- shadows
-- cards
-- buttons
-- badges
-- inputs
-- tabs
-- modal/dialog
-- empty states
-- skeleton/loading
-- error states
-- page headers
-- content widths
+### Programs + Assignments — UI-V3-6
 
-Prefer reusable components.
+Adopt operational toolbars, responsive lists, focused editors, and sticky actions where justified. Preserve lifecycle and assignment rules.
 
-Do not create page-specific styling everywhere.
+### Persona + Scenario management — UI-V3-6
 
-Do not introduce a large UI framework unless separately approved.
+Clarify entity/version relationships and publishing state. Preserve immutable published versions and all existing APIs.
 
----
+## 8. Component migration
 
-## 8. Visual Direction
+### KEEP
 
-Desired direction:
+- `Brand`: preserve semantic product identity API; restyle internally.
+- `Avatar`: keep behavior and reuse canonical geometry.
+- authorization policy and navigation visibility functions.
+- business feature components until their assigned slice.
 
-Modern enterprise SaaS.
+### REFACTOR in UI-V3-2
 
-Clean and light.
+- `AppLayout` into AppSidebar, AppTopbar, and MobileNavDrawer responsibilities.
+- `Button`: V3 color, geometry, focus, pressed, and loading foundation.
+- `PageHeader`: V3 type scale and responsive action layout.
+- `Badge`: explicit StatusBadge semantics while keeping compatibility.
+- `FormControls`: canonical input/focus/error styles.
+- `Feedback`: unified loading/empty/error/forbidden foundations.
+- `Modal`: dialog semantics, focus trap, Escape, restoration, and scroll lock.
 
-Professional but not boring.
+### REPLACE progressively
 
-Use strong hierarchy and whitespace.
+- generic Card wrappers where Section, Surface, MetricStrip, FormSection, or ResponsiveDataList communicates hierarchy better;
+- page-local status pills with `StatusBadge`;
+- improvised toolbar rows with `PageToolbar`/`FilterBar`;
+- wide mobile tables with `ResponsiveDataList`.
 
-Avoid:
+### NEW only when audited
 
-- excessive gradients
-- excessive glassmorphism
-- neon UI
-- gaming dashboard appearance
-- overly dense admin tables
-- too many unrelated colors
-- huge decorative elements
-- unnecessary animations
+- `AppSidebar`, `AppTopbar`, `MobileNavDrawer`;
+- `Surface`, `SectionHeader`, `StatusBadge`, `Skeleton`, `InlineAlert`;
+- foundations for `PageToolbar`, `ResponsiveDataList`, `MetricStrip`, `FormField`, and `StickyActionBar`.
 
-Animations should be subtle and functional.
+Avoid a giant component package or abstractions without current callers.
 
----
+## 9. Implementation slices
 
-## 9. Main Navigation
+### UI-V3-1 — Design authority and audit documentation
 
-Audit current AppLayout.
+- Rewrite `docs/DESIGN.md`.
+- Rewrite this blueprint.
+- Create screenshot index, page audit, and reference matrix.
+- Commit independently after documentation audit.
 
-Redesign navigation so primary areas are easy to understand.
+### UI-V3-2 — Foundation and App Shell
 
-Likely product areas include:
+- Add Be Vietnam Pro Variable.
+- Implement canonical tokens through Tailwind and CSS variables.
+- Refactor shell/navigation, Login foundation, shared states, and justified primitives.
+- Validate role navigation, responsiveness, accessibility, console/network boundaries.
+- Commit independently.
 
-- Tổng quan
-- Khách hàng AI
-- Luyện tập
-- Lịch sử
-- Tiến độ
+### UI-V3-3 — Learner entry surfaces
 
-Use current routes as authority.
+- Dashboard, Customers, Practice Setup, My Assignments.
 
-Do not create fake menu items for future features.
+### UI-V3-4 — Core learning loop
 
-Navigation must work on:
+- Training Room, Result, Evaluation, Coach.
 
-desktop
-tablet
-mobile
+### UI-V3-5 — Review and progression
 
----
+- History, Replay, Progress, Leaderboard.
 
-## 10. Dashboard
+### UI-V3-6 — Management operations and final polish
 
-Goal:
+- Programs, Assignments, Persona/Scenario management, cross-page accessibility/regression.
 
-Give the Sale a clear starting point.
+No later slice begins without visual review of the preceding checkpoint.
 
-Dashboard should prioritize:
+## 10. Browser review gates
 
-- greeting / current context
-- primary CTA to start practice
-- recent sessions
-- progress summary
-- useful training state
+Every slice runs at `1440×900`, `1024×768`, and `390×844` as relevant.
 
-Do not turn Dashboard into a dense analytics console.
+UI-V3-2 acceptance requires:
 
-Progress API failure must remain non-blocking.
+- Login, Dashboard shell, all three role sidebars;
+- expanded desktop, collapsed tablet/user choice, mobile drawer;
+- active parent route behavior;
+- 403 and 404;
+- keyboard focus, drawer focus trap, Escape, restoration, scroll lock;
+- no horizontal overflow or unexpected console errors;
+- zero Evaluation POST, Coach POST, and unexpected Customer AI calls.
 
----
+Focused comparison screenshots belong under `output/playwright/ui-redesign-v3/implementation/<slice>/` and are not committed by default.
 
-## 11. AI Customer Library
+## 11. API and business compatibility
 
-Make personas easy to browse.
+The redesign changes presentation only. It must not modify:
 
-Consider:
+- backend source, Prisma, migrations, or database data;
+- Runtime or Customer AI;
+- Evaluation/Coach behavior or triggering;
+- Progress, Gamification, or Leaderboard calculations;
+- Training Program, Assignment, Persona, or Scenario lifecycles;
+- authentication, session, RBAC, ownership, or public DTO contracts.
 
-- search
-- clear persona card hierarchy
-- role/customer type
-- difficulty
-- communication style
-- concise preview
-- clear CTA to practice
+Selectors may change only when focused browser tests are updated in the same slice without weakening behavioral assertions.
 
-Do not expose private persona/runtime internals.
+## 12. Validation order
 
-Use only existing safe DTO fields.
+1. Review file scope and privacy-sensitive rendering.
+2. Sales Web canonical typecheck.
+3. ESLint with zero warnings.
+4. Production build and font bundle/network audit.
+5. Focused deterministic auth/navigation tests.
+6. Real-browser role, viewport, accessibility, console, and network acceptance.
+7. `git diff --check`, source classification, and screenshot exclusion.
 
----
+## 13. Risks and controls
 
-## 12. Practice Setup
+- **Navigation regression:** keep capability policy canonical; test SALE/MANAGER/ADMIN.
+- **Drawer accessibility:** deterministic focus/scroll tests plus real keyboard review.
+- **Page selector breakage:** preserve semantic labels and update only focused UI selectors.
+- **Font weight/bundle growth:** one variable family, one package import, no CDN or static weight set.
+- **Scope creep:** page-specific content stays in UI-V3-3 through UI-V3-6.
+- **Screenshot churn:** output remains temporary and untracked.
 
-Make session setup simple.
+## 14. Definition of done
 
-The Sale should clearly understand:
-
-- selected customer
-- training mode
-- what the mode means
-- how to start
-
-Avoid unnecessarily complex forms.
-
-Primary CTA must be obvious.
-
----
-
-## 13. Training Chat
-
-This is the most important screen.
-
-Design for long daily usage.
-
-Prioritize:
-
-- conversation readability
-- clear Sale vs Customer distinction
-- comfortable message width
-- timestamps/status only when useful
-- sticky input area
-- session state
-- easy stop/finish action
-
-Runtime Insight should remain secondary to the conversation.
-
-Do not allow insight panels to overpower the chat.
-
-Responsive mobile chat is mandatory.
-
-Do not modify message generation behavior.
-
----
-
-## 14. Result
-
-Result screen should have strong information hierarchy.
-
-Suggested flow:
-
-Session result
-
-→ performance summary
-
-→ Evaluation
-
-→ AI Coach
-
-Avoid one extremely long wall of cards.
-
-Use grouping, sections and progressive disclosure where useful.
-
-Do not hide essential results behind unnecessary interaction.
-
----
-
-## 15. Evaluation
-
-Preserve current evaluator semantics.
-
-UI should make it easy to understand:
-
-- overall score
-- criteria
-- strengths
-- improvement areas
-- evaluation state
-
-Do not recalculate scores in frontend.
-
-Backend data is authoritative.
-
----
-
-## 16. AI Coach
-
-Coach should look action-oriented rather than analytical.
-
-Prioritize:
-
-- what to improve
-- why
-- what to do
-- suggested phrasing
-- next practice focus
-
-Keep suggestion cards easy to scan.
-
-Do not automatically generate Coach feedback.
-
-Existing CTA/state behavior must remain unchanged.
-
----
-
-## 17. History / Replay
-
-History should be easy to scan.
-
-Important information:
-
-- date
-- customer/persona
-- mode
-- status
-- result/evaluation summary where already available
-
-Running session:
-continue training
-
-Completed session:
-view replay/result
-
-Do not change ownership behavior.
-
----
-
-## 18. Progress
-
-Preserve existing backend analytics.
-
-Main sections:
-
-- summary
-- overall trend
-- skills
-- strongest area
-- needs attention
-- recent evaluated sessions
-
-Charts must remain readable on small screens.
-
-Do not create new analytics formulas in frontend.
-
----
-
-## 19. Responsive Requirements
-
-Mandatory breakpoints:
-
-Desktop
-Tablet
-Mobile
-
-Every page must be reviewed in all three.
-
-No horizontal overflow.
-
-Tables must adapt or become cards on mobile.
-
-Chat input must remain usable with mobile keyboard.
-
-Navigation must not consume excessive screen area.
-
----
-
-## 20. Accessibility
-
-Maintain:
-
-- keyboard navigation
-- visible focus
-- semantic buttons/links
-- form labels
-- accessible modal behavior
-- readable contrast
-- textual state indicators
-
-Do not communicate important information using color alone.
-
----
-
-## 21. Data / Privacy Boundary
-
-Never expose:
-
-- raw prompts
-- raw model responses
-- Runtime internals
-- guard diagnostics
-- full persona internals
-- source customer identifiers
-- exact private stock data
-- database credentials
-- auth tokens
-- cookies
-- raw dataset content
-
-Frontend may only use existing public DTOs.
-
----
-
-## 22. Technical Rules
-
-Prefer:
-
-existing React/Vite/Tailwind architecture
-
-small reusable components
-
-existing API clients
-
-existing DTO contracts
-
-existing router
-
-existing authentication
-
-Avoid:
-
-major dependency migration
-
-Next.js migration
-
-state-management rewrite
-
-backend rewrite
-
-API rewrite
-
-large architecture refactor
-
-unless separately approved.
-
----
-
-## 23. Implementation Strategy
-
-DO NOT redesign every page immediately.
-
-First:
-
-1. Audit existing frontend.
-2. Capture current page inventory.
-3. Identify shared UI patterns.
-4. Propose design tokens.
-5. Propose shell/navigation redesign.
-6. Propose page-by-page redesign plan.
-7. Show plan.
-8. STOP and wait for approval.
-
-After approval implement incrementally.
-
-Preferred slices:
-
-UI-1
-Design system + application shell
-
-UI-2
-Dashboard
-
-UI-3
-Persona Library + Practice Setup
-
-UI-4
-Training Chat
-
-UI-5
-Result + Evaluation + AI Coach
-
-UI-6
-History + Replay
-
-UI-7
-Progress
-
-UI-8
-Responsive/accessibility/regression polish
-
-Do not implement all slices in one uncontrolled change.
-
----
-
-## 24. Validation
-
-For each UI slice:
-
-- TypeScript PASS
-- lint PASS
-- build PASS
-- existing behavior preserved
-- desktop review
-- tablet review
-- mobile review
-- no Console errors
-- API calls unchanged unless approved
-- no new AI calls caused by rendering
-- privacy boundary preserved
-
----
-
-## 25. Git Policy
-
-Work on a dedicated UI branch.
-
-Do not rewrite history.
-
-Do not force push.
-
-Do not mix unrelated backend feature development into UI redesign.
-
-Use small reviewable commits after each approved UI slice.
-
----
-
-## 26. First Task
-
-Your FIRST task is PLAN ONLY.
-
-Audit the existing frontend.
-
-Do not modify files.
-
-Return:
-
-# TESTLAB UI REDESIGN AUDIT
-
-## Current page inventory
-
-## Current design system
-
-## Current shared components
-
-## UX problems
-
-## Visual consistency problems
-
-## Responsive problems
-
-## Pages ranked by redesign priority
-
-## Proposed design direction
-
-## Proposed design tokens
-
-## Proposed component system
-
-## Proposed navigation
-
-## Page-by-page redesign plan
-
-## Files likely affected
-
-## Dependencies required
-
-## Risks
-
-## Validation plan
-
-## Recommended UI implementation slices
-
-## FINAL VERDICT
-
-Return ONE:
-
-UI_REDESIGN_PLAN_READY
-
-UI_REDESIGN_REQUIRES_PRODUCT_DECISION
-
-UI_REDESIGN_REQUIRES_BACKEND_CHANGE
-
-UI_REDESIGN_BLOCKED
-
-Then STOP.
-
-Wait for approval.
+A slice is done only when its planned source, deterministic checks, real-browser review, business-call audit, Git scope audit, and reviewable commit all pass. Passing documentation alone never proves implementation completion.
