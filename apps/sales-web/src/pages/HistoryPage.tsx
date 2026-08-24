@@ -20,6 +20,7 @@ import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { ErrorState, LoadingState } from '../components/ui/Feedback'
 import { SearchInput, Select } from '../components/ui/FormControls'
+import { Surface } from '../components/ui/Surface'
 import { trainingService } from '../services/trainingService'
 import type { HistoryPage as HistoryPageData, RecentSession, TrainingMode } from '../types/training'
 import { labelMode, labelOutcome, labelTrainingStatus } from '../utils/trainingLabels'
@@ -49,7 +50,7 @@ function getInitials(name: string) {
 }
 
 function getColorFromId(id: string) {
-  const palette = ['#2f6fed', '#7257d9', '#138b78', '#d16f32', '#3b647d', '#c15078']
+  const palette = ['#0068FF', '#087EA4', '#138B78', '#B35C1E', '#3B647D', '#B54764']
   const hash = Array.from(id).reduce((value, char) => value + char.charCodeAt(0), 0)
   return palette[hash % palette.length]
 }
@@ -137,7 +138,7 @@ export function HistoryPage() {
     <div className="mx-auto max-w-6xl space-y-6 pb-8">
       {/* Header */}
       <PageHeader
-        eyebrow="Training history"
+        eyebrow="Hồ sơ luyện tập"
         title="Lịch sử luyện tập"
         description="Tìm lại các phiên đã lưu, tiếp tục phiên đang chạy hoặc xem lại toàn bộ hội thoại đã hoàn thành."
         action={
@@ -151,7 +152,7 @@ export function HistoryPage() {
       />
 
       {/* Filter & Search Controls */}
-      <Card className="p-4 sm:p-5">
+      <Surface className="border border-border p-4 shadow-subtle sm:p-5">
         <form
           className="grid gap-3 lg:grid-cols-[minmax(240px,1fr)_200px_200px_auto]"
           onSubmit={submitSearch}
@@ -197,7 +198,7 @@ export function HistoryPage() {
             )}
           </div>
         </form>
-      </Card>
+      </Surface>
 
       {/* Content Area */}
       {loading ? (
@@ -241,11 +242,13 @@ export function HistoryPage() {
       ) : (
         <>
           {/* Session List */}
-          <div className="space-y-3">
+          <Surface className="overflow-hidden border border-border shadow-subtle">
+            <div className="divide-y divide-border">
             {history.items.map((session) => (
               <SessionItem key={session.id} session={session} onNavigate={navigate} />
             ))}
-          </div>
+            </div>
+          </Surface>
 
           {/* Pagination */}
           <div className="flex flex-col items-center justify-between gap-3 pt-3 sm:flex-row">
@@ -299,7 +302,7 @@ function SessionItem({
   const color = getColorFromId(session.persona.id)
 
   return (
-    <Card className="p-4 sm:p-5 transition duration-150 hover:border-border-strong hover:shadow-subtle">
+    <article className="p-4 transition duration-150 hover:bg-surface-subtle/40 sm:p-5">
       {/* Desktop Grid Layout */}
       <div className="hidden lg:grid lg:grid-cols-[1.3fr_1fr_0.9fr_auto] lg:items-center lg:gap-4">
         {/* Column 1: Persona Info */}
@@ -474,6 +477,6 @@ function SessionItem({
           </div>
         </div>
       </div>
-    </Card>
+    </article>
   )
 }

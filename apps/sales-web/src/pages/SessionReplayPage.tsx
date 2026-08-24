@@ -183,7 +183,7 @@ export function SessionReplayPage() {
       </div>
 
       {/* Main Grid Layout */}
-      <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
+      <div className="grid gap-6 xl:grid-cols-[300px_minmax(0,1fr)]">
         {/* Left Column: Persona & Metadata */}
         <aside className="space-y-4">
           {/* Persona Card */}

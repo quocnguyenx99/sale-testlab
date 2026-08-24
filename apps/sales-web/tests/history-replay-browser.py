@@ -4,6 +4,8 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 BASE_URL = os.getenv("SALES_WEB_URL", "http://localhost:5173")
+ARTIFACTS = Path("output/playwright/ui-redesign-v3/implementation/ui-v3-5")
+ARTIFACTS.mkdir(parents=True, exist_ok=True)
 
 USER = {"id": "history-user", "email": "sale@testlab.local", "displayName": "Nguyễn Văn A", "role": "SALE"}
 
@@ -238,6 +240,8 @@ with sync_playwright() as playwright:
     assert page.locator("span", has_text="Đã hoàn thành").first.is_visible()
     assert page.locator("span", has_text="Đang hoạt động").first.is_visible()
 
+    page.screenshot(path=ARTIFACTS / "history-1280.png", full_page=True)
+
     # 2. Test Pagination controls
     assert page.get_by_text("Trang 1 / 2").is_visible()
     next_btn = page.get_by_role("button", name="Sau")
@@ -283,6 +287,8 @@ with sync_playwright() as playwright:
     page.set_viewport_size({"width": 1280, "height": 900})
     page.goto(f"{BASE_URL}/history/sess-comp-1", wait_until="networkidle")
 
+    page.screenshot(path=ARTIFACTS / "replay-1280.png", full_page=True)
+
     # Verify Read-Only Banner
     page.get_by_text("Chế độ xem lại").wait_for()
     assert page.get_by_text("Phiên luyện tập đã kết thúc. Nội dung bên dưới được đọc trực tiếp").is_visible()
@@ -322,6 +328,7 @@ with sync_playwright() as playwright:
     # 8. Test Mobile viewport on Replay Page
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto(f"{BASE_URL}/history/sess-comp-1", wait_until="networkidle")
+    page.screenshot(path=ARTIFACTS / "replay-390.png", full_page=True)
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
 
     # 9. Verify that NO unexpected POST, AI, Evaluation or Coaching requests were made
