@@ -50,3 +50,47 @@ This index records the approved real-browser audit. The PNG files are temporary 
 - Filenames preserve the source acceptance script, route fragment, sequence, and action (`goto`, `nav`, or `scripted`).
 - Repeated screenshots represent different deterministic states or navigation paths; they are intentionally summarized into logical IDs above.
 - No screenshots are approved as production assets.
+
+## Implementation acceptance inventory
+
+These captures were produced after the corresponding local implementation checkpoint. They remain temporary, untracked evidence under `output/playwright/ui-redesign-v3/implementation/`.
+
+### UI-V3-3 — learner activation and brand
+
+- `ui-v3-3/brand-login-1440.png`
+- `ui-v3-3/brand-login-390.png`
+- `ui-v3-3/learner-dashboard-1440.png`
+- `ui-v3-3/learner-mobile-nav-390.png`
+- Persona Library, Practice Setup and learner assignment flows are additionally covered by the deterministic `persona-setup-browser.py` and `training-assignments-browser.py` acceptance scripts.
+
+### UI-V3-4 — training and feedback
+
+- `ui-v3-4/training-room-1440.png`
+- `ui-v3-4/training-room-390.png`
+- `ui-v3-4/result-before-evaluation-1440.png`
+- `ui-v3-4/result-evaluation-coach-1440.png`
+- `ui-v3-4/result-390.png`
+
+### UI-V3-5 — progress and history
+
+- `ui-v3-5/history-1280.png`
+- `ui-v3-5/replay-1280.png`
+- `ui-v3-5/replay-390.png`
+- `ui-v3-5/progress-1280.png`
+- `ui-v3-5/progress-390.png`
+- `ui-v3-5/leaderboard-1280.png`
+- `ui-v3-5/leaderboard-390.png`
+
+### UI-V3-6 — training operations and managed content
+
+- `ui-v3-6/program-list-768.png`
+- `ui-v3-6/program-editor-1280.png`
+- `ui-v3-6/program-editor-390.png`
+- `ui-v3-6/assignment-detail-1280.png`
+- `ui-v3-6/assignment-list-1280.png`
+- `ui-v3-6/assignment-list-390.png`
+- `ui-v3-6/persona-management-1280.png`
+- `ui-v3-6/scenario-management-1280.png`
+- `ui-v3-6/scenario-management-390.png`
+
+All implementation acceptance runs used safe API fixtures, reported no unexpected console errors, and asserted zero automatic Customer AI, Evaluation or Coach calls where those boundaries applied.
