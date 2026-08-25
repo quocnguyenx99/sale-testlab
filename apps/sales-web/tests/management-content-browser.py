@@ -68,6 +68,58 @@ SCENARIOS = [
     },
 ]
 
+PERSONA_DETAIL = {
+    **PERSONAS[0],
+    "versions": [version("pv-2", 2, "PUBLISHED")],
+    "currentVersion": {
+        **version("pv-2", 2, "PUBLISHED"),
+        "displayName": "Khách hàng doanh nghiệp",
+        "buyerRole": "Quản lý mua hàng",
+        "organizationType": "Doanh nghiệp",
+        "difficulty": "MEDIUM",
+        "summary": "Quan tâm hiệu quả đầu tư và quy trình triển khai.",
+        "productInterests": ["Giải pháp doanh nghiệp"],
+        "purchaseContext": "Mở rộng hệ thống cho nhiều chi nhánh.",
+        "behaviorTraits": ["Thận trọng"],
+        "commonObjections": ["Chi phí đầu tư"],
+        "likelyQuestions": ["Thời gian triển khai"],
+        "trainingFocus": ["Khám phá nhu cầu"],
+    },
+    "scenarioLinks": [
+        {
+            "scenarioId": SCENARIOS[0]["id"],
+            "title": SCENARIOS[0]["title"],
+            "isDefault": True,
+            "sortOrder": 1,
+            "available": True,
+        }
+    ],
+}
+
+SCENARIO_DETAIL = {
+    **SCENARIOS[0],
+    "versions": [version("sv-1", 3, "PUBLISHED")],
+    "currentVersion": {
+        **version("sv-1", 3, "PUBLISHED"),
+        "title": "Tư vấn giải pháp cho doanh nghiệp",
+        "description": "Tình huống tư vấn có nhiều bên liên quan.",
+        "difficulty": "HARD",
+        "category": "Tư vấn giải pháp",
+        "customerNeed": "Chuẩn hóa thiết bị cho nhiều chi nhánh.",
+        "priorities": ["Hiệu quả đầu tư"],
+        "trainingObjective": "Xác định nhu cầu và đề xuất lộ trình phù hợp.",
+        "tags": ["B2B"],
+        "openingExamples": ["Anh/chị đang ưu tiên mục tiêu nào?"],
+    },
+    "personaLinks": [
+        {
+            "personaId": PERSONAS[0]["id"],
+            "displayName": PERSONAS[0]["displayName"],
+            "isDefault": True,
+        }
+    ],
+}
+
 
 def fulfill(route, body, status=200):
     route.fulfill(status=status, content_type="application/json", body=json.dumps(body, ensure_ascii=False))
@@ -89,6 +141,10 @@ with sync_playwright() as playwright:
             return fulfill(route, {"personas": PERSONAS})
         if url.endswith("/api/v3/manage/scenarios"):
             return fulfill(route, {"scenarios": SCENARIOS})
+        if url.endswith(f"/api/v3/manage/personas/{PERSONAS[0]['id']}"):
+            return fulfill(route, {"persona": PERSONA_DETAIL})
+        if url.endswith(f"/api/v3/manage/scenarios/{SCENARIOS[0]['id']}"):
+            return fulfill(route, {"scenario": SCENARIO_DETAIL})
         return fulfill(route, {"error": {"code": "NOT_FOUND", "message": "Safe fixture miss"}}, 404)
 
     page.route("**/api/v3/**", api)
@@ -98,16 +154,28 @@ with sync_playwright() as playwright:
     page.get_by_text("Sẵn sàng luyện tập", exact=True).wait_for()
     page.screenshot(path=ARTIFACTS / "persona-management-1280.png", full_page=True)
 
+    page.goto(f"{BASE_URL}/manage/personas/{PERSONAS[0]['id']}", wait_until="networkidle")
+    page.get_by_role("heading", name=PERSONAS[0]["displayName"]).wait_for()
+    assert page.get_by_label("Tên hiển thị").is_disabled()
+    page.get_by_text("Đã xuất bản · v2", exact=True).wait_for()
+    page.screenshot(path=ARTIFACTS / "persona-version-1280.png", full_page=True)
+
     page.goto(f"{BASE_URL}/manage/scenarios", wait_until="networkidle")
     page.get_by_role("heading", name="Quản lý tình huống").wait_for()
     page.get_by_text("Tư vấn giải pháp cho doanh nghiệp", exact=True).wait_for()
     page.screenshot(path=ARTIFACTS / "scenario-management-1280.png", full_page=True)
 
+    page.goto(f"{BASE_URL}/manage/scenarios/{SCENARIOS[0]['id']}", wait_until="networkidle")
+    page.get_by_role("heading", name=SCENARIOS[0]["title"]).wait_for()
+    assert page.get_by_label("Tên tình huống").is_disabled()
+    page.get_by_text("Đã xuất bản · v3", exact=True).wait_for()
+    page.screenshot(path=ARTIFACTS / "scenario-version-1280.png", full_page=True)
+
     page.set_viewport_size({"width": 390, "height": 844})
     page.reload(wait_until="networkidle")
-    page.get_by_text("Xử lý phản đối về giá", exact=True).wait_for()
+    page.get_by_label("Tên tình huống").wait_for()
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-    page.screenshot(path=ARTIFACTS / "scenario-management-390.png", full_page=True)
+    page.screenshot(path=ARTIFACTS / "scenario-version-390.png", full_page=True)
 
     assert not any(method == "POST" for method, _ in requests), requests
     assert console_errors == [], console_errors

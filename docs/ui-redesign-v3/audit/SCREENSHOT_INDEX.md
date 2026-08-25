@@ -90,7 +90,10 @@ These captures were produced after the corresponding local implementation checkp
 - `ui-v3-6/assignment-list-1280.png`
 - `ui-v3-6/assignment-list-390.png`
 - `ui-v3-6/persona-management-1280.png`
+- `ui-v3-6/persona-version-1280.png`
 - `ui-v3-6/scenario-management-1280.png`
 - `ui-v3-6/scenario-management-390.png`
+- `ui-v3-6/scenario-version-1280.png`
+- `ui-v3-6/scenario-version-390.png`
 
 All implementation acceptance runs used safe API fixtures, reported no unexpected console errors, and asserted zero automatic Customer AI, Evaluation or Coach calls where those boundaries applied.
