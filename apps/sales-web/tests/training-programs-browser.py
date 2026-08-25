@@ -1,9 +1,12 @@
 import json
 import os
 from copy import deepcopy
+from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 BASE_URL = os.getenv("SALES_WEB_URL", "http://127.0.0.1:5173")
+ARTIFACTS = Path("output/playwright/ui-redesign-v3/implementation/ui-v3-6")
+ARTIFACTS.mkdir(parents=True, exist_ok=True)
 NOW = "2026-08-21T09:00:00.000Z"
 PERSONAS = [
     {
@@ -182,7 +185,7 @@ with sync_playwright() as playwright:
     install_api(manager_page, manager_state, manager_requests)
     login(manager_page, "MANAGER")
     manager_errors.clear()
-    manager_page.get_by_role("link", name="Chương trình đào tạo").click()
+    manager_page.get_by_role("link", name="Chương trình", exact=True).click()
     manager_page.wait_for_url("**/training-programs")
     manager_page.get_by_role("heading", name="Chưa có chương trình đào tạo").wait_for()
     manager_page.get_by_role("button", name="Tạo chương trình đầu tiên").click()
@@ -197,6 +200,7 @@ with sync_playwright() as playwright:
     manager_page.get_by_role("button", name="Lưu bản nháp").click()
     manager_page.wait_for_url("**/training-programs/phase10b-program")
     manager_page.get_by_text("Bản nháp", exact=True).wait_for()
+    manager_page.screenshot(path=ARTIFACTS / "program-editor-1280.png", full_page=True)
     first_payload = manager_state["saved_payloads"][0]
     assert [item["personaId"] for item in first_payload["items"]] == [PERSONAS[1]["id"], PERSONAS[0]["id"]]
     assert [item["sortOrder"] for item in first_payload["items"]] == [1, 2]
@@ -211,6 +215,9 @@ with sync_playwright() as playwright:
     manager_page.get_by_text("Đã lưu trữ", exact=True).wait_for()
     assert manager_page.get_by_role("button", name="Lưu trữ").count() == 0
     manager_page.set_viewport_size({"width": 390, "height": 844})
+    manager_page.reload(wait_until="networkidle")
+    manager_page.get_by_text("Đã lưu trữ", exact=True).wait_for()
+    manager_page.screenshot(path=ARTIFACTS / "program-editor-390.png", full_page=True)
     assert manager_page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     assert not manager_errors, manager_errors
     assert_zero_ai(manager_requests)
@@ -224,9 +231,10 @@ with sync_playwright() as playwright:
     install_api(admin_page, admin_state, admin_requests)
     login(admin_page, "ADMIN")
     admin_page.locator("header button").click()
-    admin_page.locator("aside").nth(1).get_by_role("link", name="Chương trình đào tạo").click()
+    admin_page.locator("aside").nth(1).get_by_role("link", name="Chương trình", exact=True).click()
     admin_page.wait_for_url("**/training-programs")
     admin_page.get_by_text(seeded_program["name"], exact=True).wait_for()
+    admin_page.screenshot(path=ARTIFACTS / "program-list-768.png", full_page=True)
     admin_page.get_by_role("button", name="Xem chương trình").click()
     admin_page.wait_for_url("**/training-programs/phase10b-program")
     admin_page.get_by_text("Đã lưu trữ", exact=True).wait_for()
@@ -242,7 +250,7 @@ with sync_playwright() as playwright:
     login(sale_page, "SALE")
     sale_page.locator("header button").click()
     sale_drawer = sale_page.locator("aside").nth(1)
-    assert sale_drawer.get_by_role("link", name="Chương trình đào tạo").count() == 0
+    assert sale_drawer.get_by_role("link", name="Chương trình", exact=True).count() == 0
     sale_page.goto(f"{BASE_URL}/training-programs", wait_until="networkidle")
     sale_page.get_by_role("heading", name="Bạn không có quyền truy cập").wait_for()
     assert sale_page.url.endswith("/training-programs")
