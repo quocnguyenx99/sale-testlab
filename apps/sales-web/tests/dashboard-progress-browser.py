@@ -52,6 +52,8 @@ with sync_playwright() as playwright:
     page.get_by_text("72", exact=True).wait_for()
     page.screenshot(path=str(ARTIFACTS / "phase9d-dashboard-fixture-desktop.png"), full_page=True)
     page.set_viewport_size({"width": 390, "height": 844})
+    page.reload(wait_until="networkidle")
+    page.get_by_role("heading", name="Tiến độ luyện tập").wait_for()
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     page.screenshot(path=str(ARTIFACTS / "phase9d-dashboard-fixture-mobile.png"), full_page=True)
     page.set_viewport_size({"width": 1280, "height": 900})
