@@ -1,8 +1,11 @@
 import json
 import os
+from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 BASE_URL = os.getenv("SALES_WEB_URL", "http://127.0.0.1:5173")
+ARTIFACTS = Path("output/playwright/ui-redesign-v3/implementation/ui-v3-5")
+ARTIFACTS.mkdir(parents=True, exist_ok=True)
 
 
 def fulfill(route, body, status=200):
@@ -152,6 +155,8 @@ with sync_playwright() as playwright:
             assert not any(url.endswith("/api/v3/gamification/me") for _, url in requests)
 
         page.goto(f"{BASE_URL}/leaderboard", wait_until="networkidle")
+        if role == "SALE":
+            page.screenshot(path=ARTIFACTS / "leaderboard-1280.png", full_page=True)
         page.get_by_role("heading", name="Bảng xếp hạng").wait_for()
         page.get_by_text("Sale dẫn đầu", exact=True).wait_for()
         page.get_by_text("120", exact=True).wait_for()
@@ -167,6 +172,8 @@ with sync_playwright() as playwright:
 
         page.set_viewport_size({"width": 390, "height": 844})
         page.reload(wait_until="networkidle")
+        if role == "SALE":
+            page.screenshot(path=ARTIFACTS / "leaderboard-390.png", full_page=True)
         page.get_by_text("Sale dẫn đầu", exact=True).wait_for()
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         assert_zero_ai(requests)

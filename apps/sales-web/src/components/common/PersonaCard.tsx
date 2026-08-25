@@ -15,7 +15,7 @@ export function PersonaCard({
   onView?: () => void
 }) {
   return (
-    <Card className="flex h-full flex-col p-5 transition-colors duration-150 hover:border-brand-border">
+    <Card className="flex h-full flex-col p-5 transition-colors duration-150 hover:border-brand-border hover:bg-brand-subtle/30">
       <div className="flex items-start justify-between gap-3">
         <Avatar initials={persona.initials} color={persona.color} size="md" />
         <DifficultyBadge value={persona.difficulty} />
@@ -33,7 +33,7 @@ export function PersonaCard({
           <Badge key={interest}>{interest}</Badge>
         ))}
       </div>
-      <div className="mt-auto flex gap-2 pt-5">
+      <div className="mt-auto mt-5 flex gap-2 border-t border-border pt-4">
         {onView && (
           <Button
             aria-label={`Xem chi tiết ${persona.displayName}`}

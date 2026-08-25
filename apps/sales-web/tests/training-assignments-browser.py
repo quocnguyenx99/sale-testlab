@@ -1,9 +1,12 @@
 import json
 import os
 from copy import deepcopy
+from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 BASE_URL = os.getenv("SALES_WEB_URL", "http://127.0.0.1:5173")
+ARTIFACTS = Path("output/playwright/ui-redesign-v3/implementation/ui-v3-6")
+ARTIFACTS.mkdir(parents=True, exist_ok=True)
 NOW = "2026-08-21T07:00:00.000Z"
 USERS = {
     "SALE": {"id": "sale-a", "email": "sale-a@example.test", "displayName": "Nguyễn An", "role": "SALE"},
@@ -217,7 +220,7 @@ with sync_playwright() as playwright:
     manager_requests = []
     install_api(manager, "MANAGER", manager_requests)
     login(manager, "MANAGER")
-    manager.get_by_role("link", name="Phân công đào tạo").click()
+    manager.get_by_role("link", name="Phân công", exact=True).click()
     manager.get_by_role("heading", name="Chưa có phân công đào tạo").wait_for()
     manager.get_by_role("button", name="Tạo phân công đầu tiên").click()
     manager.get_by_label("Nhân viên SALE").select_option(USERS["SALE"]["id"])
@@ -226,6 +229,7 @@ with sync_playwright() as playwright:
     manager.get_by_role("button", name="Phân công chương trình").click()
     manager.wait_for_url("**/training-assignments/assignment-1")
     manager.get_by_text("0/2 nội dung", exact=True).wait_for()
+    manager.screenshot(path=ARTIFACTS / "assignment-detail-1280.png", full_page=True)
     assert manager.get_by_text("hội thoại", exact=False).count() == 1
     assert manager.get_by_text("Tin nhắn", exact=False).count() == 0
     create_assignment("program-b", "SALE", "MANAGER", "cancel-fixture")
@@ -233,8 +237,26 @@ with sync_playwright() as playwright:
     manager.once("dialog", lambda dialog: dialog.accept())
     manager.get_by_label("Hủy phân công Program B").click()
     manager.get_by_text("Đã hủy", exact=True).wait_for()
+    manager.screenshot(path=ARTIFACTS / "assignment-list-1280.png", full_page=True)
     manager.set_viewport_size({"width": 390, "height": 844})
-    assert manager.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    manager.reload(wait_until="networkidle")
+    manager.get_by_text("Đã hủy", exact=True).wait_for()
+    manager.screenshot(path=ARTIFACTS / "assignment-list-390.png", full_page=True)
+    overflow = manager.evaluate("""() => ({
+        viewport: window.innerWidth,
+        document: document.documentElement.scrollWidth,
+        offenders: [...document.querySelectorAll('*')]
+            .filter((element) => element.getBoundingClientRect().right > window.innerWidth + 1)
+            .slice(0, 8)
+            .map((element) => ({
+                tag: element.tagName,
+                text: element.textContent?.trim(),
+                aria: element.getAttribute('aria-label'),
+                rect: element.getBoundingClientRect().toJSON(),
+                className: String(element.className)
+            }))
+    })""")
+    assert overflow["document"] <= overflow["viewport"], overflow
     assert_no_new_ai(manager_requests)
     manager.close()
 
@@ -242,7 +264,7 @@ with sync_playwright() as playwright:
     sale_requests = []
     install_api(sale, "SALE", sale_requests)
     login(sale, "SALE")
-    assert sale.get_by_role("link", name="Phân công đào tạo").count() == 0
+    assert sale.get_by_role("link", name="Phân công", exact=True).count() == 0
     sale.get_by_role("link", name="Bài tập được giao").click()
     sale.get_by_text("Program A", exact=True).wait_for()
     sale.get_by_role("button", name="Xem bài tập").first.click()
@@ -274,7 +296,7 @@ with sync_playwright() as playwright:
     login(admin, "ADMIN")
     assert admin.get_by_role("link", name="Bài tập được giao").count() == 0
     admin.locator("header button").click()
-    admin.locator("aside").nth(1).get_by_role("link", name="Phân công đào tạo").click()
+    admin.locator("aside").nth(1).get_by_role("link", name="Phân công", exact=True).click()
     admin.get_by_role("button", name="Phân công chương trình").click()
     admin.get_by_label("Nhân viên SALE").select_option(USERS["SALE_B"]["id"])
     admin.get_by_label("Chương trình đã xuất bản").select_option("program-b")

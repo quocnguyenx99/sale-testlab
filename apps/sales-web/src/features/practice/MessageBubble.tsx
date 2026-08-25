@@ -6,19 +6,19 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
   return (
     <div className={`flex ${sale ? 'justify-end' : 'justify-start'}`}>
       <div className={`flex max-w-[88%] sm:max-w-[78%] flex-col ${sale ? 'items-end' : 'items-start'}`}>
-        <span className={`mb-1 px-1 text-[11px] font-semibold ${sale ? 'text-brand' : 'text-ink-muted'}`}>
+        <span className={`mb-1 px-1 text-xs font-semibold ${sale ? 'text-brand' : 'text-ink-muted'}`}>
           {sale ? 'Bạn' : 'Khách hàng AI'}
         </span>
         <div
-          className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed break-words shadow-subtle ${
+          className={`break-words rounded-xl px-4 py-2.5 text-[15px] leading-[22px] ${
             sale
-              ? 'rounded-tr-sm border border-brand-border/60 bg-brand-soft text-indigo-950'
+              ? 'rounded-tr-sm border border-brand-border bg-brand-soft text-ink'
               : 'rounded-tl-sm border border-border bg-surface-subtle text-ink'
           }`}
         >
           {message.content}
         </div>
-        <span className="mt-1 px-1 text-[10px] text-ink-muted tabular-nums">
+        <span className="mt-1 px-1 text-xs text-ink-muted tabular-nums">
           {new Date(message.createdAt).toLocaleTimeString('vi-VN', {
             hour: '2-digit',
             minute: '2-digit',

@@ -169,7 +169,7 @@ export function SessionReplayPage() {
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-sm font-bold text-ink">Chế độ xem lại</h2>
-              <Badge className="border-emerald-200 bg-emerald-50 text-emerald-800 font-semibold text-[11px]">
+              <Badge className="border-emerald-200 bg-emerald-50 text-emerald-800 font-semibold text-xs">
                 <CheckCircle2 className="h-3 w-3 mr-1" />
                 Đã hoàn thành
               </Badge>
@@ -183,7 +183,7 @@ export function SessionReplayPage() {
       </div>
 
       {/* Main Grid Layout */}
-      <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
+      <div className="grid gap-6 xl:grid-cols-[300px_minmax(0,1fr)]">
         {/* Left Column: Persona & Metadata */}
         <aside className="space-y-4">
           {/* Persona Card */}
@@ -254,7 +254,7 @@ export function SessionReplayPage() {
             </dl>
 
             <div className="mt-4 border-t border-border pt-3.5">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+              <p className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
                 Kết quả ghi nhận
               </p>
               <p className="mt-1 font-bold text-sm text-ink">{outcomeLabel}</p>
@@ -275,7 +275,7 @@ export function SessionReplayPage() {
                   Sắp xếp theo trình tự thời gian · {messages.length} tin nhắn được lưu
                 </p>
               </div>
-              <Badge className="text-[10px] uppercase font-bold tracking-wider text-ink-muted bg-surface">
+              <Badge className="text-xs uppercase font-bold tracking-wider text-ink-muted bg-surface">
                 Chỉ đọc
               </Badge>
             </div>

@@ -1,18 +1,16 @@
-import { Sparkles } from 'lucide-react'
+import { BrandMark } from './BrandMark'
 
-export function Brand({ compact = false }: { compact?: boolean }) {
+export function Brand({ compact = false, adaptive = false }: { compact?: boolean; adaptive?: boolean }) {
   return (
-    <div className="flex items-center gap-2.5">
-      <div className="grid h-8 w-8 place-items-center rounded-lg bg-brand text-white shadow-subtle shrink-0">
-        <Sparkles className="h-4 w-4" />
-      </div>
+    <div aria-label="TestLab — AI Sales Training" className="flex items-center gap-2.5" role="img">
+      <BrandMark />
       {!compact && (
-        <div className="min-w-0">
-          <div className="text-sm font-bold tracking-tight text-ink leading-tight">
+        <div className={`min-w-0 ${adaptive ? 'hidden xl:block' : ''}`}>
+          <div className="text-sm font-bold leading-tight tracking-[-0.025em] text-ink">
             AI Sales TestLab
           </div>
-          <div className="text-[10px] font-semibold tracking-wider uppercase text-brand">
-            V3 Training
+          <div className="mt-0.5 text-xs font-semibold leading-[18px] text-brand">
+            Sales training
           </div>
         </div>
       )}

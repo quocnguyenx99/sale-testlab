@@ -4,9 +4,9 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { PageHeader } from '../components/common/PageHeader'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
-import { Card } from '../components/ui/Card'
 import { ErrorState, LoadingState } from '../components/ui/Feedback'
 import { Input, Select } from '../components/ui/FormControls'
+import { Surface } from '../components/ui/Surface'
 import { TrainingProgramApiError, trainingProgramService } from '../services/trainingProgramService'
 import { trainingService } from '../services/trainingService'
 import type { PublicPersona, TrainingMode } from '../types/training'
@@ -145,7 +145,7 @@ export function TrainingProgramEditorPage() {
         <ArrowLeft className="h-3.5 w-3.5" /> Danh sách chương trình
       </button>
       <PageHeader
-        eyebrow="Training program"
+        eyebrow="Biên soạn đào tạo"
         title={isNew ? 'Tạo chương trình đào tạo' : program?.name ?? 'Chương trình đào tạo'}
         description={editable ? 'Biên soạn chuỗi nội dung luyện tập từ Persona và tình huống hiện có.' : 'Nội dung đã khóa để bảo toàn cấu hình đã xuất bản.'}
         action={program ? <Badge className={trainingProgramStatusClass(program.status)}>{trainingProgramStatusLabel(program.status)}</Badge> : undefined}
@@ -153,7 +153,7 @@ export function TrainingProgramEditorPage() {
 
       {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{error}</div>}
 
-      <Card className="p-5 sm:p-6">
+      <Surface className="border border-border p-5 shadow-subtle sm:p-6">
         <div className="grid gap-5">
           <label className="grid gap-2 text-sm font-semibold text-ink">
             Tên chương trình
@@ -172,9 +172,9 @@ export function TrainingProgramEditorPage() {
             />
           </label>
         </div>
-      </Card>
+      </Surface>
 
-      <Card className="p-5 sm:p-6">
+      <Surface className="border border-border p-5 shadow-subtle sm:p-6">
         <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
           <div>
             <h2 className="text-base font-bold text-ink">Nội dung luyện tập</h2>
@@ -232,7 +232,7 @@ export function TrainingProgramEditorPage() {
             )
           })}
         </div>
-      </Card>
+      </Surface>
 
       <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
         <div>

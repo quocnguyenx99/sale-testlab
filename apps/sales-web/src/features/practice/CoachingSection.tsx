@@ -144,7 +144,7 @@ export function CoachingSection({
   return (
     <Card className="mt-6 overflow-hidden">
       {/* Header Banner */}
-      <div className="border-b border-border bg-gradient-to-r from-brand-soft/40 via-surface to-surface p-6">
+      <div className="border-b border-border bg-brand-subtle p-6">
         <div className="inline-flex items-center gap-1.5 rounded-md border border-brand-border bg-brand-soft px-2.5 py-0.5 text-xs font-semibold text-brand">
           <Sparkles className="h-3.5 w-3.5" />
           AI Coach
@@ -165,22 +165,22 @@ export function CoachingSection({
           <p className="text-xs font-semibold uppercase tracking-wider text-ink-muted mb-3">
             Ưu tiên hành động
           </p>
-          <div className="grid gap-4 lg:grid-cols-3">
+          <div className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
             {coaching.priorities.map((priority, index) => {
               const isRefinement = priority.priorityKind === 'REFINEMENT'
               return (
                 <article
                   key={priority.criterionKey}
-                  className={`flex flex-col justify-between rounded-xl border p-5 transition-colors ${
+                  className={`flex flex-col justify-between p-5 transition-colors ${
                     isRefinement
-                      ? 'border-brand-border/60 bg-brand-soft/20'
-                      : 'border-amber-200/70 bg-amber-50/30'
+                      ? 'bg-brand-soft/20'
+                      : 'bg-surface'
                   }`}
                 >
                   <div>
                     <div className="flex items-center justify-between gap-2">
                       <span
-                        className={`rounded-md px-2 py-0.5 text-[11px] font-bold ${
+                        className={`rounded-md px-2 py-0.5 text-xs font-bold ${
                           isRefinement
                             ? 'bg-brand-soft text-brand'
                             : 'bg-amber-100 text-amber-800'
@@ -196,7 +196,7 @@ export function CoachingSection({
                     </p>
 
                     <div className="mt-3 border-t border-border/50 pt-2.5">
-                      <p className="text-[11px] font-semibold text-ink-muted uppercase tracking-wider">
+                      <p className="text-xs font-semibold text-ink-muted uppercase tracking-wider">
                         Vì sao quan trọng
                       </p>
                       <p className="mt-0.5 text-xs leading-relaxed text-ink-secondary">
@@ -205,7 +205,7 @@ export function CoachingSection({
                     </div>
 
                     <div className="mt-3 border-t border-border/50 pt-2.5">
-                      <p className="text-[11px] font-semibold text-ink-muted uppercase tracking-wider">
+                      <p className="text-xs font-semibold text-ink-muted uppercase tracking-wider">
                         Hành động đề xuất
                       </p>
                       <p className="mt-0.5 text-xs leading-relaxed text-ink-secondary">
@@ -216,7 +216,7 @@ export function CoachingSection({
 
                   {priority.suggestedPhrasing && (
                     <div className="mt-4 rounded-lg border border-brand-border/70 bg-surface p-3 shadow-subtle">
-                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-brand">
+                      <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-brand">
                         <Quote className="h-3 w-3" />
                         Cách diễn đạt mẫu
                       </p>

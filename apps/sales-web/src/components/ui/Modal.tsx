@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
-import { useEffect, type ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
+import { useFocusTrap } from './useFocusTrap'
 
 export function Modal({
   open,
@@ -14,36 +15,36 @@ export function Modal({
   children: ReactNode
   footer?: ReactNode
 }) {
-  useEffect(() => {
-    if (!open) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, open])
+  const titleId = useId()
+  const dialogRef = useFocusTrap<HTMLDivElement>(open, onClose)
 
   if (!open) return null
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/40 p-0 backdrop-blur-[2px] sm:items-center sm:p-5"
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
+      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/35 p-0 backdrop-blur-[2px] sm:items-center sm:p-5"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose()
       }}
     >
-      <div className="max-h-[90vh] w-full overflow-auto rounded-t-2xl border border-border bg-surface shadow-float sm:max-w-lg sm:rounded-2xl">
+      <div
+        aria-labelledby={titleId}
+        aria-modal="true"
+        className="max-h-[90dvh] w-full overflow-auto rounded-t-2xl bg-surface shadow-dialog sm:max-w-lg sm:rounded-2xl"
+        ref={dialogRef}
+        role="dialog"
+        tabIndex={-1}
+      >
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
-          <h2 className="text-base font-semibold text-ink">{title}</h2>
+          <h2 className="text-base font-semibold text-ink" id={titleId}>{title}</h2>
           <button
             aria-label="Đóng"
-            className="rounded-lg p-1.5 text-ink-muted hover:bg-surface-subtle hover:text-ink transition duration-150"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-ink-muted transition-colors duration-150 hover:bg-surface-subtle hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/30"
+            data-autofocus
             onClick={onClose}
+            type="button"
           >
-            <X className="h-4 w-4" />
+            <X className="h-[18px] w-[18px]" aria-hidden="true" />
           </button>
         </div>
         <div className="p-6">{children}</div>

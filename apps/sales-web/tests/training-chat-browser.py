@@ -4,7 +4,8 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 BASE_URL = os.getenv("SALES_WEB_URL", "http://localhost:5173")
-ARTIFACTS = Path(__file__).parent.parent / "test-artifacts"
+ARTIFACTS = Path("output/playwright/ui-redesign-v3/implementation/ui-v3-4")
+ARTIFACTS.mkdir(parents=True, exist_ok=True)
 
 USER = {"id": "chat-user", "email": "sale@testlab.local", "displayName": "Nguyễn Văn A", "role": "SALE"}
 PERSONA = {
@@ -117,7 +118,7 @@ def fulfill(route, body, status=200):
 
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch(headless=True)
-    page = browser.new_page(viewport={"width": 1280, "height": 900})
+    page = browser.new_page(viewport={"width": 1440, "height": 900})
     console_errors = []
     requests = []
     page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
@@ -146,6 +147,7 @@ with sync_playwright() as playwright:
 
     # 1. Test CUSTOMER_FIRST session
     page.goto(f"{BASE_URL}/practice/sess-cf-1", wait_until="networkidle")
+    page.screenshot(path=ARTIFACTS / "training-room-1440.png", full_page=True)
     page.get_by_text("Anh Quân").first.wait_for()
     assert page.get_by_text("Chào em, bên em có những dòng máy in mã vạch nào").is_visible()
 
@@ -183,6 +185,7 @@ with sync_playwright() as playwright:
     # 6. Test mobile viewport
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto(f"{BASE_URL}/practice/sess-cf-1", wait_until="networkidle")
+    page.screenshot(path=ARTIFACTS / "training-room-390.png", full_page=True)
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
 
     # Verify no accidental evaluation/coaching calls

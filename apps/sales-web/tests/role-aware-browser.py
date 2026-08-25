@@ -8,11 +8,19 @@ ROLE_LABELS = {
     "MANAGER": "Quản lý",
     "ADMIN": "Quản trị viên",
 }
-BASE_NAV = ["/dashboard", "/customers", "/practice/new", "/history", "/progress", "/leaderboard"]
 EXPECTED_NAV = {
-    "SALE": [*BASE_NAV, "/my-training-assignments"],
-    "MANAGER": [*BASE_NAV, "/training-programs", "/training-assignments", "/manage/personas", "/manage/scenarios"],
-    "ADMIN": [*BASE_NAV, "/training-programs", "/training-assignments", "/manage/personas", "/manage/scenarios"],
+    "SALE": [
+        "/dashboard", "/customers", "/practice/new", "/my-training-assignments",
+        "/history", "/progress", "/leaderboard",
+    ],
+    "MANAGER": [
+        "/dashboard", "/customers", "/practice/new", "/history", "/progress", "/leaderboard",
+        "/training-programs", "/training-assignments", "/manage/personas", "/manage/scenarios",
+    ],
+    "ADMIN": [
+        "/dashboard", "/customers", "/practice/new", "/history", "/progress", "/leaderboard",
+        "/training-programs", "/training-assignments", "/manage/personas", "/manage/scenarios",
+    ],
 }
 PROGRESS = {
     "evaluatorVersion": "testlab-evaluator-v1",

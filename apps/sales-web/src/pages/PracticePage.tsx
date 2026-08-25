@@ -15,6 +15,7 @@ import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { ErrorState, LoadingState } from '../components/ui/Feedback'
 import { Modal } from '../components/ui/Modal'
+import { useFocusTrap } from '../components/ui/useFocusTrap'
 import { MessageBubble } from '../features/practice/MessageBubble'
 import { RuntimeInsightPanel } from '../features/practice/RuntimeInsightPanel'
 import { labelMode } from '../utils/trainingLabels'
@@ -31,6 +32,7 @@ export function PracticePage() {
   const [confirmEnd, setConfirmEnd] = useState(false)
   const [stopping, setStopping] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
+  const insightRef = useFocusTrap<HTMLElement>(insightOpen, () => setInsightOpen(false))
 
   useEffect(() => {
     if (!sessionId || session?.id === sessionId) {
@@ -128,7 +130,7 @@ export function PracticePage() {
   const isRunning = session.status === 'RUNNING'
 
   return (
-    <div className="-mx-4 -my-6 flex min-h-[calc(100vh-3.5rem)] flex-col bg-canvas sm:-mx-6 sm:-my-8 lg:-mx-8 lg:-my-8 lg:min-h-screen">
+    <div className="-mx-4 -my-6 flex min-h-[calc(100dvh-3.5rem)] flex-col bg-canvas sm:-mx-6 sm:-my-8 lg:-mx-8 lg:-my-8 lg:min-h-[100dvh]">
       {/* Training Workspace Header */}
       <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between border-b border-border bg-surface px-4 sm:px-6">
         <div className="flex min-w-0 items-center gap-3">
@@ -196,9 +198,9 @@ export function PracticePage() {
       </header>
 
       {/* Main Workspace Grid */}
-      <div className="grid min-h-0 flex-1 lg:grid-cols-[260px_1fr]">
+      <div className="grid min-h-0 flex-1 xl:grid-cols-[280px_minmax(0,1fr)]">
         {/* Desktop Sidebar: Persona & Scenario Context */}
-        <aside className="hidden border-r border-border bg-surface p-5 lg:block overflow-y-auto">
+        <aside className="hidden overflow-y-auto border-r border-border bg-surface p-5 xl:block">
           <p className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
             Khách hàng AI
           </p>
@@ -238,12 +240,12 @@ export function PracticePage() {
         {/* Conversation Thread & Composer Column */}
         <section className="flex min-h-0 flex-col bg-canvas">
           {/* Mobile Scenario Strip */}
-          <div className="border-b border-border bg-surface px-4 py-2 lg:hidden">
+          <div className="border-b border-border bg-surface px-4 py-2 xl:hidden">
             <div className="flex items-center justify-between gap-3">
               <p className="truncate text-xs text-ink-secondary">
                 <span className="font-semibold text-ink">Tình huống:</span> {scenario.title}
               </p>
-              <span className="shrink-0 text-[10px] font-bold text-brand uppercase">
+              <span className="shrink-0 text-xs font-bold text-brand uppercase">
                 {labelMode(mode)}
               </span>
             </div>
@@ -301,12 +303,12 @@ export function PracticePage() {
           </div>
 
           {/* Sticky Composer */}
-          <div className="sticky bottom-0 border-t border-border bg-surface px-3 py-3 sm:px-6 sm:py-3.5">
+          <div className="sticky bottom-0 border-t border-border bg-surface px-3 py-3 [padding-bottom:max(0.75rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-3.5">
             <div className="mx-auto max-w-3xl">
               <div className="flex items-end gap-2 rounded-xl border border-border bg-surface p-2 shadow-subtle focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/15 transition-all">
                 <textarea
                   aria-label="Tin nhắn cho khách hàng"
-                  className="max-h-32 min-h-11 flex-1 resize-none bg-transparent px-2.5 py-2 text-sm text-ink outline-none placeholder:text-ink-muted leading-relaxed"
+                  className="max-h-32 min-h-11 flex-1 resize-none bg-transparent px-2.5 py-2 text-[15px] leading-[22px] text-ink outline-none placeholder:text-ink-muted"
                   disabled={!isRunning || responding}
                   rows={1}
                   placeholder={isRunning ? 'Nhập tin nhắn cho khách hàng...' : 'Phiên đã hoàn thành'}
@@ -324,7 +326,7 @@ export function PracticePage() {
                   <Send className="h-4 w-4" />
                 </Button>
               </div>
-              <p className="mt-1.5 hidden text-center text-[10px] text-ink-muted sm:block">
+              <p className="mt-1.5 hidden text-center text-xs text-ink-muted sm:block">
                 Enter để gửi · Shift + Enter để xuống dòng
               </p>
             </div>
@@ -341,6 +343,7 @@ export function PracticePage() {
             onClick={() => setInsightOpen(false)}
           />
           <aside
+            ref={insightRef}
             role="dialog"
             aria-modal="true"
             aria-label="Thông tin phiên"
@@ -355,6 +358,7 @@ export function PracticePage() {
               </div>
               <button
                 aria-label="Đóng"
+                data-autofocus
                 className="rounded-lg p-1.5 text-ink-muted hover:bg-surface-subtle hover:text-ink transition duration-150"
                 onClick={() => setInsightOpen(false)}
               >

@@ -19,6 +19,7 @@ import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/Feedback'
+import { Surface } from '../components/ui/Surface'
 import { trainingService } from '../services/trainingService'
 import type { ProgressAnalytics, ProgressTrend, ProgressTrendState } from '../types/training'
 import {
@@ -105,13 +106,13 @@ function TrendChart({ progress }: { progress: ProgressAnalytics }) {
           strokeWidth="1"
         />
         {/* Y-axis Labels */}
-        <text x="4" y={y(100) + 4} fill="#94a3b8" fontSize="11" fontFamily="inherit">
+        <text x="4" y={y(100) + 4} fill="#98A2B3" fontSize="12" fontFamily="inherit">
           100
         </text>
-        <text x="10" y={y(50) + 4} fill="#94a3b8" fontSize="11" fontFamily="inherit">
+        <text x="10" y={y(50) + 4} fill="#98A2B3" fontSize="12" fontFamily="inherit">
           50
         </text>
-        <text x="16" y={y(0) + 4} fill="#94a3b8" fontSize="11" fontFamily="inherit">
+        <text x="16" y={y(0) + 4} fill="#98A2B3" fontSize="12" fontFamily="inherit">
           0
         </text>
 
@@ -120,7 +121,7 @@ function TrendChart({ progress }: { progress: ProgressAnalytics }) {
           <polyline
             fill="none"
             points={polyline}
-            stroke="#1e3a8a"
+            stroke="#0068FF"
             strokeWidth="2.5"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -135,7 +136,7 @@ function TrendChart({ progress }: { progress: ProgressAnalytics }) {
               cy={y(point.score)}
               r="5"
               fill="#ffffff"
-              stroke="#1e3a8a"
+              stroke="#0068FF"
               strokeWidth="2.5"
               className="transition duration-150 hover:r-6 cursor-pointer"
             />
@@ -152,7 +153,7 @@ function TrendChart({ progress }: { progress: ProgressAnalytics }) {
   )
 }
 
-function SummaryCard({
+function SummaryMetric({
   label,
   value,
   detail,
@@ -164,18 +165,16 @@ function SummaryCard({
   icon: ReactNode
 }) {
   return (
-    <Card className="p-4 sm:p-5 transition duration-150 hover:border-border-strong hover:shadow-subtle">
-      <div className="flex items-start justify-between gap-3">
-        <div>
+    <div className="flex min-w-0 items-start justify-between gap-3 px-4 py-4 sm:px-5">
+        <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wider text-ink-muted">{label}</p>
           <p className="mt-2 text-2xl font-bold tracking-tight text-ink tabular-nums">{value}</p>
           {detail && <p className="mt-1 text-xs text-ink-muted leading-relaxed">{detail}</p>}
         </div>
-        <div className="grid h-10 w-10 place-items-center rounded-xl bg-brand-soft text-brand shrink-0 shadow-subtle">
+        <div className="grid h-9 w-9 place-items-center rounded-lg bg-brand-soft text-brand shrink-0">
           {icon}
         </div>
-      </div>
-    </Card>
+    </div>
   )
 }
 
@@ -250,7 +249,7 @@ export function ProgressPage() {
 
   const header = (
     <PageHeader
-      eyebrow="Progress analytics"
+      eyebrow="Phân tích học tập"
       title="Tiến độ luyện tập"
       description="Theo dõi kết quả từ các phiên đã hoàn thành và được hệ thống đánh giá."
     />
@@ -323,24 +322,24 @@ export function ProgressPage() {
       <div>
         <section
           aria-label="Tóm tắt tiến độ"
-          className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
+          className="grid overflow-hidden rounded-xl border border-border bg-surface shadow-subtle sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4"
         >
-          <SummaryCard
+          <SummaryMetric
             label="Tổng số phiên"
             value={String(summary.totalSessions)}
             icon={<Compass className="h-5 w-5" />}
           />
-          <SummaryCard
+          <SummaryMetric
             label="Phiên đã hoàn thành"
             value={String(summary.completedSessions)}
             icon={<CheckCircle2 className="h-5 w-5" />}
           />
-          <SummaryCard
+          <SummaryMetric
             label="Phiên đã đánh giá"
             value={String(summary.evaluatedSessions)}
             icon={<ClipboardCheck className="h-5 w-5" />}
           />
-          <SummaryCard
+          <SummaryMetric
             label="Điểm trung bình"
             value={formatProgressScore(summary.averageOverallScore)}
             detail={
@@ -422,11 +421,12 @@ export function ProgressPage() {
           </p>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <Surface className="overflow-hidden border border-border shadow-subtle">
+          <div className="-mb-px -mr-px grid md:grid-cols-2 xl:grid-cols-3">
           {skills.map((skill) => (
-            <Card
+            <article
               key={skill.criterionKey}
-              className="p-5 transition duration-150 hover:border-border-strong hover:shadow-subtle"
+              className="border-b border-r border-border p-5 transition-colors hover:bg-surface-subtle/40"
             >
               <div className="flex items-start justify-between gap-3">
                 <h3 className="text-sm font-bold text-ink">{skill.label}</h3>
@@ -435,7 +435,7 @@ export function ProgressPage() {
 
               <dl className="mt-4 grid grid-cols-2 gap-3 border-y border-border py-3">
                 <div>
-                  <dt className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+                  <dt className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
                     Trung bình
                   </dt>
                   <dd className="mt-1 text-lg font-bold text-ink tabular-nums">
@@ -443,7 +443,7 @@ export function ProgressPage() {
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+                  <dt className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
                     Gần đây
                   </dt>
                   <dd className="mt-1 text-lg font-bold text-ink tabular-nums">
@@ -459,9 +459,10 @@ export function ProgressPage() {
                       skill.trend.state
                     )}`}
               </p>
-            </Card>
+            </article>
           ))}
-        </div>
+          </div>
+        </Surface>
       </section>
 
       {/* Highlights Section */}
@@ -488,7 +489,7 @@ export function ProgressPage() {
             {/* Desktop Table */}
             <Card className="hidden overflow-hidden md:block">
               <table className="w-full text-left text-xs">
-                <thead className="border-b border-border bg-surface-subtle/50 text-[11px] uppercase tracking-wider text-ink-muted">
+                <thead className="border-b border-border bg-surface-subtle/50 text-xs uppercase tracking-wider text-ink-muted">
                   <tr>
                     <th className="px-5 py-3.5 font-semibold">Khách hàng</th>
                     <th className="px-5 py-3.5 font-semibold">Thời điểm đánh giá</th>
@@ -540,7 +541,7 @@ export function ProgressPage() {
                       <h3 className="text-sm font-bold text-ink">
                         {session.persona.displayName}
                       </h3>
-                      <p className="mt-0.5 flex items-center gap-1 text-[11px] text-ink-muted">
+                      <p className="mt-0.5 flex items-center gap-1 text-xs text-ink-muted">
                         <CalendarDays className="h-3 w-3" />
                         {formatProgressDate(session.evaluatedAt)}
                       </p>

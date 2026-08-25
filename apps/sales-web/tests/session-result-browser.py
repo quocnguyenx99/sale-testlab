@@ -4,7 +4,8 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 BASE_URL = os.getenv("SALES_WEB_URL", "http://localhost:5173")
-ARTIFACTS = Path(__file__).parent.parent / "test-artifacts"
+ARTIFACTS = Path("output/playwright/ui-redesign-v3/implementation/ui-v3-4")
+ARTIFACTS.mkdir(parents=True, exist_ok=True)
 
 USER = {"id": "result-user", "email": "sale@testlab.local", "displayName": "Nguyễn Văn A", "role": "SALE"}
 PERSONA = {
@@ -152,7 +153,7 @@ def fulfill(route, body, status=200):
 
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch(headless=True)
-    page = browser.new_page(viewport={"width": 1280, "height": 900})
+    page = browser.new_page(viewport={"width": 1440, "height": 900})
     console_errors = []
     requests = []
     page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
@@ -179,6 +180,7 @@ with sync_playwright() as playwright:
 
     # 1. Load Session Result page
     page.goto(f"{BASE_URL}/practice/sess-res-1/result", wait_until="networkidle")
+    page.screenshot(path=ARTIFACTS / "result-before-evaluation-1440.png", full_page=True)
     page.get_by_role("heading", name="Tổng kết phiên luyện tập").wait_for()
 
     # Verify initial summary details
@@ -215,6 +217,8 @@ with sync_playwright() as playwright:
     assert page.get_by_text("Tiếp tục duy trì").is_visible()
     assert page.get_by_text("Thực hành xử lý phản đối về thời gian bảo hành").is_visible()
 
+    page.screenshot(path=ARTIFACTS / "result-evaluation-coach-1440.png", full_page=True)
+
     # 5. Check Navigation Actions
     assert page.get_by_role("button", name="Luyện tập lại").is_visible()
     assert page.get_by_role("button", name="Chọn khách hàng khác").is_visible()
@@ -224,6 +228,7 @@ with sync_playwright() as playwright:
     # 6. Test mobile viewport
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto(f"{BASE_URL}/practice/sess-res-1/result", wait_until="networkidle")
+    page.screenshot(path=ARTIFACTS / "result-390.png", full_page=True)
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
 
     # Assert no console errors

@@ -4,6 +4,8 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 BASE_URL = os.getenv("SALES_WEB_URL", "http://localhost:5173")
+ARTIFACTS = Path("output/playwright/ui-redesign-v3/implementation/ui-v3-5")
+ARTIFACTS.mkdir(parents=True, exist_ok=True)
 
 USER = {"id": "progress-user", "email": "sale@testlab.local", "displayName": "Nguyễn Văn A", "role": "SALE"}
 
@@ -242,6 +244,8 @@ with sync_playwright() as playwright:
     res_btn = page.get_by_role("button", name="Xem kết quả").first
     assert res_btn.is_visible()
 
+    page.screenshot(path=ARTIFACTS / "progress-1280.png", full_page=True)
+
     # 2. Test Tablet Viewport
     page.set_viewport_size({"width": 768, "height": 1024})
     page.goto(f"{BASE_URL}/progress", wait_until="networkidle")
@@ -250,6 +254,7 @@ with sync_playwright() as playwright:
     # 3. Test Mobile Viewport
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto(f"{BASE_URL}/progress", wait_until="networkidle")
+    page.screenshot(path=ARTIFACTS / "progress-390.png", full_page=True)
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     assert page.get_by_role("heading", name="Tiến độ luyện tập").is_visible()
     assert page.locator("h3:visible", has_text="Anh Tuấn").is_visible()
